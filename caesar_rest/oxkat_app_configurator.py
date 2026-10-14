@@ -144,7 +144,10 @@ class OxkatAppConfigurator(AppConfigurator):
 
 		stage = self.job_options.get("stage") or "GET_INFO"
 		if stage not in IMPLEMENTED_STAGES:
-			logger.warning("oxkat stage %s is not yet implemented", stage)
+			self.validation_status = (
+				"Oxkat stage '%s' is not yet implemented." % stage
+			)
+			logger.warning(self.validation_status)
 			return False
 
 		# Slurm runs one controller process, not one entire runner per MPI rank.
