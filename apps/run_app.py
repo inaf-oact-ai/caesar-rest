@@ -314,6 +314,16 @@ def get_args():
 		help='Path to Falcon1 fextractor Singularity container'
 	)
 	
+	parser.add_argument(
+		'-oxkat_container',
+		'--oxkat_container', 
+		dest='oxkat_container', 
+		default='/opt/containers/oxkat/oxkat-caesar.sif', 
+		required=False, 
+		type=str, 
+		help='Path to OxKAT Singularity container (default=/opt/containers/oxkat/oxkat-caesar.sif)'
+	)
+	
 	# - Dataset options
 	parser.add_argument('-dataset_smgps','--dataset_smgps', dest='dataset_smgps', default='', required=False, type=str, help='Path to smgps dataset json filelist')
 	parser.add_argument('-dataset_smgps_feats_simclr','--dataset_smgps_feats_simclr', dest='dataset_smgps_feats_simclr', default='', required=False, type=str, help='Path to smgps_feats_simclr dataset json filelist')
@@ -476,6 +486,7 @@ fextractor_moirai_container= args.fextractor_moirai_container
 fextractor_fats_container= args.fextractor_fats_container
 fextractor_licu_container= args.fextractor_licu_container
 fextractor_falcon_container= args.fextractor_falcon_container
+oxkat_container= args.oxkat_container
 
 # - Dataset options
 dataset_smgps= args.dataset_smgps
@@ -563,6 +574,7 @@ config.SLURM_FEXTRACTOR_MOIRAI_JOB_IMAGE= fextractor_moirai_container
 config.SLURM_FEXTRACTOR_FATS_JOB_IMAGE= fextractor_fats_container
 config.SLURM_FEXTRACTOR_LICU_JOB_IMAGE= fextractor_licu_container
 config.SLURM_FEXTRACTOR_FALCON_JOB_IMAGE= fextractor_falcon_container
+config.SLURM_OXKAT_JOB_IMAGE= oxkat_container
 
 # - Create data manager (DEPRECATED BY MONGO)
 ##logger.info("Creating data manager ...")

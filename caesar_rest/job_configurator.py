@@ -37,6 +37,7 @@ from caesar_rest.simsearch_app_configurator import SimilaritySearchAppConfigurat
 from caesar_rest.caesar_yolo_app_configurator import CaesarYoloAppConfigurator
 from caesar_rest.sfforecaster_app_configurator import SFForecasterAppConfigurator
 from caesar_rest.fextractor_app_configurator import FeatExtractorAppConfigurator
+from caesar_rest.oxkat_app_configurator import OxkatAppConfigurator
 
 # Get logger
 from caesar_rest import logger
@@ -66,6 +67,7 @@ class JobConfigurator(object):
 			'caesar-yolo': CaesarYoloAppConfigurator,
 			'sfforecaster': SFForecasterAppConfigurator,
 			'fextractor': FeatExtractorAppConfigurator,
+			'oxkat': OxkatAppConfigurator,
 		}
 		
 		

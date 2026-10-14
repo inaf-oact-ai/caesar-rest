@@ -427,6 +427,10 @@ def submit_job_kubernetes(app_name, cmd_args, job_top_dir, username, run_opts):
 
 		job_label= 'fextractor-job'	
 		
+	elif app_name=="oxkat":
+		image= current_app.config['OXKAT_JOB_IMAGE']
+		job_label= 'oxkat-job'	
+		
 	else:
 		logger.warn("Unknown/unsupported app %s!" % app_name, action="submitjob", user=username)
 		return None
@@ -594,6 +598,9 @@ def submit_job_slurm(app_name, inputfile, cmd_args, job_top_dir, username, run_o
 			)
 			return None		
 			
+	elif app_name=="oxkat":
+		image= current_app.config['SLURM_OXKAT_JOB_IMAGE']
+				
 	else:
 		logger.warn("Unknown/unsupported app %s!" % app_name, action="submitjob", user=username)
 		return None
