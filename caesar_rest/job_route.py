@@ -1459,10 +1459,13 @@ def get_job_out_file(task_id, label):
 	res['status']= ''
 
 	# - Get aai info
-	username= 'anonymous'
-	if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info):
-		email= g.oidc_token_info['email']
-		username= utils.sanitize_username(email)
+	#username= 'anonymous'
+	#if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info):
+	#	email= g.oidc_token_info['email']
+	#	username= utils.sanitize_username(email)
+
+	# - Get authenticated user storage identifier
+	username = utils.get_storage_username()
 
 	# - Search job id in user collection
 	collection_name= username + '.jobs'
