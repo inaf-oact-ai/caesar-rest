@@ -324,7 +324,31 @@ def get_args():
 		help='Path to OxKAT Singularity container (default=/opt/containers/oxkat/oxkat-caesar.sif)'
 	)
 	
-	# - Dataset options
+	# - Dynamic dataset registry options
+	parser.add_argument(
+		'--dataset_registry_enabled',
+		dest='dataset_registry_enabled',
+		action='store_true',
+		help='Enable MongoDB-backed dynamic dataset registry'
+	)
+
+	parser.add_argument(
+		'--dataset_allowed_roots',
+		dest='dataset_allowed_roots',
+		default='',
+		type=str,
+		help='Comma-separated absolute directory paths permitted for registered datasets'
+	)
+
+	parser.add_argument(
+		'--dataset_admin_identities',
+		dest='dataset_admin_identities',
+		default='',
+		type=str,
+		help='Comma-separated administrator OIDC identities (issuer|subject)'
+	)
+
+	# - Legacy Dataset options
 	parser.add_argument('-dataset_smgps','--dataset_smgps', dest='dataset_smgps', default='', required=False, type=str, help='Path to smgps dataset json filelist')
 	parser.add_argument('-dataset_smgps_feats_simclr','--dataset_smgps_feats_simclr', dest='dataset_smgps_feats_simclr', default='', required=False, type=str, help='Path to smgps_feats_simclr dataset json filelist')
 	parser.add_argument('-dataset_smgps_feats_siglip','--dataset_smgps_feats_siglip', dest='dataset_smgps_feats_siglip', default='', required=False, type=str, help='Path to smgps_feats_siglip dataset json filelist')
@@ -488,7 +512,7 @@ fextractor_licu_container= args.fextractor_licu_container
 fextractor_falcon_container= args.fextractor_falcon_container
 oxkat_container= args.oxkat_container
 
-# - Dataset options
+# - Legacy dataset options
 dataset_smgps= args.dataset_smgps
 dataset_smgps_feats_simclr= args.dataset_smgps_feats_simclr
 dataset_smgps_feats_siglip= args.dataset_smgps_feats_siglip
@@ -497,6 +521,51 @@ dataset_emu_pilot= args.dataset_emu_pilot
 dataset_emu= args.dataset_emu
 dataset_emu_scorpio_pilot= args.dataset_emu_scorpio_pilot
 dataset_emu_gp_pilot= args.dataset_emu_gp_pilot
+
+# - Dynamic dataset registry options
+dataset_registry_enabled = args.dataset_registry_enabled
+
+dataset_allowed_roots = [
+	os.path.realpath(path.strip())
+	for path in args.dataset_allowed_roots.split(',')
+	if path.strip()
+]
+
+dataset_admin_identities = [
+	identity.strip()
+	for identity in args.dataset_admin_identities.split(',')
+	if identity.strip()
+]
+
+# Validate administrator identities.
+for identity in dataset_admin_identities:
+	if '|' not in identity:
+		logger.error("Invalid dataset administrator identity: expected issuer|subject")
+		sys.exit(1)
+
+# Validate storage roots.
+for path in dataset_allowed_roots:
+	if not os.path.isdir(path):
+		logger.error("Dataset storage root does not exist or is not a directory: %s", path)
+		sys.exit(1)
+
+# Registry requires AAI and MongoDB.
+if dataset_registry_enabled:
+	if not use_aai or oidc is None:
+		logger.error("Dynamic dataset registry requires AAI")
+		sys.exit(1)
+
+	if not use_db or mongo is None:
+		logger.error("Dynamic dataset registry requires MongoDB")
+		sys.exit(1)
+
+	if not dataset_allowed_roots:
+		logger.error("Dynamic dataset registry requires allowed storage roots")
+		sys.exit(1)
+
+	if not dataset_admin_identities:
+		logger.error("Dynamic dataset registry requires administrator identities")
+		sys.exit(1)
 
 #===============================
 #==   INIT
@@ -589,7 +658,7 @@ jobcfg= JobConfigurator()
 celery.conf.result_backend= result_backend
 celery.conf.broker_url= broker_url
 
-# - Set dataset configs
+# - Set legacy dataset configs
 config.DATASETS["smgps"]["path"]= dataset_smgps
 config.DATASETS["smgps-feats-simclr"]["path"]= dataset_smgps_feats_simclr
 config.DATASETS["smgps-feats-siglip"]["path"]= dataset_smgps_feats_siglip
@@ -598,6 +667,11 @@ config.DATASETS["emu-pilot"]["path"]= dataset_emu_pilot
 config.DATASETS["emu"]["path"]= dataset_emu
 config.DATASETS["emu-scorpio-pilot"]["path"]= dataset_emu_scorpio_pilot
 config.DATASETS["emu-gp-pilot"]["path"]= dataset_emu_gp_pilot
+
+# - Dynamic dataset registry configuration
+config.DATASET_REGISTRY_ENABLED = dataset_registry_enabled
+config.DATASET_ALLOWED_ROOTS = dataset_allowed_roots
+config.DATASET_ADMIN_IDENTITIES = dataset_admin_identities
 
 #===============================
 #==   CREATE APP
