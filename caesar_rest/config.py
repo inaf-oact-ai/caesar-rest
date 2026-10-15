@@ -146,6 +146,30 @@ class Config(object):
 	OXKAT_JOB_IMAGE= 'sriggi/oxkat-caesar:latest' ## TO BE CREATED YET!
 
 	# - DATASET app options
+	# - Dynamic dataset registry options
+	#
+	# Disabled by default for backward compatibility.
+	# Requires MongoDB and authenticated OIDC identities.
+	DATASET_REGISTRY_ENABLED = False
+
+	# Only these physical storage roots may contain
+	# dynamically registered datasets.
+	#
+	# All paths must be absolute.
+	# Symlinks are resolved during registration.
+	DATASET_ALLOWED_ROOTS = []
+
+	# CAESAR-REST dataset administrators.
+	#
+	# Each identity is represented by:
+	#     <OIDC issuer>|<OIDC subject>
+	#
+	# Example:
+	#     https://identity.example.org|admin-subject
+	#
+	# Do not use email addresses or display names.
+	DATASET_ADMIN_IDENTITIES = []
+	
 	#   NB: paths are to be configured at app deployment phase.
 	DATASETS= {
 		"smgps": {

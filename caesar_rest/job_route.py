@@ -46,6 +46,7 @@ from caesar_rest import oidc
 from caesar_rest import utils
 from caesar_rest.decorators import custom_require_login
 from caesar_rest import mongo
+from caesar_rest import dataset_registry
 from caesar_rest import jobmgr_kube
 from caesar_rest import jobmgr_slurm
 
@@ -71,20 +72,47 @@ dataset_names_bp = Blueprint('dataset_names', __name__, url_prefix='/caesar/api/
 #=================================
 #===      DATASETS
 #=================================
-@job_bp.route('/datasets',methods=['GET'])
+#@job_bp.route('/datasets',methods=['GET'])
+#@custom_require_login
+#def get_dataset_names():
+#	""" Get supported datasets (with paths not empty) """
+
+#	datasets= current_app.config['DATASETS']
+#	dataset_names= {}
+#	for key, value in datasets.items():
+#		if value["path"]=="":
+#			continue
+#		dataset_names[key]= value.copy()
+#		del dataset_names[key]["path"]
+	
+#	return make_response(jsonify(dataset_names), 200)
+
+
+@job_bp.route('/datasets', methods=['GET'])
 @custom_require_login
 def get_dataset_names():
-	""" Get supported datasets (with paths not empty) """
+	"""Return datasets accessible to the current user."""
 
-	datasets= current_app.config['DATASETS']
-	dataset_names= {}
-	for key, value in datasets.items():
-		if value["path"]=="":
-			continue
-		dataset_names[key]= value.copy()
-		del dataset_names[key]["path"]
-	
-	return make_response(jsonify(dataset_names), 200)
+	try:
+		datasets = dataset_registry.available_datasets()
+
+	except dataset_registry.DatasetError as e:
+		return make_response(
+			jsonify({'error': str(e)}),
+			e.status
+		)
+
+	except Exception as e:
+		logger.error(
+			"Failed to retrieve available datasets (err=%s)!" % str(e),
+			action="getdatasets"
+		)
+		return make_response(
+			jsonify({'error': 'Failed to retrieve datasets'}),
+			500
+		)
+
+	return make_response(jsonify(datasets), 200)
 
 #=================================
 #===      JOB SUBMIT 
@@ -1145,33 +1173,88 @@ def process_multi_data_inputs(req_data, res, current_app, username):
 				status= -1
 				return (status, res, [], [])
 	
-		elif data_format=="abspath":
-			# - This is already intended to be an absolute path
-			inputfile= data_input
-			inputfile_for_response= inputfile
+		#elif data_format=="abspath":
+		#	# - This is already intended to be an absolute path
+		#	inputfile= data_input
+		#	inputfile_for_response= inputfile
 		 
+		elif data_format=="abspath":
+			# - Validate direct absolute-path access
+			# - Managed dataset roots require dataset IDs
+
+			try:
+				dataset_registry.guard_abspath(data_input)
+
+			except dataset_registry.DatasetError as e:
+				logger.warn(
+					"Absolute-path input rejected for user %s: %s" %
+					(username, str(e)),
+					action="submitjob",
+					user=username
+				)
+
+				res['state']= 'ABORTED'
+				res['status']= str(e)
+				status= -1
+
+				return (status, res, [], [])
+
+			inputfile= data_input
+			inputfile_for_response= inputfile		 
+		 
+		 
+		#elif data_format=="dataset":
+		#	# - Set input to dataset path (if defined)
+		#	dataset_id= data_input
+		#	inputfile= ""
+		#	inputfile_for_response= dataset_id
+		
+		#	if dataset_id not in datasets:
+		#		logger.warn("Dataset id %s given by user %s not found among configured datasets!" % (dataset_id, username), action="submitjob", user=username)	
+		#		res['state']= 'ABORTED'	
+		#		res['status']= 'Dataset id not found among configured datasets!'
+		#		status= -1
+		#		return (status, res, [], [])
+	
+		#	if datasets[dataset_id]["path"]=="":
+		#		logger.warn("Dataset id %s required by user %s existing but its path was not configured when the app was deployed" % (dataset_id, username), action="submitjob", user=username)	
+		#		res['state']= 'ABORTED'	
+		#		res['status']= 'Dataset id existing but its path not configured when the app was deployed'
+		#		status= -1
+		#		return (status, res, [], [])
+		
+		#	inputfile= datasets[dataset_id]["path"]
+		#	inputfile_for_response= dataset_id
+		
+		
 		elif data_format=="dataset":
-			# - Set input to dataset path (if defined)
+			# - Resolve dataset ID from dynamic registry
+			# - Verify user access permissions
+			# - Fall back to legacy static datasets
+			#   according to registry migration policy
+
 			dataset_id= data_input
 			inputfile= ""
 			inputfile_for_response= dataset_id
-		
-			if dataset_id not in datasets:
-				logger.warn("Dataset id %s given by user %s not found among configured datasets!" % (dataset_id, username), action="submitjob", user=username)	
-				res['state']= 'ABORTED'	
-				res['status']= 'Dataset id not found among configured datasets!'
+
+			try:
+				inputfile= dataset_registry.resolve_input_dataset(
+					dataset_id
+				)
+
+			except dataset_registry.DatasetError as e:
+				logger.warn(
+					"Dataset %s rejected for user %s: %s" %
+					(dataset_id, username, str(e)),
+					action="submitjob",
+					user=username
+				)
+
+				res['state']= 'ABORTED'
+				res['status']= str(e)
 				status= -1
-				return (status, res, [], [])
-	
-			if datasets[dataset_id]["path"]=="":
-				logger.warn("Dataset id %s required by user %s existing but its path was not configured when the app was deployed" % (dataset_id, username), action="submitjob", user=username)	
-				res['state']= 'ABORTED'	
-				res['status']= 'Dataset id existing but its path not configured when the app was deployed'
-				status= -1
-				return (status, res, [], [])
-		
-			inputfile= datasets[dataset_id]["path"]
-			inputfile_for_response= dataset_id
+
+				return (status, res, [], [])		
 		
 		else:
 			logger.warn("Invalid data_inputs_format option value given by user %s!" % (username), action="submitjob", user=username)	
@@ -1230,35 +1313,84 @@ def process_single_data_inputs(req_data, res, current_app, username):
 			status= -1
 			return (status, res, inputfile, inputfile_for_response)
 			
+	#elif data_inputs_format=="abspath":
+	#	# - This is already intended to be an absolute path
+	#	#inputfile= req_data['data_inputs']
+	#	inputfile= data_inputs
+	#	inputfile_for_response= inputfile
+		
 	elif data_inputs_format=="abspath":
-		# - This is already intended to be an absolute path
-		#inputfile= req_data['data_inputs']
+		# - Validate direct absolute-path access
+		# - Managed dataset roots require dataset IDs
+
+		try:
+			dataset_registry.guard_abspath(data_inputs)
+
+		except dataset_registry.DatasetError as e:
+			logger.warn(
+				"Absolute-path input rejected for user %s: %s" %
+				(username, str(e)),
+				action="submitjob",
+				user=username
+			)
+
+			res['state']= 'ABORTED'
+			res['status']= str(e)
+			status= -1
+
+			return (status, res, "", "")
+
 		inputfile= data_inputs
-		inputfile_for_response= inputfile
+		inputfile_for_response= inputfile		
 		 
+	#elif data_inputs_format=="dataset":
+	#	# - Set input to dataset path (if defined)
+	#	dataset_id= data_inputs
+	#	inputfile= ""
+	#	inputfile_for_response= dataset_id
+	#	
+	#	if dataset_id not in datasets:
+	#		logger.warn("Dataset id %s given by user %s not found among configured datasets!" % (dataset_id, username), action="submitjob", user=username)	
+	#		res['state']= 'ABORTED'	
+	#		res['status']= 'Dataset id not found among configured datasets!'
+	#		status= -1
+	#		return (status, res, inputfile, inputfile_for_response)
+	#
+	#	if datasets[dataset_id]["path"]=="":
+	#		logger.warn("Dataset id %s required by user %s existing but its path was not configured when the app was deployed" % (dataset_id, username), action="submitjob", user=username)	
+	#		res['state']= 'ABORTED'	
+	#		res['status']= 'Dataset id existing but its path not configured when the app was deployed'
+	#		status= -1
+	#		return (status, res, inputfile, inputfile_for_response)
+	#	
+	#	inputfile= datasets[dataset_id]["path"]
+	#	inputfile_for_response= dataset_id
+		
 	elif data_inputs_format=="dataset":
-		# - Set input to dataset path (if defined)
+		# - Resolve and authorize the dataset ID
+
 		dataset_id= data_inputs
-		#dataset_id= req_data['data_inputs']
 		inputfile= ""
 		inputfile_for_response= dataset_id
-		
-		if dataset_id not in datasets:
-			logger.warn("Dataset id %s given by user %s not found among configured datasets!" % (dataset_id, username), action="submitjob", user=username)	
-			res['state']= 'ABORTED'	
-			res['status']= 'Dataset id not found among configured datasets!'
+
+		try:
+			inputfile= dataset_registry.resolve_input_dataset(
+				dataset_id
+			)
+
+		except dataset_registry.DatasetError as e:
+			logger.warn(
+				"Dataset %s rejected for user %s: %s" %
+				(dataset_id, username, str(e)),
+				action="submitjob",
+				user=username
+			)
+
+			res['state']= 'ABORTED'
+			res['status']= str(e)
 			status= -1
-			return (status, res, inputfile, inputfile_for_response)
-	
-		if datasets[dataset_id]["path"]=="":
-			logger.warn("Dataset id %s required by user %s existing but its path was not configured when the app was deployed" % (dataset_id, username), action="submitjob", user=username)	
-			res['state']= 'ABORTED'	
-			res['status']= 'Dataset id existing but its path not configured when the app was deployed'
-			status= -1
-			return (status, res, inputfile, inputfile_for_response)
-		
-		inputfile= datasets[dataset_id]["path"]
-		inputfile_for_response= dataset_id
+
+			return (status, res, "", "")		
 		
 	else:
 		logger.warn("Invalid data_inputs_format option value given by user %s!" % (username), action="submitjob", user=username)	
