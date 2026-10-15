@@ -1,5 +1,8 @@
 """Dataset and team API. Admin writes, filtered authenticated reads."""
+
 from flask import Blueprint, jsonify, request
+from flask import g, current_app
+
 from caesar_rest import oidc
 from caesar_rest.decorators import custom_require_login
 from caesar_rest import dataset_registry as registry
@@ -7,6 +10,9 @@ from caesar_rest import dataset_registry as registry
 registry_bp = Blueprint('dataset_registry', __name__, url_prefix='/caesar/api/v1.0')
 
 
+###########################################
+###    HELPERS
+###########################################
 def response_error(error):
 	return jsonify({'error': str(error)}), error.status
 
@@ -19,6 +25,28 @@ def invoke(func, *args):
 	except registry.DatasetError as exc:
 		return response_error(exc)
 
+
+###############################################
+####    ENDPOINTS
+###############################################
+@registry_bp.route('/datasets/me', methods=['GET'])
+@custom_require_login
+def current_identity():
+    def action():
+        user_id = registry.identity()
+        claims = g.oidc_token_info
+
+        return jsonify({
+            'issuer': claims['iss'],
+            'subject': claims['sub'],
+            'user_id': user_id,
+            'is_dataset_admin': registry.is_admin(user_id),
+            'registry_enabled': current_app.config.get(
+                'DATASET_REGISTRY_ENABLED', False
+            )
+        })
+
+    return invoke(action)
 
 @registry_bp.route('/datasets', methods=['POST'])
 @custom_require_login
