@@ -387,33 +387,10 @@ def remove_member(team_id, user_id):
 	checked_id(team_id, 'team ID')
 	checked_user_id(user_id)
 
-	db = database()
-
-	print("DELETE MEMBERS DB:", db.name, flush=True)
-
-	query = {
+	result = database().team_memberships.delete_one({
 		'team_id': team_id,
 		'user_id': user_id
-	}
-
-	# Diagnostic: check the exact matching document.
-	matching_member = db.team_memberships.find_one(query)
-
-	# Diagnostic: inspect the stored IDs for this team.
-	stored_members = list(
-		db.team_memberships.find(
-			{'team_id': team_id},
-			{'_id': 0, 'user_id': 1}
-		)
-	)
-
-	print("DELETE QUERY:", repr(query))
-	print("MATCHING MEMBER:", repr(matching_member))
-	print("STORED MEMBERS:", repr(stored_members))
-
-	result = db.team_memberships.delete_one(query)
-
-	print("DELETED COUNT:", result.deleted_count, flush=True)
+	})
 
 	return result.deleted_count > 0
 
