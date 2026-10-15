@@ -536,6 +536,7 @@ dataset_admin_identities = [
 	for identity in args.dataset_admin_identities.split(',')
 	if identity.strip()
 ]
+logger.info("Parsed dataset admin identities: %r", dataset_admin_identities)
 
 # Validate administrator identities.
 for identity in dataset_admin_identities:
