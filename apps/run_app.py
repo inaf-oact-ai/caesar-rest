@@ -531,8 +531,9 @@ dataset_allowed_roots = [
 	if path.strip()
 ]
 
+
 dataset_admin_identities = [
-	identity.strip()
+	identity.strip().replace(r'\|', '|')
 	for identity in args.dataset_admin_identities.split(',')
 	if identity.strip()
 ]
