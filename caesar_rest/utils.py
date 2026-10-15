@@ -1,7 +1,7 @@
 ##############################
 #   MODULE IMPORTS
 ##############################
-# Import standard modules
+# - Import standard modules
 import os
 import sys
 import json
@@ -13,13 +13,17 @@ import hashlib
 import tarfile
 import subprocess
 import uuid
+import re
 
-# Import astro modules
+# - Import Flask modules
+from flask import current_app, g, abort
+
+# - Import astro modules
 from astropy.io import fits
 from astropy.visualization import ZScaleInterval, LinearStretch, ImageNormalize, MinMaxInterval
 import regions
 
-## Graphics modules
+# - Graphics modules
 import matplotlib as mpl
 mpl.rcParams['xtick.direction'] = 'in'
 mpl.rcParams['ytick.direction'] = 'in'
@@ -27,7 +31,7 @@ mpl.rcParams['ytick.direction'] = 'in'
 from matplotlib import pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-# Get logger
+# - Get logger
 from caesar_rest import logger
 
 def get_uuid():
