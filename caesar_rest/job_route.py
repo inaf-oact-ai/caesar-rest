@@ -13,6 +13,7 @@ import numpy as np
 import glob
 import base64
 import errno
+import hashlib
 
 try:
 	FileNotFoundError  # python3
@@ -68,6 +69,29 @@ job_component_catalog_file_bp = Blueprint('job_component_catalog_file', __name__
 job_preview_bp = Blueprint('job_preview', __name__, url_prefix='/caesar/api/v1.0')
 job_preview_file_bp = Blueprint('job_preview_file', __name__, url_prefix='/caesar/api/v1.0')
 dataset_names_bp = Blueprint('dataset_names', __name__, url_prefix='/caesar/api/v1.0')
+
+####################################
+##   HELPERS
+####################################
+def get_job_username():
+	"""Return a readable, unique job owner directory identifier."""
+
+	if not current_app.config.get('USE_AAI', False):
+		return 'anonymous'
+
+	user_id = dataset_registry.identity()
+	claims = g.oidc_token_info
+
+	subject = claims['sub']
+	username = claims.get('preferred_username')
+
+	if not isinstance(username, str) or not username.strip():
+		username = 'user'
+
+	username = utils.sanitize_username(username)
+	subject = utils.sanitize_username(subject)
+
+	return username + '_' + subject
 
 #=================================
 #===      DATASETS
@@ -131,10 +155,13 @@ def submit_job():
 	res['submit_date']= ''
 
 	# - Get aai info
-	username= 'anonymous'
-	if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info):
-		email= g.oidc_token_info['email']
-		username= utils.sanitize_username(email)
+	#username= 'anonymous'
+	#if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info):
+	#	email= g.oidc_token_info['email']
+	#	username= utils.sanitize_username(email)
+
+	# - Get authenticated user storage identifier
+	username = utils.get_storage_username()
 
 	# - Get mongo info
 	mongo_dbhost= current_app.config['MONGO_HOST']
@@ -695,10 +722,13 @@ def get_job_ids():
 	""" Retrieve all job ids per user """
 
 	# - Get aai info
-	username= 'anonymous'
-	if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info):
-		email= g.oidc_token_info['email']
-		username= utils.sanitize_username(email)
+	#username= 'anonymous'
+	#if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info):
+	#	email= g.oidc_token_info['email']
+	#	username= utils.sanitize_username(email)
+
+	# - Get authenticated user storage identifier
+	username = utils.get_storage_username()
 
 	# - Get all job ids from DB
 	res= {}	
@@ -729,10 +759,13 @@ def cancel_job(task_id):
 	res['status']= ''
 
 	# - Get aai info
-	username= 'anonymous'
-	if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info):
-		email= g.oidc_token_info['email']
-		username= utils.sanitize_username(email)
+	#username= 'anonymous'
+	#if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info):
+	#	email= g.oidc_token_info['email']
+	#	username= utils.sanitize_username(email)
+
+	# - Get authenticated user storage identifier
+	username = utils.get_storage_username()
 
 	# - Get mongo info
 	mongo_dbhost= current_app.config['MONGO_HOST']
@@ -1030,10 +1063,13 @@ def get_job_status(task_id):
 	res['tag']= ''
 
 	# - Get aai info
-	username= 'anonymous'
-	if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info):
-		email= g.oidc_token_info['email']
-		username= utils.sanitize_username(email)
+	#username= 'anonymous'
+	#if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info):
+	#	email= g.oidc_token_info['email']
+	#	username= utils.sanitize_username(email)
+
+	# - Get authenticated user storage identifier
+	username = utils.get_storage_username()
 
 	# - Search job id in user collection
 	collection_name= username + '.jobs'

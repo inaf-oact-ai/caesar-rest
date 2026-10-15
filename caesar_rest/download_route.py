@@ -56,10 +56,13 @@ def get_registered_file_ids():
 	""" Returns all file ids registered in the system """
 
 	# - Get aai info
-	username= 'anonymous'
-	if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info): 
-		email= g.oidc_token_info['email']
-		username= utils.sanitize_username(email)
+	#username= 'anonymous'
+	#if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info): 
+	#	email= g.oidc_token_info['email']
+	#	username= utils.sanitize_username(email)
+
+	# - Get authenticated user storage identifier
+	username = utils.get_storage_username()
 
 	# - Get all file uuids
 	res= {}
@@ -85,11 +88,14 @@ def download_id():
 	""" Download data by uuid """
 
 	# - Get aai info
-	username= 'anonymous'
-	if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info): 
-		email= g.oidc_token_info['email']
-		username= utils.sanitize_username(email)
+	#username= 'anonymous'
+	#if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info): 
+	#	email= g.oidc_token_info['email']
+	#	username= utils.sanitize_username(email)
 
+	# - Get authenticated user storage identifier
+	username = utils.get_storage_username()
+	
 	# - Get args
 	if request.method == 'POST':
 		uuid = request.form['uuid']
@@ -111,10 +117,13 @@ def download_by_uuid(file_uuid):
 	}
 
 	# - Get aai info
-	username= 'anonymous'
-	if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info):
-		email= g.oidc_token_info['email']
-		username= utils.sanitize_username(email)
+	#username= 'anonymous'
+	#if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info):
+	#	email= g.oidc_token_info['email']
+	#	username= utils.sanitize_username(email)
+
+	# - Get authenticated user storage identifier
+	username = utils.get_storage_username()
 
 	# - Search file uuid
 	collection_name= username + '.files'
@@ -170,10 +179,13 @@ def delete_by_uuid(file_uuid):
 	}
 
 	# - Get aai info
-	username= 'anonymous'
-	if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info):
-		email= g.oidc_token_info['email']
-		username= utils.sanitize_username(email)
+	#username= 'anonymous'
+	#if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info):
+	#	email= g.oidc_token_info['email']
+	#	username= utils.sanitize_username(email)
+
+	# - Get authenticated user storage identifier
+	username = utils.get_storage_username()
 
 	# - Search file uuid
 	collection_name= username + '.files'
