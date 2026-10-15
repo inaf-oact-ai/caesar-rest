@@ -19,12 +19,17 @@ def response_error(error):
 
 def invoke(func, *args):
 	try:
-		# The legacy login decorator can allow anonymous mode; registry never does.
+		# The legacy login decorator can allow anonymous mode;
+		# the dataset registry always requires authentication.
 		registry.identity()
+
+		# Synchronize the authenticated user's display metadata.
+		registry.sync_current_user()
+
 		return func(*args)
+
 	except registry.DatasetError as exc:
 		return response_error(exc)
-
 
 ###############################################
 ####    ENDPOINTS
@@ -107,12 +112,12 @@ def new_team():
 @registry_bp.route('/teams/<team_id>/members', methods=['GET'])
 @custom_require_login
 def members(team_id):
-	def action():
-		registry.require_admin()
-		registry.checked_id(team_id, 'team ID')
-		return jsonify([d['user_id'] for d in registry.database().team_memberships.find({'team_id': team_id})])
-	return invoke(action)
 
+	def action():
+		members = registry.list_team_members(team_id)
+		return jsonify(members)
+
+	return invoke(action)
 
 @registry_bp.route('/teams/<team_id>/members', methods=['POST'])
 @custom_require_login
@@ -129,10 +134,18 @@ def add_team_member(team_id):
 @registry_bp.route('/teams/<team_id>/members', methods=['DELETE'])
 @custom_require_login
 def delete_team_member(team_id):
+
 	def action():
 		payload = request.get_json(silent=True)
-		if not isinstance(payload, dict) or not isinstance(payload.get('user_id'), str):
-			raise registry.DatasetError('user_id required')
-		registry.remove_member(team_id, payload['user_id'])
-		return jsonify({'removed': True})
+
+		if not isinstance(payload, dict):
+			raise registry.DatasetError('JSON object required')
+
+		removed = registry.remove_member(
+			team_id,
+			payload.get('user_id')
+		)
+
+		return jsonify({'removed': removed})
+
 	return invoke(action)

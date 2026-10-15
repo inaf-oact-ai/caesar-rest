@@ -36,6 +36,58 @@ def identity():
 		raise DatasetError('OIDC issuer and subject required', 401)
 	return issuer + '|' + subject
 
+def sync_current_user():
+	"""
+	Synchronize user metadata from validated OIDC claims.
+
+	Authorization continues to use issuer|subject.
+	Usernames and emails are display metadata only.
+	"""
+
+	user_id = identity()
+	claims = g.oidc_token_info
+
+	username = claims.get('preferred_username')
+	email = claims.get('email')
+	name = claims.get('name')
+
+	if not isinstance(username, str) or not username.strip():
+		username = None
+	else:
+		username = username.strip()
+
+	if not isinstance(email, str) or not email.strip():
+		email = None
+	else:
+		email = email.strip()
+
+	if not isinstance(name, str) or not name.strip():
+		name = None
+	else:
+		name = name.strip()
+
+	now = datetime.now(timezone.utc)
+
+	ensure_indexes()
+
+	database().users.update_one(
+		{'user_id': user_id},
+		{
+			'$set': {
+				'username': username,
+				'email': email,
+				'name': name,
+				'last_seen': now
+			},
+			'$setOnInsert': {
+				'user_id': user_id,
+				'created_at': now
+			}
+		},
+		upsert=True
+	)
+
+	return user_id
 
 def is_admin(user_id=None):
 	user_id = user_id or identity()
@@ -52,14 +104,40 @@ def checked_id(value, label='identifier'):
 		raise DatasetError('Invalid ' + label)
 	return value
 
+def checked_user_id(user_id):
+	"""Validate the stable OIDC issuer|subject identifier."""
+
+	if not isinstance(user_id, str):
+		raise DatasetError('Member user_id must be issuer|subject')
+
+	if user_id.count('|') != 1:
+		raise DatasetError('Member user_id must contain exactly one separator')
+
+	issuer, subject = user_id.split('|', 1)
+
+	if not issuer or not subject:
+		raise DatasetError('Member issuer and subject are required')
+
+	if issuer != issuer.strip() or subject != subject.strip():
+		raise DatasetError('Invalid whitespace in member user_id')
+
+	return user_id
+    
 
 def ensure_indexes():
 	db = database()
+
 	db.datasets.create_index('dataset_id', unique=True)
 	db.teams.create_index('team_id', unique=True)
-	db.team_memberships.create_index([('team_id', 1), ('user_id', 1)], unique=True)
+
+	db.team_memberships.create_index(
+		[('team_id', 1), ('user_id', 1)],
+		unique=True
+	)
 	db.team_memberships.create_index('user_id')
 
+	db.users.create_index('user_id', unique=True)
+    
 
 def validated_path(path, check_exists=True):
 	if not isinstance(path, str) or not os.path.isabs(path):
@@ -274,22 +352,103 @@ def create_team(payload):
 
 
 def add_member(team_id, user_id):
+	"""Add an OIDC user identity to a team."""
+
 	require_admin()
 	checked_id(team_id, 'team ID')
-	if not isinstance(user_id, str) or '|' not in user_id:
-		raise DatasetError('Member user_id must be issuer|subject')
-	if database().teams.find_one({'team_id': team_id, 'enabled': True}) is None:
-		raise DatasetError('Team not found', 404)
-	ensure_indexes()
-	database().team_memberships.update_one({'team_id': team_id, 'user_id': user_id},
-		{'$setOnInsert': {'team_id': team_id, 'user_id': user_id}}, upsert=True)
+	checked_user_id(user_id)
 
+	if database().teams.find_one({
+		'team_id': team_id,
+		'enabled': True
+	}) is None:
+		raise DatasetError('Team not found', 404)
+
+	ensure_indexes()
+
+	database().team_memberships.update_one(
+		{
+			'team_id': team_id,
+			'user_id': user_id
+		},
+		{
+			'$setOnInsert': {
+				'team_id': team_id,
+				'user_id': user_id
+			}
+		},
+		upsert=True
+	)
 
 def remove_member(team_id, user_id):
+	"""Remove an OIDC user identity from a team."""
+
 	require_admin()
 	checked_id(team_id, 'team ID')
-	database().team_memberships.delete_one({'team_id': team_id, 'user_id': user_id})
+	checked_user_id(user_id)
 
+	result = database().team_memberships.delete_one({
+		'team_id': team_id,
+		'user_id': user_id
+	})
+
+	return result.deleted_count > 0
+
+
+def list_team_members(team_id):
+	"""Return team members enriched with cached user metadata."""
+
+	require_admin()
+	checked_id(team_id, 'team ID')
+
+	db = database()
+
+	if db.teams.find_one({'team_id': team_id}) is None:
+		raise DatasetError('Team not found', 404)
+
+	memberships = list(
+		db.team_memberships.find(
+			{'team_id': team_id},
+			{'_id': 0, 'user_id': 1}
+		)
+	)
+
+	user_ids = [m['user_id'] for m in memberships]
+
+	users = {
+		user['user_id']: user
+		for user in db.users.find(
+			{'user_id': {'$in': user_ids}},
+			{
+				'_id': 0,
+				'user_id': 1,
+				'username': 1,
+				'email': 1,
+				'name': 1
+			}
+		)
+	}
+
+	result = []
+
+	for membership in memberships:
+		user_id = membership['user_id']
+		user = users.get(user_id, {})
+
+		result.append({
+			'user_id': user_id,
+			'username': user.get('username'),
+			'email': user.get('email'),
+			'name': user.get('name')
+		})
+
+	return sorted(
+		result,
+		key=lambda member: (
+			member['username'] or '',
+			member['user_id']
+		)
+	)
 
 def resolve_input_dataset(dataset_id):
 	"""Resolve DB dataset, falling back only for admins to legacy static entries."""
