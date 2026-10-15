@@ -7,9 +7,6 @@ from caesar_rest import oidc
 import json
 
 # Get logger
-#import logging
-#logger = logging.getLogger(__name__)
-
 from caesar_rest import logger
 
 def custom_require_login(view_func, scopes_required=None, render_errors=True):
@@ -36,3 +33,25 @@ def custom_require_login(view_func, scopes_required=None, render_errors=True):
 				response_body = json.dumps(response_body)
 			return response_body, 401, {'WWW-Authenticate': 'Bearer'}
 	return decorated
+	
+	
+def custom_require_browser_login(view_func):
+	"""Require interactive OIDC login only when AAI is enabled."""
+
+	@wraps(view_func)
+	def decorated(*args, **kwargs):
+
+		aai_enabled = current_app.config['USE_AAI']
+		has_oidc = (oidc is not None)
+
+		if not aai_enabled:
+			return view_func(*args, **kwargs)
+
+		if not has_oidc:
+			logger.error("AAI is enabled but OIDC is unavailable")
+			return "OIDC authentication is unavailable", 503
+
+		return oidc.require_login(view_func)(*args, **kwargs)
+
+	return decorated
+

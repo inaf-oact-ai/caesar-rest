@@ -1,13 +1,14 @@
 ##############################
 #   MODULE IMPORTS
 ##############################
+from functools import wraps
+
 from flask import current_app, Blueprint, render_template, request, redirect
 from caesar_rest import oidc
 from caesar_rest.decorators import custom_require_login
+from caesar_rest.decorators import custom_require_browser_login
 
 # Get logger
-#import logging
-#logger = logging.getLogger(__name__)
 from caesar_rest import logger
 
 ##############################
@@ -33,23 +34,36 @@ def index():
 		return render_template('index.html')
 
 
+#@index_bp.route('/login')
+#@custom_require_login
+#def login():
+#	aai_enabled= current_app.config['USE_AAI']
+#	has_oidc= (oidc is not None)
+#	logger.debug("use_aai? %d has_oidc? %d" % (aai_enabled, has_oidc))
+#
+#	if aai_enabled and has_oidc:
+#		user_info = oidc.user_getinfo(['preferred_username', 'email', 'sub', 'name'])
+#		# return value is a dictionary with keys the above keywords
+#		return redirect("/", code=302) #'Welcome {user_info}'.format(user_info=user_info['name'])
+#
+#	else:
+#		return render_template('index.html')
+
 @index_bp.route('/login')
-#@oidc.require_login
-@custom_require_login
+@custom_require_browser_login
 def login():
 
-	aai_enabled= current_app.config['USE_AAI']
-	has_oidc= (oidc is not None)
+	aai_enabled = current_app.config['USE_AAI']
+	has_oidc = (oidc is not None)
 	logger.debug("use_aai? %d has_oidc? %d" % (aai_enabled, has_oidc))
 
 	if aai_enabled and has_oidc:
 		user_info = oidc.user_getinfo(['preferred_username', 'email', 'sub', 'name'])
-		# return value is a dictionary with keys the above keywords
-		return redirect("/", code=302) #'Welcome {user_info}'.format(user_info=user_info['name'])
+		logger.debug("OIDC login successful")
+		return redirect("/", code=302)
 
 	else:
 		return render_template('index.html')
-
 
 
 @index_bp.route('/logout')
