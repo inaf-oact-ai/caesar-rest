@@ -389,6 +389,8 @@ def remove_member(team_id, user_id):
 
 	db = database()
 
+	print("DELETE MEMBERS DB:", db.name, flush=True)
+
 	query = {
 		'team_id': team_id,
 		'user_id': user_id
