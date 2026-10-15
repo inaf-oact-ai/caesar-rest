@@ -114,7 +114,26 @@ def new_team():
 def members(team_id):
 
 	def action():
+		registry.require_admin()
+
+		db = registry.database()
+
+		print(
+			"GET MEMBERS DB:",
+			db.name,
+			"TEAM:",
+			repr(team_id),
+			flush=True
+		)
+
 		members = registry.list_team_members(team_id)
+
+		print(
+			"GET MEMBERS RESULT:",
+			repr(members),
+			flush=True
+		)
+
 		return jsonify(members)
 
 	return invoke(action)
