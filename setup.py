@@ -46,7 +46,8 @@ reqs.append('pyyaml')
 
 reqs.append('pymongo')
 reqs.append('flask-pymongo')
-reqs.append('flask_oidc_ex')
+#reqs.append('flask_oidc_ex')
+reqs.append('flask-oidc-ex @ git+https://github.com/inaf-oact-ai/flask-oidc-ex.git@master')
 
 reqs.append('extension-helpers')
 reqs.append('astropy')
