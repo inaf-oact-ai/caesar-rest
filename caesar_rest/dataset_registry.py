@@ -129,8 +129,7 @@ def guard_abspath(path):
 
 
 def public_metadata(doc):
-	return {k: v for k, v in doc.items() if k in ('name', 'description', 'type', 'format', 'app', 'visibility')}
-
+	return {k: v for k, v in doc.items() if k in ('name', 'description', 'type', 'format', 'visibility')}
 
 def list_datasets():
 	user_id = identity()
@@ -138,69 +137,100 @@ def list_datasets():
 
 
 def register_dataset(payload):
+	""" Register a dataset"""
+	
 	require_admin()
 	if not isinstance(payload, dict):
 		raise DatasetError('JSON object required')
-	allowed = {'dataset_id', 'name', 'description', 'path', 'type', 'format', 'app', 'visibility', 'allowed_teams', 'enabled'}
+	
+	allowed = {
+		'dataset_id', 'name', 'description', 'path',
+		'type', 'format', 'visibility',
+		'allowed_teams', 'enabled'
+	}
+
 	if set(payload) - allowed:
 		raise DatasetError('Unknown registration fields')
+		
 	dataset_id = checked_id(payload.get('dataset_id'), 'dataset ID')
 	name = payload.get('name')
 	if not isinstance(name, str) or not name.strip():
 		raise DatasetError('Dataset name required')
+	
 	kind = payload.get('type', 'directory')
 	if kind not in ('file', 'directory'):
 		raise DatasetError('Invalid dataset type')
+	
 	visibility = payload.get('visibility', 'admin')
 	if visibility not in ('public', 'restricted', 'admin'):
 		raise DatasetError('Invalid visibility')
+	
 	teams = payload.get('allowed_teams', [])
 	if not isinstance(teams, list) or len(teams) != len(set(str(v) for v in teams)):
 		raise DatasetError('Invalid allowed_teams')
+	
 	for team in teams:
 		checked_id(team, 'team ID')
 		if database().teams.find_one({'team_id': team, 'enabled': True}) is None:
 			raise DatasetError('Unknown or disabled team: ' + team)
+	
 	path = validated_path(payload.get('path'))
 	if (kind == 'directory' and not os.path.isdir(path)) or (kind == 'file' and not os.path.isfile(path)):
 		raise DatasetError('Dataset path type mismatch')
+	
 	doc = {'dataset_id': dataset_id, 'name': name.strip(), 'path': path,
 		'type': kind, 'visibility': visibility, 'allowed_teams': teams,
 		'enabled': payload.get('enabled', True), 'created_by': identity(),
 		'created_at': datetime.now(timezone.utc)}
+	
 	if not isinstance(doc['enabled'], bool):
 		raise DatasetError('enabled must be boolean')
-	for k in ('description', 'format', 'app'):
+	
+	for k in ('description', 'format'):
 		v = payload.get(k, '')
 		if not isinstance(v, str):
 			raise DatasetError(k + ' must be text')
 		doc[k] = v
+	
 	from pymongo.errors import DuplicateKeyError
 	try:
 		ensure_indexes()
 		database().datasets.insert_one(doc)
 	except DuplicateKeyError:
 		raise DatasetError('Dataset ID already registered', 409)
+	
 	return doc
 
 
 def update_dataset(dataset_id, payload):
+	""" Update dataset """
+	
 	require_admin()
 	checked_id(dataset_id, 'dataset ID')
 	if not isinstance(payload, dict) or not payload:
 		raise DatasetError('Nonempty JSON object required')
-	allowed = {'name', 'description', 'format', 'app', 'enabled', 'visibility', 'allowed_teams'}
+	
+	allowed = {
+		'name', 'description', 'format',
+		'enabled', 'visibility', 'allowed_teams'
+	}
+
 	if set(payload) - allowed:
 		raise DatasetError('Immutable or unknown dataset field')
+		
 	if 'name' in payload and (not isinstance(payload['name'], str) or not payload['name'].strip()):
 		raise DatasetError('Invalid name')
-	for k in ('description', 'format', 'app'):
+	
+	for k in ('description', 'format'):
 		if k in payload and not isinstance(payload[k], str):
 			raise DatasetError(k + ' must be text')
+	
 	if 'enabled' in payload and not isinstance(payload['enabled'], bool):
 		raise DatasetError('enabled must be boolean')
+	
 	if 'visibility' in payload and payload['visibility'] not in ('public', 'restricted', 'admin'):
 		raise DatasetError('Invalid visibility')
+	
 	if 'allowed_teams' in payload:
 		teams = payload['allowed_teams']
 		if not isinstance(teams, list) or len(teams) != len(set(map(str, teams))):
@@ -209,12 +239,15 @@ def update_dataset(dataset_id, payload):
 			checked_id(team, 'team ID')
 			if database().teams.find_one({'team_id': team, 'enabled': True}) is None:
 				raise DatasetError('Unknown or disabled team: ' + team)
+	
 	res = database().datasets.update_one({'dataset_id': dataset_id}, {'$set': payload})
 	if not res.matched_count:
 		raise DatasetError('Dataset not found', 404)
 
 
 def unregister_dataset(dataset_id):
+	""" Unregister dataset """
+	
 	require_admin()
 	checked_id(dataset_id, 'dataset ID')
 	# Disable/unregister only; never delete files. Check running jobs separately before deployment.
