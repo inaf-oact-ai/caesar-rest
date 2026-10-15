@@ -168,7 +168,8 @@ def download_by_uuid(file_uuid):
 
 
 
-@delete_id_bp.route('/delete/<string:file_uuid>', methods=['GET', 'POST'])
+#@delete_id_bp.route('/delete/<string:file_uuid>', methods=['GET', 'POST'])
+@delete_id_bp.route('/delete/<string:file_uuid>', methods=['DELETE'])
 @custom_require_login
 def delete_by_uuid(file_uuid):
 	""" Delete data by uuid """

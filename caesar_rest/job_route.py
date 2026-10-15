@@ -70,28 +70,6 @@ job_preview_bp = Blueprint('job_preview', __name__, url_prefix='/caesar/api/v1.0
 job_preview_file_bp = Blueprint('job_preview_file', __name__, url_prefix='/caesar/api/v1.0')
 dataset_names_bp = Blueprint('dataset_names', __name__, url_prefix='/caesar/api/v1.0')
 
-####################################
-##   HELPERS
-####################################
-def get_job_username():
-	"""Return a readable, unique job owner directory identifier."""
-
-	if not current_app.config.get('USE_AAI', False):
-		return 'anonymous'
-
-	user_id = dataset_registry.identity()
-	claims = g.oidc_token_info
-
-	subject = claims['sub']
-	username = claims.get('preferred_username')
-
-	if not isinstance(username, str) or not username.strip():
-		username = 'user'
-
-	username = utils.sanitize_username(username)
-	subject = utils.sanitize_username(subject)
-
-	return username + '_' + subject
 
 #=================================
 #===      DATASETS
@@ -1563,11 +1541,12 @@ def get_job_out_file(task_id, label):
 			res['status']= errmsg
 			return make_response(jsonify(res),500)
 
-		if image=='':
-			errmsg= 'Failed to convert file ' + filename + ' to b64 string (err=' + str(e) + ')!'
+		if not image:
+			errmsg = 'Failed to convert file ' + filename + ' to b64 string (empty result)!'
 			logger.warn(errmsg, action="joboutput", user=username)
-			res['status']= errmsg
-			return make_response(jsonify(res),500)
+			res['status'] = errmsg
+			return make_response(jsonify(res), 500)	
+			
 		else:
 			return make_response(jsonify({'status': '', 'image': image}), 200)
 	
