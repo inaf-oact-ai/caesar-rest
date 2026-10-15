@@ -611,14 +611,23 @@ app.app_context().push()
 #==   INIT OIDC TO APP
 #===============================
 # - Add Flask OIDC configuration
-if use_aai and oidc is not None:
+if use_aai:
+	if oidc is None:
+		logger.critical("AAI is enabled, but flask_oidc_ex could not be initialized")
+		raise RuntimeError("AAI requested but flask_oidc_ex is unavailable")
+
 	logger.info("Initializing OIDC to app ...")
 	try:
 		oidc.init_app(app)
-	except:
-		logger.error("Failed to initialize OIDC to app!")
+		logger.info("OIDC initialization completed successfully")
+
+	except Exception as e:
+		logger.exception(f"Failed to initialize OIDC to app (err={str(e)})!")
+		raise
+
 else:
 	logger.info("Starting app without AAI ...")
+
 
 #===============================
 #==   INIT MONGO TO APP
