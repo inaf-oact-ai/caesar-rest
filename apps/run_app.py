@@ -539,19 +539,19 @@ dataset_admin_identities = [
 ]
 logger.info("Parsed dataset admin identities: %r", dataset_admin_identities)
 
-# Validate administrator identities.
+# - Validate administrator identities.
 for identity in dataset_admin_identities:
 	if '|' not in identity:
 		logger.error("Invalid dataset administrator identity: expected issuer|subject")
 		sys.exit(1)
 
-# Validate storage roots.
+# - Validate storage roots.
 for path in dataset_allowed_roots:
 	if not os.path.isdir(path):
 		logger.error("Dataset storage root does not exist or is not a directory: %s", path)
 		sys.exit(1)
 
-# Registry requires AAI and MongoDB.
+# - Registry requires AAI and MongoDB.
 if dataset_registry_enabled:
 	if not use_aai or oidc is None:
 		logger.error("Dynamic dataset registry requires AAI")
@@ -712,6 +712,10 @@ if use_db and mongo is not None:
 	logger.info("Initializing MongoDB to app ...")
 	try:
 		mongo.init_app(app)
+		from caesar_rest.pipeline_manager import ensure_indexes
+		with app.app_context():
+			ensure_indexes()
+			
 	except:
 		logger.error("Failed to initialize MongoDB to app!")
 else:

@@ -1,0 +1,67 @@
+"""Generic pipeline metadata endpoints; no agent decisions or job submission."""
+
+from flask import Blueprint, jsonify, request
+
+from caesar_rest import utils
+from caesar_rest.decorators import custom_require_login
+from caesar_rest import pipeline_manager as manager
+
+
+pipeline_bp = Blueprint('pipelines', __name__, url_prefix='/caesar/api/v1.0')
+
+
+def invoke(callback, *args):
+	try:
+		owner = utils.get_storage_username()
+		return callback(owner, *args)
+	except manager.PipelineError as exc:
+		return jsonify({'error': str(exc)}), exc.status
+
+
+@pipeline_bp.route('/pipelines', methods=['POST'])
+@custom_require_login
+def create_pipeline():
+	def action(owner):
+		doc = manager.create_pipeline(owner, request.get_json(silent=True))
+		return jsonify(doc), 201
+	return invoke(action)
+
+
+@pipeline_bp.route('/pipelines', methods=['GET'])
+@custom_require_login
+def list_pipelines():
+	return invoke(lambda owner: jsonify(manager.list_pipelines(owner)))
+
+
+@pipeline_bp.route('/pipelines/<pipeline_id>', methods=['GET'])
+@custom_require_login
+def get_pipeline(pipeline_id):
+	return invoke(lambda owner: jsonify(manager.public_doc(manager.get_pipeline(owner, pipeline_id))))
+
+
+@pipeline_bp.route('/pipelines/<pipeline_id>/runs', methods=['GET'])
+@custom_require_login
+def list_runs(pipeline_id):
+	return invoke(lambda owner: jsonify(manager.list_runs(owner, pipeline_id)))
+
+
+@pipeline_bp.route('/pipelines/<pipeline_id>/nodes/<node_id>/runs', methods=['GET', 'POST'])
+@custom_require_login
+def node_runs(pipeline_id, node_id):
+	if request.method == 'GET':
+		return invoke(lambda owner: jsonify(manager.list_runs(owner, pipeline_id, node_id)))
+	def action(owner):
+		doc = manager.create_run(owner, pipeline_id, node_id, request.get_json(silent=True))
+		return jsonify(doc), 201
+	return invoke(action)
+
+
+@pipeline_bp.route('/pipelines/<pipeline_id>/nodes/<node_id>/selection', methods=['POST'])
+@custom_require_login
+def select_run(pipeline_id, node_id):
+	def action(owner):
+		payload = request.get_json(silent=True)
+		if not isinstance(payload, dict) or not isinstance(payload.get('run_id'), str):
+			raise manager.PipelineError('run_id must be supplied as a string')
+		return jsonify(manager.select_run(owner, pipeline_id, node_id, payload['run_id']))
+	return invoke(action)

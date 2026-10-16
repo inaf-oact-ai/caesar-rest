@@ -44,7 +44,6 @@ from pymongo import MongoClient
 
 
 ## Get logger
-#logger = logging.getLogger(__name__)
 from caesar_rest import logger
 
 ##############################
@@ -71,7 +70,6 @@ def configure_celery_app(app):
 ##############################
 #   FLASK APP CREATION 
 ##############################
-##def create_app(cfg,dm,jc):
 def create_app(cfg,jc):
 	""" Create app """
 
@@ -97,8 +95,10 @@ def create_app(cfg,jc):
 	from caesar_rest.job_route import job_catalog_bp, job_catalog_file_bp, job_component_catalog_bp, job_component_catalog_file_bp, job_preview_bp, job_preview_file_bp
 	from caesar_rest.job_route import dataset_names_bp
 	from caesar_rest.dataset_route import registry_bp
+	from caesar_rest.pipeline_route import pipeline_bp
 	from caesar_rest.app_route import app_names_bp, app_describe_bp
 	from caesar_rest.accounting_route import accounting_bp, appstats_bp
+	
 	app.register_blueprint(index_bp)
 	app.register_blueprint(upload_bp)
 	app.register_blueprint(download_id_bp)
@@ -120,6 +120,7 @@ def create_app(cfg,jc):
 	app.register_blueprint(appstats_bp)
 	app.register_blueprint(dataset_names_bp)
 	app.register_blueprint(registry_bp)
+	app.register_blueprint(pipeline_bp)
 
 	return app
 
