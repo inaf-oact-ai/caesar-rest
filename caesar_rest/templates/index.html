@@ -1,49 +1,72 @@
 <!doctype html>
-<title> Welcome to CAESAR rest app test page </title>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101c33">
+  <meta name="description" content="CAESAR-REST — an API for scientific data management and asynchronous processing.">
+  <title>CAESAR-REST | Scientific processing API</title>
+  <style>
+    :root{color-scheme:dark;--bg:#0b1325;--panel:#14223b;--panel2:#192a46;--text:#eef4ff;--muted:#b3c3db;--line:#30435e;--accent:#63dbcb;--blue:#91baff}
+    *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:radial-gradient(ellipse 90% 55% at 85% -10%,#234169 0%,transparent 70%),var(--bg);color:var(--text);font:16px/1.55 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    a{color:var(--accent)}a:hover{color:#c0fff2}.wrap{width:min(1120px,calc(100% - 40px));margin:auto}
+    header{border-bottom:1px solid var(--line);background:#0b1325bd;backdrop-filter:blur(12px)}header .wrap{display:flex;justify-content:space-between;align-items:center;gap:18px;flex-wrap:wrap;padding:17px 0}
+    .brand{display:flex;align-items:center;gap:12px;color:var(--text);text-decoration:none;font-size:18px;font-weight:800;letter-spacing:.02em}.mark{display:grid;place-items:center;width:42px;height:42px;border:2px solid var(--accent);border-radius:13px;color:var(--accent);font-size:23px}
+    nav{display:flex;align-items:center;gap:18px;flex-wrap:wrap}nav a{text-decoration:none;color:var(--muted);font-size:14px}.pill{border:1px solid var(--line);padding:7px 13px;border-radius:999px;color:var(--text);text-decoration:none}
+    .hero{padding:86px 0 66px;display:grid;grid-template-columns:1.4fr .8fr;gap:44px;align-items:center}.eyebrow{color:var(--accent);text-transform:uppercase;letter-spacing:.16em;font-size:12px;font-weight:800}h1{font-size:clamp(40px,6vw,70px);line-height:1.07;letter-spacing:-.045em;margin:15px 0 24px}h2{font-size:27px;letter-spacing:-.025em;margin:0 0 10px}h3{font-size:18px;margin:0 0 7px}.lead{font-size:19px;color:var(--muted);max-width:650px}.actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:28px}.btn{display:inline-block;padding:11px 17px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:var(--text);text-decoration:none;font:inherit;cursor:pointer;font-weight:650}.btn.primary{background:var(--accent);border-color:var(--accent);color:#08202a}.btn:hover{filter:brightness(1.12)}
+    .glass{background:linear-gradient(135deg,#172d4b,#112039);border:1px solid #3b5272;border-radius:20px;padding:27px;box-shadow:0 25px 55px #0004}.mini{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);font-weight:800}.glass code{display:block;margin-top:18px;white-space:pre-wrap;word-break:break-word;line-height:1.9;color:#d9edff;font-size:13px}.subtle{color:var(--muted)}section{padding:31px 0 43px}.section-intro{max-width:750px;color:var(--muted);margin:0 0 22px}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.card{padding:24px;border:1px solid var(--line);border-radius:15px;background:var(--panel)}.card p{color:var(--muted);margin:0 0 11px}.card a{font-weight:650}.number{font-size:12px;color:var(--accent);font-weight:800;margin-bottom:12px}.endpoint{display:inline-block;margin:6px 0 14px;padding:5px 9px;border-radius:6px;background:#0b1729;color:#bce9f7;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere}
+    .tools{display:grid;grid-template-columns:1fr 1fr;gap:16px}.toolbox{padding:24px;border:1px solid var(--line);border-radius:15px;background:var(--panel)}label{display:block;color:var(--muted);font-size:14px;font-weight:650;margin:15px 0 7px}input[type=file],input[type=text]{width:100%;padding:12px;border:1px solid #536581;border-radius:9px;background:#0d1a30;color:var(--text);font:inherit}input:focus-visible,a:focus-visible,button:focus-visible{outline:3px solid var(--accent);outline-offset:3px}.flash{border:1px solid #6f5e3b;background:#3e3525;padding:12px 18px;border-radius:10px;margin-top:14px}.note{font-size:13px;color:var(--muted)}footer{margin-top:50px;border-top:1px solid var(--line);padding:26px 0 40px;color:var(--muted);font-size:14px}footer .wrap{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
+    @media(max-width:800px){.hero{grid-template-columns:1fr;padding-top:56px}.grid{grid-template-columns:1fr 1fr}.tools{grid-template-columns:1fr}}@media(max-width:550px){.wrap{width:min(100% - 28px,1120px)}.grid{grid-template-columns:1fr}.hero{gap:25px}nav{gap:12px}h1{font-size:43px}}
+  </style>
+</head>
+<body>
+<header><div class="wrap">
+  <a class="brand" href="/" aria-label="CAESAR-REST home"><span class="mark" aria-hidden="true">✦</span>CAESAR-REST</a>
+  <nav aria-label="Main navigation"><a href="#capabilities">Capabilities</a><a href="#api">API routes</a><a href="#tools">File tools</a><a href="https://github.com/inaf-oact-ai/caesar-rest" target="_blank" rel="noopener noreferrer">GitHub ↗</a>
+    {% if aai_enabled %}{% if username %}<a class="pill" href="/logout">Log out</a>{% else %}<a class="pill" href="/login">Log in</a>{% endif %}{% endif %}
+  </nav>
+</div></header>
+<main class="wrap">
+  <div class="hero">
+    <div><div class="eyebrow">Scientific data • Asynchronous processing • REST API</div><h1>Compute, manage,<br>discover.</h1>
+      <p class="lead">CAESAR-REST provides a service interface for scientific datasets, application execution, and retrieval of processing results.</p>
+      <div class="actions"><a class="btn primary" href="#api">Explore the API</a><a class="btn" href="https://github.com/inaf-oact-ai/caesar-rest" target="_blank" rel="noopener noreferrer">View source ↗</a></div>
+    </div>
+    <aside class="glass" aria-label="Service information"><div class="mini">API quick reference</div><code>Base path
+/caesar/api/v1.0
 
-<p> Welcome. You are authenticated as {{ username }}. <a href="/logout">Log out</a> </p>
-
-<!-- FILE UPLOAD -->
-<h2>Select a file to upload</h2>
-<p>
-	{% with messages = get_flashed_messages() %}
-	  {% if messages %}
-		<ul class=flashes>
-		{% for message in messages %}
-		  <li>{{ message }}</li>
-		{% endfor %}
-		</ul>
-	  {% endif %}
-	{% endwith %}
-</p>
-
-<!--<form method="post" action="/" enctype="multipart/form-data">-->
-<form method="post" action="caesar/api/v1.0/upload" enctype="multipart/form-data">
-	<dl>
-		<p>
-			<input type="file" name="file" autocomplete="off" required>
-		</p>
-	</dl>
-  <p>
-		<input type="submit" value="Submit">
-	</p>
-</form>
-
-<!-- FILE DOWNLOAD -->
-<!--
-<h2>Specify file to download by path </h2>
-
-<form method="post" action="caesar/api/v1.0/download-path">
-  <p>Filename:</p>
-  <p><input type = "text" name = "filename" /></p>
-  <p><input type = "submit" value = "submit" /></p>
-</form>
--->
-
-<h2>Specify file to download by uuid </h2>
-
-<form method="post" action="caesar/api/v1.0/download">
-  <p>UUID:</p>
-  <p><input type = "text" name = "uuid" /></p>
-  <p><input type = "submit" value = "submit" /></p>
-</form>
+GET  /datasets
+GET  /jobs
+POST /job
+GET  /job/{id}/status
+GET  /job/{id}/output</code><p class="note">Protected endpoints may require an authenticated session or an authorized bearer token.</p></aside>
+  </div>
+  <section id="capabilities"><h2>Built for scientific workflows</h2><p class="section-intro">One interface for moving data into the service, running configured processing applications, and tracking their outputs.</p>
+    <div class="grid">
+      <article class="card"><div class="number">01 / DATA</div><h3>Dataset management</h3><p>Discover and work with datasets exposed to your authorized identity.</p><span class="endpoint">GET /datasets</span></article>
+      <article class="card"><div class="number">02 / EXECUTION</div><h3>Asynchronous jobs</h3><p>Submit application work, then query job state and retrieve results.</p><span class="endpoint">POST /job</span></article>
+      <article class="card"><div class="number">03 / INTEGRATION</div><h3>Service-to-service API</h3><p>Integrate CAESAR-REST into automated data-processing workflows.</p><span class="endpoint">GET /jobs</span></article>
+    </div>
+  </section>
+  <section id="api"><h2>Common API routes</h2><p class="section-intro">These paths are defined in the application. Response formats, request parameters, and access rules depend on the endpoint.</p>
+    <div class="grid">
+      <article class="card"><h3>Browse datasets</h3><span class="endpoint">GET /caesar/api/v1.0/datasets</span><p>Discover available dataset information.</p></article>
+      <article class="card"><h3>List jobs</h3><span class="endpoint">GET /caesar/api/v1.0/jobs</span><p>Inspect submitted jobs within your permitted scope.</p></article>
+      <article class="card"><h3>Job status and output</h3><span class="endpoint">GET /job/{id}/status</span><p>Retrieve execution status; use <code>/job/{id}/output</code> for outputs.</p></article>
+    </div>
+    <p class="note">API prefix for job-specific paths: <code>/caesar/api/v1.0</code>. This page is a starting point, not a complete API specification. Refer to the <a href="https://github.com/inaf-oact-ai/caesar-rest" target="_blank" rel="noopener noreferrer">repository</a> for implementation details.</p>
+  </section>
+  <section id="tools"><h2>File utilities</h2><p class="section-intro">The original upload and UUID download tools remain available below. The server handles authorization and validates each request.</p>
+    {% with messages = get_flashed_messages() %}{% if messages %}<div class="flash" role="status"><ul>{% for message in messages %}<li>{{ message }}</li>{% endfor %}</ul></div>{% endif %}{% endwith %}
+    {% if not aai_enabled or username %}
+    <div class="tools">
+      <div class="toolbox"><h3>Upload a file</h3><p class="subtle">Choose a permitted file format to upload to your account.</p><form method="post" action="{{ url_for('upload.upload_file') }}" enctype="multipart/form-data"><label for="upload-file">File</label><input id="upload-file" type="file" name="file" required><button class="btn primary" type="submit" style="margin-top:18px">Upload file</button></form></div>
+      <div class="toolbox"><h3>Download by UUID</h3><p class="subtle">Retrieve a file using the UUID returned after upload.</p><form method="post" action="{{ url_for('download_id.download_id') }}"><label for="download-uuid">File UUID</label><input id="download-uuid" type="text" name="uuid" placeholder="Enter a file UUID" required autocomplete="off"><button class="btn primary" type="submit" style="margin-top:18px">Download file</button></form></div>
+    </div>
+    {% else %}<div class="toolbox"><h3>Sign in to use file tools</h3><p class="subtle">File operations require authentication on this deployment. Your API client may instead use the supported bearer-token flow.</p><a class="btn primary" href="/login">Log in</a></div>{% endif %}
+    <p class="note">For browser forms, ensure your deployment supports cookie-based authentication for these endpoints. A login session does not necessarily replace the bearer token required by API clients.</p>
+  </section>
+</main>
+<footer><div class="wrap"><span>CAESAR-REST · Scientific processing services</span><span>{% if username %}Signed in as {{ username }}{% elif aai_enabled %}Not signed in{% else %}Authentication disabled for this deployment{% endif %} · <a href="https://github.com/inaf-oact-ai/caesar-rest" target="_blank" rel="noopener noreferrer">Source code</a></span></div></footer>
+</body>
+</html>
