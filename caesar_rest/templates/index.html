@@ -23,7 +23,7 @@
 <header><div class="wrap">
   <a class="brand" href="/" aria-label="CAESAR-REST home"><span class="mark" aria-hidden="true">✦</span>CAESAR-REST</a>
   <nav aria-label="Main navigation"><a href="#capabilities">Capabilities</a><a href="#api">API routes</a><a href="#tools">File tools</a><a href="https://github.com/inaf-oact-ai/caesar-rest" target="_blank" rel="noopener noreferrer">GitHub ↗</a>
-    {% if aai_enabled %}{% if username %}<a class="pill" href="/logout">Log out</a>{% else %}<a class="pill" href="/login">Log in</a>{% endif %}{% endif %}
+    <a class="pill" href="#authentication">Authentication</a>
   </nav>
 </div></header>
 <main class="wrap">
@@ -39,7 +39,7 @@ GET  /datasets
 GET  /jobs
 POST /job
 GET  /job/{id}/status
-GET  /job/{id}/output</code><p class="note">Protected endpoints may require an authenticated session or an authorized bearer token.</p></aside>
+GET  /job/{id}/output</code><p class="note">When authentication is enabled, protected API endpoints require a valid Keycloak bearer access token.</p></aside>
   </div>
   <section id="capabilities"><h2>Built for scientific workflows</h2><p class="section-intro">One interface for moving data into the service, running configured processing applications, and tracking their outputs.</p>
     <div class="grid">
@@ -56,17 +56,31 @@ GET  /job/{id}/output</code><p class="note">Protected endpoints may require an a
     </div>
     <p class="note">API prefix for job-specific paths: <code>/caesar/api/v1.0</code>. This page is a starting point, not a complete API specification. Refer to the <a href="https://github.com/inaf-oact-ai/caesar-rest" target="_blank" rel="noopener noreferrer">repository</a> for implementation details.</p>
   </section>
-  <section id="tools"><h2>File utilities</h2><p class="section-intro">The original upload and UUID download tools remain available below. The server handles authorization and validates each request.</p>
-    {% with messages = get_flashed_messages() %}{% if messages %}<div class="flash" role="status"><ul>{% for message in messages %}<li>{{ message }}</li>{% endfor %}</ul></div>{% endif %}{% endwith %}
-    {% if not aai_enabled or username %}
-    <div class="tools">
-      <div class="toolbox"><h3>Upload a file</h3><p class="subtle">Choose a permitted file format to upload to your account.</p><form method="post" action="{{ url_for('upload.upload_file') }}" enctype="multipart/form-data"><label for="upload-file">File</label><input id="upload-file" type="file" name="file" required><button class="btn primary" type="submit" style="margin-top:18px">Upload file</button></form></div>
-      <div class="toolbox"><h3>Download by UUID</h3><p class="subtle">Retrieve a file using the UUID returned after upload.</p><form method="post" action="{{ url_for('download_id.download_id') }}"><label for="download-uuid">File UUID</label><input id="download-uuid" type="text" name="uuid" placeholder="Enter a file UUID" required autocomplete="off"><button class="btn primary" type="submit" style="margin-top:18px">Download file</button></form></div>
+  <section id="authentication"><h2>API authentication</h2>
+    <p class="section-intro">CAESAR-REST uses Keycloak-issued OAuth2 access tokens when authentication is enabled. The API validates bearer tokens; this landing page does not initiate an interactive Keycloak sign-in.</p>
+    <div class="grid">
+      <article class="card"><div class="number">01 / TOKEN</div><h3>Obtain an access token</h3><p>Use your organization's approved Keycloak OAuth2/OIDC client flow (for example, Insomnia or your integrated application). Do not paste access tokens into this page.</p></article>
+      <article class="card"><div class="number">02 / REQUEST</div><h3>Send an authorized request</h3><p>Include the token in the <code>Authorization: Bearer</code> header on protected API requests.</p></article>
+      <article class="card"><div class="number">03 / DATA</div><h3>Access your resources</h3><p>Dataset and job operations remain subject to server-side authentication and authorization.</p></article>
     </div>
-    {% else %}<div class="toolbox"><h3>Sign in to use file tools</h3><p class="subtle">File operations require authentication on this deployment. Your API client may instead use the supported bearer-token flow.</p><a class="btn primary" href="/login">Log in</a></div>{% endif %}
-    <p class="note">For browser forms, ensure your deployment supports cookie-based authentication for these endpoints. A login session does not necessarily replace the bearer token required by API clients.</p>
+    <div class="toolbox"><h3>Example API request</h3><pre style="white-space:pre-wrap;overflow-wrap:anywhere"><code>curl -H "Authorization: Bearer $ACCESS_TOKEN" \
+  "https://YOUR-CAESAR-HOST/caesar/api/v1.0/jobs"</code></pre>
+    <p class="note">Replace <code>YOUR-CAESAR-HOST</code> with your server host name, and set <code>ACCESS_TOKEN</code> in your shell using your authorized Keycloak client. Never place tokens in URL query parameters.</p></div>
+  </section>
+  <section id="tools"><h2>File utilities</h2><p class="section-intro">Upload and UUID-based download endpoints are available through the API.</p>
+    {% if aai_enabled %}
+    <div class="toolbox"><h3>Use an authenticated API client</h3><p class="subtle">File operations require a bearer token in this deployment. Use Insomnia, curl, or another OAuth2-capable client rather than an ordinary HTML form.</p>
+    <p><span class="endpoint">POST /caesar/api/v1.0/upload</span> &nbsp; <span class="endpoint">GET /caesar/api/v1.0/download?uuid=...</span></p>
+    <a class="btn primary" href="#authentication">How authentication works</a></div>
+    {% else %}
+    {% with messages = get_flashed_messages() %}{% if messages %}<div class="flash" role="status"><ul>{% for message in messages %}<li>{{ message }}</li>{% endfor %}</ul></div>{% endif %}{% endwith %}
+    <div class="tools">
+      <div class="toolbox"><h3>Upload a file</h3><p class="subtle">Choose a permitted file format.</p><form method="post" action="{{ url_for('upload.upload_file') }}" enctype="multipart/form-data"><label for="upload-file">File</label><input id="upload-file" type="file" name="file" required><button class="btn primary" type="submit" style="margin-top:18px">Upload file</button></form></div>
+      <div class="toolbox"><h3>Download by UUID</h3><p class="subtle">Retrieve an uploaded file using its UUID.</p><form method="post" action="{{ url_for('download_id.download_id') }}"><label for="download-uuid">File UUID</label><input id="download-uuid" type="text" name="uuid" placeholder="Enter a file UUID" required autocomplete="off"><button class="btn primary" type="submit" style="margin-top:18px">Download file</button></form></div>
+    </div>
+    {% endif %}
   </section>
 </main>
-<footer><div class="wrap"><span>CAESAR-REST · Scientific processing services</span><span>{% if username %}Signed in as {{ username }}{% elif aai_enabled %}Not signed in{% else %}Authentication disabled for this deployment{% endif %} · <a href="https://github.com/inaf-oact-ai/caesar-rest" target="_blank" rel="noopener noreferrer">Source code</a></span></div></footer>
+<footer><div class="wrap"><span>CAESAR-REST · Scientific processing services</span><span>{% if aai_enabled %}Bearer-token authentication enabled{% else %}Authentication disabled for this deployment{% endif %} · <a href="https://github.com/inaf-oact-ai/caesar-rest" target="_blank" rel="noopener noreferrer">Source code</a></span></div></footer>
 </body>
 </html>

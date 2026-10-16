@@ -62,14 +62,13 @@ def index():
 
 
 @index_bp.route('/login')
-@custom_require_login
 def login():
 	aai_enabled = bool(current_app.config['USE_AAI'])
 	has_oidc = (oidc is not None)
 	logger.debug('use_aai? %d has_oidc? %d' % (aai_enabled, has_oidc))
-	if aai_enabled and has_oidc:
-		return redirect('/', code=302)
-	return redirect('/', code=302)
+	# This service authenticates protected API endpoints with bearer tokens.
+	# /login is kept as a compatibility alias, not an interactive OIDC flow.
+	return redirect('/#authentication', code=302)
 
 #@index_bp.route('/logout')
 #def logout():
@@ -90,5 +89,4 @@ def logout():
 	"""Perform local logout by removing the session cookie."""
 	if current_app.config['USE_AAI'] and oidc is not None:
 		oidc.logout()
-	return redirect('/', code=302)		
-
+	return redirect('/', code=302)
