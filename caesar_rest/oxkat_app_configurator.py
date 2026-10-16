@@ -49,7 +49,7 @@ class OxkatAppConfigurator(AppConfigurator):
 			"and determine calibration targets and observation metadata. "
 			"Other calibration/imaging stages are reserved for future releases."
 		)
-		self.tool_categories = ["measurement-set", "radio-interferometry"]
+		self.tool_categories = ["measurement-set"]
 		self.input_requirements = {
 			"supported_formats": ["ms"],
 			"expected_data": (
