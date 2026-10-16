@@ -14,8 +14,17 @@ from caesar_rest import mongo
 
 
 IDENTIFIER_RE = re.compile(r'^[A-Za-z][A-Za-z0-9_-]{0,63}$')
-RUN_STATES = {'PLANNED', 'SUBMITTED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED'}
-
+RUN_STATES = {
+	'PLANNED',
+	'SUBMITTING',
+	'SUBMITTED',
+	'SUBMISSION_FAILED',
+	'SUBMISSION_UNCERTAIN',
+	'RUNNING',
+	'COMPLETED',
+	'FAILED',
+	'CANCELLED'
+}
 
 class PipelineError(Exception):
 	"""A validation or state error with an HTTP status code."""

@@ -39,7 +39,7 @@ from werkzeug.utils import secure_filename
 from celery import states
 from celery.task.control import revoke
 
-# Import Celery app
+# Import caesar modules
 from caesar_rest.app import celery as celery_app
 from caesar_rest import workers
 from caesar_rest.workers import background_task
@@ -50,9 +50,9 @@ from caesar_rest import mongo
 from caesar_rest import dataset_registry
 from caesar_rest import jobmgr_kube
 from caesar_rest import jobmgr_slurm
+from caesar_rest import pipeline_job_binding
 
 # Get logger
-#logger = logging.getLogger(__name__)
 from caesar_rest import logger
 
 ##############################
@@ -70,26 +70,31 @@ job_preview_bp = Blueprint('job_preview', __name__, url_prefix='/caesar/api/v1.0
 job_preview_file_bp = Blueprint('job_preview_file', __name__, url_prefix='/caesar/api/v1.0')
 dataset_names_bp = Blueprint('dataset_names', __name__, url_prefix='/caesar/api/v1.0')
 
+##################################
+##       HELPERS
+##################################
+def safe_fail_pipeline_submission(claim, message, uncertain=False, job_id=None):
+	"""Record pipeline submission failure without masking the original error."""
+
+	if claim is None:
+		return
+
+	try:
+		pipeline_job_binding.fail_submission(
+			claim, message, uncertain=uncertain, job_id=job_id
+		)
+	except Exception as exc:
+		logger.error(
+			"Failed to record pipeline submission failure for run %s (err=%s)!" %
+			(claim.run_id, str(exc)),
+			action="submitjob",
+			user=claim.owner
+		)
+
 
 #=================================
 #===      DATASETS
 #=================================
-#@job_bp.route('/datasets',methods=['GET'])
-#@custom_require_login
-#def get_dataset_names():
-#	""" Get supported datasets (with paths not empty) """
-
-#	datasets= current_app.config['DATASETS']
-#	dataset_names= {}
-#	for key, value in datasets.items():
-#		if value["path"]=="":
-#			continue
-#		dataset_names[key]= value.copy()
-#		del dataset_names[key]["path"]
-	
-#	return make_response(jsonify(dataset_names), 200)
-
-
 @job_bp.route('/datasets', methods=['GET'])
 @custom_require_login
 def get_dataset_names():
@@ -131,12 +136,6 @@ def submit_job():
 	res['app']= ''
 	res['job_id']= ''
 	res['submit_date']= ''
-
-	# - Get aai info
-	#username= 'anonymous'
-	#if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info):
-	#	email= g.oidc_token_info['email']
-	#	username= utils.sanitize_username(email)
 
 	# - Get authenticated user storage identifier
 	username = utils.get_storage_username()
@@ -209,27 +208,84 @@ def submit_job():
 	cmd_args= ''
 	if cmd_arg_list:
 		cmd_args= ' '.join(cmd_arg_list)
+		
+	# - Optional pipeline-run context.
+	#   Pipeline features are activated only when explicitly requested.
+	pipeline_claim = None
+	pipeline_id = req_data.get('pipeline_id')
+	run_id = req_data.get('run_id')
+
+	if pipeline_id is not None or run_id is not None:
+		if pipeline_id is None or run_id is None:
+			res['state'] = 'ABORTED'
+			res['status'] = 'pipeline_id and run_id must be provided together'
+			return make_response(jsonify(res), 400)
+
+		try:
+			pipeline_claim = pipeline_job_binding.claim_run(
+				username, pipeline_id, run_id, app_name, job_options
+			)
+		except pipeline_job_binding.manager.PipelineError as exc:
+			res['state'] = 'ABORTED'
+			res['status'] = str(exc)
+			return make_response(jsonify(res), exc.status)
 	
 	# - Set job top directory
 	job_top_dir= current_app.config['JOB_DIR'] + '/' + username
 
-	# - Submit task
-	submit_res= None
-	if job_scheduler=='celery':
-		submit_res= submit_job_celery(app_name, cmd, cmd_args, job_top_dir, username, mongo_dbhost, mongo_dbport, mongo_dbname)
-	
-	elif job_scheduler=='kubernetes':
-		submit_res= submit_job_kubernetes(app_name, cmd_args, job_top_dir, username, run_opts)
 
-	elif job_scheduler=='slurm':
-		submit_res= submit_job_slurm(app_name, inputfile, cmd_args, job_top_dir, username, run_opts)
+	# - Submit the job
+	submit_res = None
+	try:
+		if job_scheduler == 'celery':
+			submit_res = submit_job_celery(
+				app_name, cmd, cmd_args, job_top_dir, username,
+				mongo_dbhost, mongo_dbport, mongo_dbname
+			)
+
+		elif job_scheduler == 'kubernetes':
+			submit_res = submit_job_kubernetes(
+				app_name, cmd_args, job_top_dir, username, run_opts
+			)
+
+		elif job_scheduler == 'slurm':
+			submit_res = submit_job_slurm(
+				app_name, inputfile, cmd_args, job_top_dir, username, run_opts
+			)
+
+	except Exception as exc:
+		logger.error(
+			"Exception while submitting job to scheduler %s (err=%s)!" %
+			(job_scheduler, str(exc)),
+			action="submitjob",
+			user=username
+		)
+
+		safe_fail_pipeline_submission(
+			pipeline_claim, str(exc), uncertain=True
+		)	
+
+		res['state'] = 'ABORTED'
+		res['status'] = 'Exception while submitting job to scheduler!'
+		return make_response(jsonify(res), 500)
 
 	if submit_res is None:
-		logger.warn("Failed to submit job to scheduler %s!" % job_scheduler, action="submitjob", user=username)
-		res['state']= 'ABORTED'
-		res['status']= 'Job failed to be submitted!'
-		return make_response(jsonify(res),500)
+		logger.warn(
+			"Failed to submit job to scheduler %s!" % job_scheduler,
+			action="submitjob",
+			user=username
+		)
 
+		safe_fail_pipeline_submission(
+			pipeline_claim, 'Scheduler submission returned no result',
+			uncertain=True
+		)
+
+		res['state'] = 'ABORTED'
+		res['status'] = 'Job failed to be submitted!'
+		return make_response(jsonify(res), 500)
+		
+	# - Retrieve job info
 	submit_date= submit_res['submit_date']
 	job_id= submit_res['job_id']
 	pid= submit_res['pid']
@@ -253,6 +309,13 @@ def submit_job():
 		"exit_code": -1
 	}
 
+	# - Add pipeline metadata only for pipeline-associated jobs.
+	#   Standalone jobs retain the original MongoDB structure.
+	if pipeline_claim is not None:
+		job_obj['pipeline_id'] = pipeline_id
+		job_obj['run_id'] = run_id
+
+	# - Create/retrieve job collection for user
 	collection_name= username + '.jobs'
 
 	try:
@@ -272,8 +335,34 @@ def submit_job():
 		logger.warn("Job %s submitted but failed to be registered in DB!" % job_id, action="submitjob", user=username)
 		res['state']= 'PENDING'
 		res['status']= 'WARN: Job submitted but failed to be registered in DB!'
+		
+		safe_fail_pipeline_submission(
+			pipeline_claim,
+			'Job submitted but MongoDB job registration failed',
+			uncertain=True,
+			job_id=job_id
+		)
+			
 		return make_response(jsonify(res),500)
 
+	# - Associate the submitted job with its pipeline run.
+	if pipeline_claim is not None:
+		try:
+			pipeline_job_binding.finish_submission(
+				pipeline_claim, job_id, job_scheduler, pid
+			)
+		except Exception as exc:
+			logger.error(
+				"Job %s submitted but pipeline association failed (err=%s)!" %
+				(job_id, str(exc)),
+				action="submitjob",
+				user=username
+			)
+
+			res['job_id'] = job_id
+			res['state'] = 'PENDING'
+			res['status'] = 'Job submitted; pipeline association requires reconciliation'
+			return make_response(jsonify(res), 202)
 
 	# - Fill response
 	res['job_id']= job_id
