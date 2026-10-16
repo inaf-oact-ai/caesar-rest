@@ -10,7 +10,6 @@ import datetime
 import logging
 import numpy as np
 import subprocess
-import json
 import ast
 import yaml
 
@@ -47,21 +46,25 @@ class CaesarAppConfigurator(AppConfigurator):
 
 		# - Describe app
 		self.description = (
-			""
+			"Run Caesar source finder tool on radio astronomical images to extract point-like/compact and extended sources. "
+			#"The tool supports both point-like/compact and extended source extraction. "
+			"The tool also supports characterization of extracted compact sources, including component identification and measurement of source/component parameters (flux density, position, extension, morphological flags) through 2D gaussian mixture fitting. "
+			#"The app expects input image-like astronomical data, in FITS format. "
 		)
 		
+		self.tool_categories= ["image"]
+		
 		self.input_requirements = {
-			"supported_formats": ["uid", "abspath", "dataset"],
-			"expected_data": "TBD",
-			"notes": [
-				"TBD",
-				"TBD"
-			]
+			"expected_data": "Single radio-continuum astronomical image",
+			"supported_formats": ["fits"],
+			"notes": [],
 		}
 		
 		self.limitations = [
-			"TBD",
-			"TBD"
+			"Compact source detection accuracy depends on background estimation parameters and detection thresholds.",
+			"Extended source detection accuracy depends on background estimation parameters and on the extended source detection algorithm chosen."
+			"Processing of very large images (>10000 pixels) is supported but it may be computationally expensive unless the tiling and parallel run mode is activated (see options).",
+			"The app can be used with input images from different astronomical domains (e.g. infrared) but we anticipate sub-optimal performance as the tool was specifically tested on radio images and relative image metadata only."
 		]
 
 		# - Define dictionary with allowed options
@@ -74,65 +77,76 @@ class CaesarAppConfigurator(AppConfigurator):
 			'save-fits' : Option(
 				name='save-fits', 
 				description='Save maps in FITS format (default: ROOT format)', 
-				category='OUTPUT'
+				category='OUTPUT',
+				default_value=False
 			),
 			'save-inputmap' : Option(
 				name='save-inputmap', 
 				description='Save input map in output file', 
-				category='OUTPUT'
+				category='OUTPUT',
+				default_value=False
 			),
 			'save-bkgmap' : Option(
 				name='save-bkgmap', 
 				description='Save bkg map in output file', 
-				category='OUTPUT'
+				category='OUTPUT',
+				default_value=False
 			),
 			'save-rmsmap' : Option(
 				name='save-rmsmap', 
 				description='Save rms map in output file', 
-				category='OUTPUT'
+				category='OUTPUT',
+				default_value=False
 			),
 			'save-significancemap' : Option(
 				name='save-significancemap', 
 				description='Save significance map in output file', 
-				category='OUTPUT'
+				category='OUTPUT',
+				default_value=False
 			),
 			'save-residualmap' : Option(
 				name='save-residualmap', 
 				description='Save residual map in output file', 
-				category='OUTPUT'
+				category='OUTPUT',
+				default_value=False
 			),
 			'save-saliencymap' : Option(
 				name='save-saliencymap', 	
 				description='Save saliency map in output file', 
-				category='OUTPUT'
+				category='OUTPUT',
+				default_value=False
 			),
 			'save-segmentedmap' : Option(
 				name='save-segmentedmap', 
 				description='Save segmented map in output file', 
-				category='OUTPUT'
+				category='OUTPUT',
+				default_value=False
 			),
-			#'save-regions' : Option(
-			#	name='save-regions', 
-			#	description='Save DS9 regions', 
-			#	category='OUTPUT'
-			#),
+			'save-regions' : Option(
+				name='save-regions', 
+				description='Save DS9 regions', 
+				category='OUTPUT',
+				default_value=True
+			),
+			'save-summaryplot' : Option(
+				name='save-summaryplot', 
+				description='Save summary plot image+detections', 
+				category='OUTPUT',
+				default_value=True
+			),
+			'save-catalog-to-json' : Option(
+				name='save-catalog-to-json', 
+				description='Save catalog of detected sources in JSON format', 
+				category='OUTPUT',
+				default_value=True
+			),
 			'convertregionstowcs' : Option(
 				name='convertregionstowcs', 
 				description='Save DS9 regions in WCS format', 
 				category='OUTPUT', 
-				advanced=True
+				advanced=True,
+				default_value=False
 			),
-			#'regionwcs' : ValueOption(
-			#	name='regionwcs',
-			#	value='',
-			#	value_type=int, 
-			#	description='DS9 region WCS output format (0=J2000,1=B1950,2=GALACTIC) (default=0)', 
-			#	category='OUTPUT', 
-			#	advanced=True,
-			#	default_value=0,
-			#	min_value=0,
-			#	max_value=2
-			#),
 			'regionwcs' : EnumValueOption(
 				name='regionwcs',
 				value='',
@@ -149,7 +163,8 @@ class CaesarAppConfigurator(AppConfigurator):
 			'read-subimg' : Option(
 				name='read-subimg', 
 				description='Read sub-image of input image in [xmin,xmax] [ymin,ymax] range (default=read full image)',
-				category='IMGREAD'
+				category='IMGREAD',
+				default_value=False
 			),
 			'xmin' : ValueOption(
 				name='xmin',
@@ -197,7 +212,8 @@ class CaesarAppConfigurator(AppConfigurator):
 				name='no-parallelmedian', 
 				description='Switch off parallel median algorithm',
 				category='IMGSTATS',
-				advanced=True
+				advanced=True,
+				default_value=False
 			),
 
 			# == BKG OPTIONS ==		
@@ -248,18 +264,9 @@ class CaesarAppConfigurator(AppConfigurator):
 			'globalbkg' : Option(
 				name='globalbkg', 
 				description='Use global bkg (default: use local bkg)',
-				category='IMGBKG'	
+				category='IMGBKG',
+				default_value=False
 			),
-			#'bkgestimator' : ValueOption(
-			#	name='bkgestimator',
-			#	value='',
-			#	value_type=int, 
-			#	description='Stat estimator used for bkg (1=Mean,2=Median,3=BiWeight,4=ClippedMedian) (default=2)',
-			#	category='IMGBKG',
-			#	default_value=2,
-			#	min_value=1,
-			#	max_value=4
-			#),
 			'bkgestimator' : EnumValueOption(
 				name='bkgestimator',
 				value='',
@@ -272,7 +279,8 @@ class CaesarAppConfigurator(AppConfigurator):
 			'bkgboxpix': Option(
 				name='bkgboxpix', 
 				description='Assume box size option expressed in pixels (default: multiple of beam size)',
-				category='IMGBKG'
+				category='IMGBKG',
+				default_value=False
 			), 
 			'bkgbox' : ValueOption(
 				name='bkgbox',
@@ -298,13 +306,15 @@ class CaesarAppConfigurator(AppConfigurator):
 				name='no-bkg2ndpass', 
 				description='Do not perform a 2nd pass in bkg estimation',
 				category='IMGBKG',
-				advanced=True
+				advanced=True,
+				default_value=False
 			),
 			'bkgskipoutliers' : Option(
 				name='bkgskipoutliers', 
 				description='Remove bkg outliers (blobs above seed thr) when estimating bkg',
 				category='IMGBKG',
-				advanced=True
+				advanced=True,
+				default_value=False
 			),
 			'sourcebkgboxborder' : ValueOption(
 				name='sourcebkgboxborder',
@@ -322,7 +332,8 @@ class CaesarAppConfigurator(AppConfigurator):
 			'no-compactsearch' : Option(
 				name='no-compactsearch', 
 				description='Do not search compact sources',
-				category='COMPACT-SOURCES'
+				category='COMPACT-SOURCES',
+				default_value=False
 			),
 			'npixmin' : ValueOption(
 				name='npixmin',
@@ -350,7 +361,7 @@ class CaesarAppConfigurator(AppConfigurator):
 				value_type=float, 
 				description='Merge threshold (in nsigmas) used in flood-fill algo',
 				category='COMPACT-SOURCES',
-				default_value=2.6,
+				default_value=2.5,
 				min_value=0,
 				max_value=10000
 			),
@@ -358,9 +369,9 @@ class CaesarAppConfigurator(AppConfigurator):
 				name='compactsearchiters',
 				value='',
 				value_type=int, 
-				description='Maximum number of compact source search iterations',
+				description='Maximum number of compact source search iterations. Increase this to detect more fainter sources at the cost of also detecting false sources or artefacts.',
 				category='COMPACT-SOURCES',
-				default_value=1,
+				default_value=2,
 				min_value=0,
 				max_value=100
 			),
@@ -378,15 +389,17 @@ class CaesarAppConfigurator(AppConfigurator):
 			# == COMPACT SOURCE SELECTION OPTIONS ==
 			'selectsources' : Option(
 				name='selectsources', 
-				description='Apply selection to compact sources found',
+				description='Apply selection to compact sources found. Set to true if interested in detecting point-like sources.',
 				category='COMPACT-SOURCES',
-				subcategory='SELECTION'
+				subcategory='SELECTION',
+				default_value=False
 			),
 			'no-boundingboxcut' : Option(
 				name='no-boundingboxcut', 
-				description='Do not apply bounding box cut',
+				description='If selectsources is enabled, do not apply bounding box cut',
 				category='COMPACT-SOURCES',
-				subcategory='SELECTION'
+				subcategory='SELECTION',
+				default_value=False
 			),
 			'minboundingbox' : ValueOption(
 				name='minboundingbox',
@@ -401,10 +414,11 @@ class CaesarAppConfigurator(AppConfigurator):
 			),
 			'no-circratiocut' : Option(
 				name='no-circratiocut', 
-				description='Do not apply circular ratio parameter cut',	
+				description='If selectsources is enabled, do not apply circular ratio parameter cut',	
 				category='COMPACT-SOURCES',
 				subcategory='SELECTION',
-				advanced=True
+				advanced=True,
+				default_value=False
 			),
 			'circratiothr' : ValueOption(
 				name='circratiothr',
@@ -420,10 +434,11 @@ class CaesarAppConfigurator(AppConfigurator):
 			),
 			'no-elongationcut' : Option(
 				name='no-elongationcut', 
-				description='Do not apply elongation parameter cut',
+				description='If selectsources is enabled, do not apply elongation parameter cut',
 				category='COMPACT-SOURCES',
 				subcategory='SELECTION',
-				advanced=True
+				advanced=True,
+				default_value=False
 			),
 			'elongationthr' : ValueOption(
 				name='elongationthr',
@@ -439,10 +454,11 @@ class CaesarAppConfigurator(AppConfigurator):
 			),
 			'ellipsearearatiocut' : Option(
 				name='ellipsearearatiocut', 
-				description='Apply ellipse area ratio parameter cut',
+				description='If selectsources is enabled, apply ellipse area ratio parameter cut',
 				category='COMPACT-SOURCES',
 				subcategory='SELECTION',
-				advanced=True
+				advanced=True,
+				default_value=False
 			),
 			'ellipsearearatiominthr' : ValueOption(
 				name='ellipsearearatiominthr',
@@ -470,9 +486,10 @@ class CaesarAppConfigurator(AppConfigurator):
 			),
 			'maxnpixcut' : Option(
 				name='maxnpixcut', 
-				description='Apply max pixels cut (NB: source below this thr passes the point-like cut)',
+				description='If selectsources is enabled, apply max pixels cut (NB: source below this thr passes the point-like cut)',
 				category='COMPACT-SOURCES',
-				subcategory='SELECTION'
+				subcategory='SELECTION',
+				default_value=False
 			),
 			'maxnpix' : ValueOption(
 				name='maxnpix',
@@ -487,9 +504,10 @@ class CaesarAppConfigurator(AppConfigurator):
 			),
 			'no-nbeamscut' : Option(
 				name='no-nbeamscut', 
-				description='Use number of beams in source cut',
+				description='If selectsources is enabled, do not apply the cut on the number of beams contained in a source',
 				category='COMPACT-SOURCES',
-				subcategory='SELECTION'
+				subcategory='SELECTION',
+				default_value=False
 			),
 			'nbeamsthr' : ValueOption(
 				name='nbeamsthr',
@@ -498,7 +516,7 @@ class CaesarAppConfigurator(AppConfigurator):
 				description='nBeams threshold (sources passes point-like cut if nBeams<thr)',
 				category='COMPACT-SOURCES',
 				subcategory='SELECTION',
-				default_value=3,
+				default_value=10,
 				min_value=0.,
 				max_value=1000.
 			),
@@ -507,21 +525,11 @@ class CaesarAppConfigurator(AppConfigurator):
 			# == COMPACT NESTED SOURCE OPTIONS ==
 			'no-nestedsearch' : Option(
 				name='no-nestedsearch', 
-				description='Do not search nested sources',
+				description='Do not search for sources nested inside the sources previously extracted with the iterative flood-fill detection method.',
 				category='COMPACT-SOURCES',
-				subcategory='NESTED-SOURCES'
+				subcategory='NESTED-SOURCES',
+				default_value=True
 			),
-			#'blobmaskmethod' : ValueOption(
-			#	name='blobmaskmethod',
-			#	value='',
-			#	value_type=int, 
-			#	description='Blob mask method (1=gaus smooth+Laplacian,2=multi-scale LoG) (default=2)',
-			#	category='COMPACT-SOURCES',
-			#	subcategory='NESTED-SOURCES',
-			#	default_value=2,
-			#	min_value=1,
-			#	max_value=2
-			#),
 			'blobmaskmethod' : EnumValueOption(
 				name='blobmaskmethod',
 				value='',
@@ -540,7 +548,7 @@ class CaesarAppConfigurator(AppConfigurator):
 				description='Source area/beam thr to add nested sources (e.g. npix>thr*beamArea). NB: thr=0 means always if searchNestedSources is enabled',
 				category='COMPACT-SOURCES',
 				subcategory='NESTED-SOURCES',
-				default_value=5.,
+				default_value=10.,
 				min_value=0.,
 				max_value=1000000.
 			),
@@ -651,29 +659,19 @@ class CaesarAppConfigurator(AppConfigurator):
 			# == SOURCE FITTING OPTIONS ==
 			'fitsources' : Option(
 				name='fitsources', 
-				description='Fit compact point-like sources found',
+				description='Fit compact point-like sources found. Enable this option for measuring compact source parameters (flux, position, extension).',
 				category='COMPACT-SOURCES',
-				subcategory='FITTING'
+				subcategory='FITTING',
+				default_value=False
 			),
 			'fit-usethreads' : Option(
 				name='fit-usethreads', 
 				description='Enable multithread in source fitting (NB: use Minuit2 minimizer if enabled)',
 				category='COMPACT-SOURCES',
 				subcategory='FITTING',
-				advanced=True
+				advanced=True,
+				default_value=True # False previously
 			),
-			#'fit-minimizer' : ValueOption(
-			#	name='fit-minimizer',
-			#	value='',
-			#	value_type=str, 
-			#	description='Fit minimizer {Minuit,Minuit2} (default=Minuit2)',
-			#	category='COMPACT-SOURCES',
-			#	subcategory='FITTING',
-			#	advanced=True,
-			#	default_value='Minuit2',
-			#	min_value='',
-			#	max_value=''
-			#),
 			'fit-minimizer' : EnumValueOption(
 				name='fit-minimizer',
 				value='',
@@ -685,18 +683,6 @@ class CaesarAppConfigurator(AppConfigurator):
 				default_value='Minuit2',
 				allowed_values=['Minuit','Minuit2']
 			),
-			#'fit-minimizeralgo' : ValueOption(
-			#	name='fit-minimizeralgo',
-			#	value='',
-			#	value_type=str, 
-			#	description='Fit minimizer algo {migrad,simplex,minimize,scan,fumili (Minuit2)} (default=minimize)',
-			#	category='COMPACT-SOURCES',
-			##	subcategory='FITTING',
-			#	advanced=True,
-			#	default_value='minimize',
-			#	min_value='',
-			#	max_value=''
-			#),
 			'fit-minimizeralgo' : EnumValueOption(
 				name='fit-minimizeralgo',
 				value='',
@@ -708,7 +694,6 @@ class CaesarAppConfigurator(AppConfigurator):
 				default_value='minimize',
 				allowed_values=['migrad','simplex','minimize','scan','fumili']
 			),
-
 			'fit-printlevel' : ValueOption(
 				name='fit-printlevel',
 				value='',
@@ -740,7 +725,7 @@ class CaesarAppConfigurator(AppConfigurator):
 				description='Maximum number of beams for fitting if compact source',
 				category='COMPACT-SOURCES',
 				subcategory='FITTING',
-				default_value=20,
+				default_value=100,
 				min_value=0,
 				max_value=100000
 			),
@@ -748,7 +733,7 @@ class CaesarAppConfigurator(AppConfigurator):
 				name='fit-maxcomponents',
 				value='',
 				value_type=int, 
-				description='Maximum number of components fitted in a blob',
+				description='Maximum number of components fitted in a blob. Reduce it to limit spurious components when fitting diffuse/extended sources.',
 				category='COMPACT-SOURCES',
 				subcategory='FITTING',
 				default_value=3,
@@ -760,31 +745,35 @@ class CaesarAppConfigurator(AppConfigurator):
 				description='Initialize fit components to nested sources found in source',
 				category='COMPACT-SOURCES',
 				subcategory='FITTING',
-				advanced=True
+				advanced=True,
+				default_value=False
 			),
 			'fit-freebkg' : Option(
 				name='fit-freebkg', 
 				description='Fit with bkg offset parameter free to vary',
 				category='COMPACT-SOURCES',
-				subcategory='FITTING'
+				subcategory='FITTING',
+				default_value=False
 			),
 			'fit-estimatedbkg' : Option(
 				name='fit-estimatedbkg', 
-				description='Set bkg par starting value to estimated bkg (average over source pixels by default, box around source if --fit-estimatedboxbkg is given) (default: use fixed bkg start value)',
+				description='Set bkg par starting value to the estimated bkg (average over source pixels by default, box around source if --fit-usebkgboxestimate is given)',
 				category='COMPACT-SOURCES',
-				subcategory='FITTING'
+				subcategory='FITTING',
+				default_value=True # previously set to False
 			),
 			'fit-usebkgboxestimate' : Option(
 				name='fit-usebkgboxestimate', 
-				description='Set bkg par starting value to estimated bkg (from box around source)',
+				description='Set bkg par starting value to the estimated bkg in a box around source',
 				category='COMPACT-SOURCES',
-				subcategory='FITTING'
+				subcategory='FITTING',
+				default_value=False
 			),
 			'fit-bkg' : ValueOption(
 				name='fit-bkg',
 				value='',
 				value_type=float, 
-				description='Bkg par starting value (NB: ineffective when -fit-estimatedbkg is enabled)',
+				description='Bkg par starting value (NB: ineffective when --fit-estimatedbkg is enabled)',
 				category='COMPACT-SOURCES',
 				subcategory='FITTING',
 				default_value=0.,
@@ -798,16 +787,17 @@ class CaesarAppConfigurator(AppConfigurator):
 				description='Limit amplitude range par (Speak*(1+-FIT_AMPL_LIMIT))',
 				category='COMPACT-SOURCES',
 				subcategory='FITTING',
-				default_value=0.3,
+				default_value=0.5,
 				min_value=0.,
 				max_value=2.
 			),
 			'prefit-freeampl' : Option(
 				name='prefit-freeampl', 	
-				description='Set free amplitude par in pre-fit',
+				description='Set amplitude as free par in pre-fit. If false, keep it fixed.',
 				category='COMPACT-SOURCES',
 				subcategory='FITTING',
-				advanced=True
+				advanced=True,
+				default_value=False
 			),
 			'fit-sigmalimit' : ValueOption(
 				name='fit-sigmalimit',
@@ -816,7 +806,7 @@ class CaesarAppConfigurator(AppConfigurator):
 				description='Gaussian sigma limit around psf or beam (Bmaj*(1+-FIT_SIGMA_LIMIT))',
 				category='COMPACT-SOURCES',
 				subcategory='FITTING',
-				default_value=0.3,
+				default_value=0.5,
 				min_value=0.,
 				max_value=2.
 			),
@@ -827,7 +817,7 @@ class CaesarAppConfigurator(AppConfigurator):
 				description='Gaussian theta limit around psf or beam in degrees (e.g. Bpa +- FIT_THETA_LIMIT)',
 				category='COMPACT-SOURCES',
 				subcategory='FITTING',
-				default_value=90.,
+				default_value=360.,
 				min_value=0.,
 				max_value=360.
 			),
@@ -835,25 +825,29 @@ class CaesarAppConfigurator(AppConfigurator):
 				name='fit-nobkglimits', 
 				description='Do not apply limits in bkg offset parameter in fit',
 				category='COMPACT-SOURCES',
-				subcategory='FITTING'
+				subcategory='FITTING',
+				default_value=False
 			),
 			'fit-noampllimits' : Option(
 				name='fit-noampllimits', 
 				description='Do not apply limits in Gaussian amplitude parameters in fit',
 				category='COMPACT-SOURCES',
-				subcategory='FITTING'
+				subcategory='FITTING',
+				default_value=False
 			),
 			'fit-nosigmalimits' : Option(
 				name='fit-nosigmalimits', 
 				description='Do not apply limits in Gaussian sigma parameters in fit',
 				category='COMPACT-SOURCES',
-				subcategory='FITTING'
+				subcategory='FITTING',
+				default_value=False
 			),
 			'fit-noposlimits' : Option(
 				name='fit-noposlimits', 
 				description='Do not apply limits in Gaussian mean parameters in fit',
 				category='COMPACT-SOURCES',
-				subcategory='FITTING'
+				subcategory='FITTING',
+				default_value=False
 			),
 			'fit-poslimit' : ValueOption(
 				name='fit-poslimit',
@@ -868,9 +862,10 @@ class CaesarAppConfigurator(AppConfigurator):
 			),
 			'prefit-freepos' : Option(
 				name='prefit-freepos', 
-				description='Set free centroid pars in pre-fit (default: fixed)',
+				description='Set centroid as a free par in pre-fit. If False, keep it fixed.',
 				category='COMPACT-SOURCES',
-				subcategory='FITTING'
+				subcategory='FITTING',
+				default_value=False
 			),
 			'fit-nothetalimits' : Option(
 				name='fit-nothetalimits', 
@@ -883,28 +878,32 @@ class CaesarAppConfigurator(AppConfigurator):
 				description='Fit with sigma parameters fixed to start value (beam bmaj/bmin) (default: fit with sigma free and constrained)',
 				category='COMPACT-SOURCES',
 				subcategory='FITTING',
-				advanced=True
+				advanced=True,
+				default_value=False
 			),
 			'prefit-fixsigma' : Option(
 				name='prefit-fixsigma', 
-				description='Fix sigma parameters in pre-fit (default: free)',
+				description='Fix sigma parameters in pre-fit. If False, keep them free.',
 				category='COMPACT-SOURCES',
 				subcategory='FITTING',
-				advanced=True
+				advanced=True,
+				default_value=False
 			),
 			'fit-fixtheta' : Option(
 				name='fit-fixtheta', 
 				description='Fit with theta parameters fixed to start value (beam bpa) (default: fit with theta free and constrained)',
 				category='COMPACT-SOURCES',
 				subcategory='FITTING',
-				advanced=True
+				advanced=True,
+				default_value=False
 			),
 			'prefit-fixtheta' : Option(
 				name='prefit-fixtheta', 
-				description='Fix theta parameter in pre-fit (default: free)',
+				description='Fix theta parameter in pre-fit. If False, keep it free.',
 				category='COMPACT-SOURCES',
 				subcategory='FITTING',
-				advanced=True
+				advanced=True,
+				default_value=False
 			),
 			'fit-peakminkern' : ValueOption(
 				name='fit-peakminkern',
@@ -985,7 +984,7 @@ class CaesarAppConfigurator(AppConfigurator):
 				category='COMPACT-SOURCES',
 				subcategory='FITTING',
 				advanced=True,
-				default_value=10000,
+				default_value=1000000,
 				min_value=0,
 				max_value=1000000
 			),
@@ -994,14 +993,16 @@ class CaesarAppConfigurator(AppConfigurator):
 				description='Do not use iterative fitting to try to achieve fit convergence',
 				category='COMPACT-SOURCES',
 				subcategory='FITTING',
-				advanced=True
+				advanced=True,
+				default_value=False
 			),
 			'fit-noretry' : Option(
 				name='fit-noretry', 
 				description='Do not iteratively retry fit with less components in case of failed convergence',
 				category='COMPACT-SOURCES',
 				subcategory='FITTING',
-				advanced=True
+				advanced=True,
+				default_value=False
 			),
 			'fit-nretries' : ValueOption(
 				name='fit-nretries',
@@ -1011,7 +1012,7 @@ class CaesarAppConfigurator(AppConfigurator):
 				category='COMPACT-SOURCES',
 				subcategory='FITTING',
 				advanced=True,
-				default_value=10,
+				default_value=100,
 				min_value=0,
 				max_value=100000
 			),
@@ -1032,20 +1033,23 @@ class CaesarAppConfigurator(AppConfigurator):
 				description='Run final minimizer step (e.g. HESS) to improve fit error estimates',
 				category='COMPACT-SOURCES',
 				subcategory='FITTING',	
-				advanced=True
+				advanced=True,
+				default_value=False
 			),
 			'fit-scaledatatomax' : Option(
 				name='fit-scaledatatomax', 
 				description='Scale source data to max pixel flux for fitting. Otherwise scale to mJy.',
 				category='COMPACT-SOURCES',
 				subcategory='FITTING',
-				advanced=True
+				advanced=True,
+				default_value=False
 			),
 			'fit-nochi2cut' : Option(
 				name='fit-nochi2cut', 
 				description='Do not apply reduced chi2 cut to fitted sources',
 				category='COMPACT-SOURCES',
-				subcategory='FITTING'
+				subcategory='FITTING',
+				default_value=False
 			),
 			'fit-chi2cut' : ValueOption(
 				name='fit-chi2cut',
@@ -1063,19 +1067,22 @@ class CaesarAppConfigurator(AppConfigurator):
 				description='Apply ellipse cuts to fitted sources',
 				category='COMPACT-SOURCES',
 				subcategory='FITTING',
-				advanced=True
+				advanced=True,
+				default_value=False
 			),
 
 			# == SOURCE RESIDUAL OPTIONS ==
 			'computeresiduals' : Option(
 				name='computeresiduals', 
 				description='Compute compact source residual map (after compact source search)',
-				category='IMGRES'
+				category='IMGRES',
+				default_value=False
 			),
 			'res-removenested' : Option(
 				name='res-removenested', 
 				description='When a source has nested sources, perform the source removal only on nested sources',
-				category='IMGRES'
+				category='IMGRES',
+				default_value=False
 			),
 			'res-zthr' : ValueOption(
 				name='res-zthr',
@@ -1107,16 +1114,6 @@ class CaesarAppConfigurator(AppConfigurator):
 				min_value=1,
 				max_value=1001
 			),
-			#'res-removedsourcetype' : ValueOption(
-			#	name='res-removedsourcetype',
-			#	value='',
-			#	value_type=int, 
-			#	description='Type of source dilated from the input image (-1=ALL,1=COMPACT,2=POINT-LIKE,3=EXTENDED) (default=2)',
-			#	category='IMGRES',
-			#	default_value=2,
-			#	min_value=-1,
-			#	max_value=3
-			#),
 			'res-removedsourcetype' : EnumValueOption(
 				name='res-removedsourcetype',
 				value='',
@@ -1126,16 +1123,6 @@ class CaesarAppConfigurator(AppConfigurator):
 				default_value='POINT-LIKE',
 				allowed_values=['ALL','COMPACT','POINT-LIKE','EXTENDED']
 			),
-			#'res-pssubtractionmethod' : ValueOption(
-			#	name='res-pssubtractionmethod',
-			#	value='',
-			#	value_type=int, 
-			#	description='Method used to subtract point-sources in residual map (1=DILATION, 2=FIT MODEL REMOVAL)',
-			#	category='IMGRES',
-			#	default_value=1,
-			#	min_value=1,
-			#	max_value=2
-			#),
 			'res-pssubtractionmethod' : EnumValueOption(
 				name='res-pssubtractionmethod',
 				value='',
@@ -1148,25 +1135,17 @@ class CaesarAppConfigurator(AppConfigurator):
 			'res-bkgaroundsource': Option(
 				name='res-bkgaroundsource', 
 				description='Use bkg computed around source rather than the one computed using the global/local bkg map (default=false)',	
-				category='IMGRES'
+				category='IMGRES',
+				default_value=False
 			),
 
 			# == SMOOTHING FILTER OPTIONS ==
 			'no-presmoothing' : Option(	
 				name='no-presmoothing', 
 				description='Do not smooth input/residual map before extended source search',
-				category='IMGSMOOTH'
+				category='IMGSMOOTH',
+				default_value=False
 			),
-			#'smoothfilter' : ValueOption(
-			#	name='smoothfilter',
-			#	value='',
-			#	value_type=int, 
-			#	description='Smoothing filter to be used (1=gaussian, 2=guided filter) (default=2)',
-			#	category='IMGSMOOTH',
-			#	default_value=2,
-			#	min_value=1,
-			#	max_value=2
-			#),
 			'smoothfilter' : EnumValueOption(
 				name='smoothfilter',
 				value='',
@@ -1200,19 +1179,10 @@ class CaesarAppConfigurator(AppConfigurator):
 			# == EXTENDED SOURCE SEARCH OPTIONS ==
 			'no-extendedsearch' : Option(
 				name='no-extendedsearch', 
-				description='Do not search extended sources',
-				category='EXTENDED-SOURCES'
+				description='Do not search extended sources. If False, extended sources are searched with --extsfinder selected method',
+				category='EXTENDED-SOURCES',
+				default_value=True
 			),
-			#'extsfinder' : ValueOption(
-			#	name='extsfinder',
-			#	value='',
-			#	value_type=int, 
-			#	description='Extended source search method {1=WT-thresholding,2=SPSegmentation,3=ActiveContour,4=Saliency thresholding} (default=4)',	
-			#	category='EXTENDED-SOURCES',
-			#	default_value=4,
-			#	min_value=1,
-			#	max_value=4
-			#),
 			'extsfinder' : EnumValueOption(
 				name='extsfinder',
 				value='',
@@ -1222,16 +1192,6 @@ class CaesarAppConfigurator(AppConfigurator):
 				default_value='SALIENCY-THRESH',
 				allowed_values=['WT-THRESH','SP-HIERCLUST','ACTIVE-CONTOUR','SALIENCY-THRESH']
 			),
-			#'activecontour' : ValueOption(
-			#	name='activecontour',
-			#	value='',
-			#	value_type=int, 
-			#	description='Active contour method {1=Chanvese, 2=LRAC} (default=1)',
-			#	category='EXTENDED-SOURCES',
-			#	default_value=1,
-			#	min_value=1,
-			#	max_value=2
-			#),
 			'activecontour' : EnumValueOption(
 				name='activecontour',
 				value='',
@@ -1343,20 +1303,23 @@ class CaesarAppConfigurator(AppConfigurator):
 				description='Use bkg map in saliency computation',
 				category='EXTENDED-SOURCES',
 				subcategory='SALIENCY',
-				advanced=True
+				advanced=True,
+				default_value=False
 			),
 			'saliency-usermsmap' : Option(
 				name='saliency-usermsmap', 
 				description='Use noise map in saliency computation',
 				category='EXTENDED-SOURCES',
 				subcategory='SALIENCY',
-				advanced=True
+				advanced=True,
+				default_value=False
 			),
 			'saliency-userobustpars' : Option(
 				name='saliency-userobustpars', 
 				description='Use robust pars in saliency computation',
 				category='EXTENDED-SOURCES',
-				subcategory='SALIENCY'
+				subcategory='SALIENCY',
+				default_value=False
 			),
 
 			# == ACTIVE-CONTOUR MAIN OPTIONS ==
@@ -1371,17 +1334,6 @@ class CaesarAppConfigurator(AppConfigurator):
 				min_value=1,
 				max_value=100000
 			),
-			#'ac-levelset' : ValueOption(
-			#	name='ac-levelset',
-			#	value='',
-			#	value_type=int,
-			#	description='Init level set method in active-contour algorithms (1=circle,2=checkerboard,3=saliency) (default=1)',
-			#	category='EXTENDED-SOURCES',
-			#	subcategory='ACTIVE-CONTOUR',
-			#	default_value=1,
-			#	min_value=1,
-			#	max_value=3
-			#),
 			'ac-levelset' : EnumValueOption(
 				name='ac-levelset',
 				value='',
@@ -1543,28 +1495,6 @@ class CaesarAppConfigurator(AppConfigurator):
 			),
 
 			# == RUN OPTIONS ==
-			#'run' : Option('run', description='Run the generated run script on the local shell. If disabled only run script will be generated for later run',category='RUN'),
-			#'envfile' : ValueOption('envfile','',str, description='File (.sh) with list of environment variables to be loaded by each processing node',category='RUN'),
-			#'maxfiles' : ValueOption('maxfiles','',int, description='Maximum number of input files processed in filelist (default=-1=all files)',category='RUN'),
-			#'addrunindex' : Option('addrunindex', description='Append a run index to submission script (in case of list execution) (default=no)',category='RUN'),
-			#'jobdir' : ValueOption('jobdir','',str, description='Job directory where to run (default=pwd)',category='RUN'),			
-			#'outdir' : ValueOption('outdir','',str, description='Output directory where to put run output file (default=pwd)',category='RUN'),
-			#'mpioptions' : ValueOption('mpioptions','',str, description='Options to be passed to MPI (e.g. --bind-to {none,hwthread, core, l1cache, l2cache, l3cache, socket, numa, board}) (default=none)',category='RUN'),
-			#'hostfile' : ValueOption('hostfile','',str, description='Ascii file with list of hosts used by MPI (default=no hostfile used)',category='RUN'),
-			#'containerrun' : Option('containerrun', description='Run inside Caesar container',category='RUN'),
-			#'containerimg' : ValueOption('containerimg','',str, description='Singularity container image file (.simg) with CAESAR installed software',category='RUN'),
-			#'containeroptions' : ValueOption('containeroptions','',str, description='Options to be passed to container run (e.g. -B /home/user:/home/user) (default=none)',category='RUN'),
-
-			#'loglevel' : ValueOption(
-			#	name='loglevel',
-			#	value='',
-			#	value_type=str, 
-			#	description='Logging level string {INFO, DEBUG, WARN, ERROR, OFF} (default=INFO)',
-			#	category='RUN',
-			#	default_value='INFO',
-			#	min_value='',
-			#	max_value=''
-			#),
 			'loglevel' : EnumValueOption(
 				name='loglevel',
 				value='',
@@ -1576,13 +1506,15 @@ class CaesarAppConfigurator(AppConfigurator):
 			),
 			'no-logredir' : Option(
 				name='no-logredir', 
-				description='Do not redirect logs to output file in script',
-				category='RUN'
+				description='Do not redirect logs to output file in script. If True, no log file produced and returned as output product (only internal Slurm log)',
+				category='RUN',
+				default_value=False
 			),
 			'no-mpi' : Option(
 				name='no-mpi', 
-				description='Disable MPI run (even with 1 proc)',
-				category='RUN'
+				description='Disable MPI run. If False, MPI is used (even with 1 proc).',
+				category='RUN',
+				default_value=True
 			),
 			'nproc' : ValueOption(
 				name='nproc',
@@ -1606,20 +1538,14 @@ class CaesarAppConfigurator(AppConfigurator):
 			),
 			
 			# == SFINDER SUBMISSION OPTIONS ==
-			#'submit' : Option('submit', description='Submit the script to the batch system using queue specified. Takes precedence over local run.',category='RUN'),
-			#'batchsystem' : ValueOption('batchsystem','',str, description='Name of batch system. Valid choices are {PBS,SLURM} (default=PBS)',category='RUN'),
-			#'queue' : ValueOption('queue','',str, description='Name of queue in batch system',category='RUN'),
-			#'jobwalltime' : ValueOption('jobwalltime','',str, description='Job wall time in batch system (default=96:00:00)',category='RUN'),
-			#'jobcpus' : ValueOption('jobcpus','',int, description='Number of cpu per node requested for the job (default=1)',category='RUN'),
-			#'jobnodes' : ValueOption('jobnodes','',int, description='Number of nodes requested for the job (default=1)',category='RUN'),
-			#'jobmemory' : ValueOption('jobmemory','',float, description='Memory in GB required for the job (default=4)',category='RUN'),
-			#'jobusergroup' : ValueOption('jobusergroup','',str, description='Name of job user group batch system (default=empty)',category='RUN'),
-
+			# --> NOT EXPOSED THROUGH THE API
+			
 			# == PARALLEL PROCESSING OPTIONS ==
 			'tilesplit' : Option(
 				name='tilesplit', 
 				description='Partition input image in tiles and perform distributed processing (default=no tile split)',
-				category='RUN'
+				category='RUN',
+				default_value=False
 			),
 			'tilesize' : ValueOption(
 				name='tilesize',
@@ -1644,21 +1570,387 @@ class CaesarAppConfigurator(AppConfigurator):
 			'mergeedgesources' : Option(
 				name='mergeedgesources', 
 				description='Merge sources at tile edges. NB: Used for multitile processing',
-				category='RUN'
+				category='RUN',
+				default_value=True
 			),
 			'no-mergesources' : Option(
 				name='no-mergesources', 
-				description='Disable source merging in each tile',
-				category='RUN'
+				description='If True, disable source merging in each tile',
+				category='RUN',
+				default_value=True
 			),
 
 
 		} # close dict
 
+
 		# - Define dictionary with job outputs produced
-		self.job_outputs= {
+		json_catalog_out_desc= (
+			'JSON dictionary containing list of detected sources, islands and fitted components along with their measured parameters'
+		)
 		
-		}
+		json_catalog_out_format= (
+			'JSON dictionary follows the format below: \n\n'
+			'{\n'
+			'  "metadata": {...}\n'
+			'  "sources": [\n'
+			'     {\n'
+			'       "name": "S0",\n'
+			'       ...\n'
+			'       "islands": [\n'
+			'         {\n'
+			'           "name": "S0",\n'
+			'           "Stot": 0.01,\n'
+			'           "fit_info": {\n'
+			'              "ncomponents": 1,\n'
+			'              "components": [\n'
+			'                 {\n'
+			'                    "S": 0.002,\n'
+			'                    "S_err": 0.0001,\n'
+			'                    ...\n'
+			'                 },\n'
+			'                 ...\n'
+			'              ]\n'
+			'           }\n'
+			'           ...\n'
+			'         }\n'
+			'       ]\n'
+			'     },\n'
+			'     ...\n'
+			'  ]\n'
+			'}\n'
+			'where:\n'
+			'* metadata | dict: info on the input image data parameters (taken from the FITS header), software version/tags \n'
+			'* sources | List(dict) : list length equal to the number of extracted sources, with each dictionary containing parameters for each detected source, listed below: \n'
+			'    - name | str: Source name, usually with an "S" prefix followed by an integer\n'
+			'    - iau_name | str: Source name in IAU notation\n'
+			'    - x0/y0 | float: Source centroid position in image coordinates\n'
+			'    - ra/dec | float: Source centroid position in sky WCS coordinates\n'
+			'    - class_label | str: Astronomical classification label {UNKNOWN,MULTI-CLASS,STAR,YSO,PULSAR,HII,PN,SNR,GALAXY,QSO}. Usually set to UNKNOWN\n'
+			'    - class_score | int: Astronomical classification confidence score. Set to -1 if not available\n'
+			'    - morph_label | str: Source morphology label {UNKNOWN-MORPH,COMPACT,EXTENDED,COMPACT-EXTENDED,DIFFUSE} \n'
+			'    - sourceness_label | str: Sourceness label {UNKNOWN,REAL,CANDIDATE,FALSE}\n'
+			'    - sourceness_score | int: Sourceness confidence score in range [0,1]. Set to -1 if not available \n'
+			'    - nest_level | int: Source depth level {0: parent source, 1: nested source, 2: nested of nested source, etc...}\n'
+			'    - tags | List[str]: List of source tags given (usually empty)\n'
+			'    - nislands | int: Number of source islands found inside this source\n'
+			'    - islands | List(dict): list length equal to the number of source islands, with each dictionary containing parameters for each detected island, detailed below \n'
+			'\n'
+			'    *islands: A group of 4-connected pixels with intensity above a detection threshold with respect to the sky background level. A source may contain one or more islands and an island may contain one or multiple source components. Caesar usually produces 1 island per source, unless nested source search is activated.\n'
+			'        - name | str: Island name, usually with an "S" prefix followed by an integer\n'
+			'        - iau_name | str: Island name in IAU notation\n'
+			'        - npix | int: Number of image pixels belonging to the island\n'
+			'        - x/y | float: Island centroid position in image coordinates\n'
+			'        - ra/dec | float: Island centroid position in sky WCS coordinates (unit: deg)\n'
+			'        - xmin/xmax/ymin/ymax | float: Island bounding box position in image coordinates\n'
+			'        - ra_min/ra_max/dec_min/dec_max | float: Island bounding box position in sky WCS coordinates (unit: deg)\n'
+			'        - vertices | List[[float,float]]: Coordinates of the island contour in image coordinates\n'
+			'        - pixels | List[[float,float]]: Coordinates of the island pixels in image coordinates\n'
+			'        - Smax | float: Max pixel brightness in island (unit: Jy/beam)\n'
+			'        - Stot | float: Sum of island pixel brightness divided by beam area (unit: Jy)\n'
+			'        - bkg | float: Average background level, set to background sum over island pixels divided by the number of island pixels (unit: Jy/beam)\n'
+			'        - rms | float: Average background noise, set to background noise sum over island pixels divided by the number of island pixels (unit: Jy/beam)\n'
+			'        - morph_label | str: Source morphology label {UNKNOWN-MORPH,COMPACT,EXTENDED,COMPACT-EXTENDED,DIFFUSE}\n'
+			'        - sourceness_label | str: Sourceness label {UNKNOWN,REAL,CANDIDATE,FALSE}\n'
+			'        - sourceness_score | float: Sourceness confidence score in range [0,1]. Set to -1 if not available\n'
+			'        - border | int: Flag indicating if the island is found at the image border (=1) or not (=0)\n'
+			'        - class_label | str: Astronomical classification label {UNKNOWN,MULTI-CLASS,STAR,YSO,PULSAR,HII,PN,SNR,GALAXY,QSO}. Usually set to UNKNOWN\n'
+			'        - class_score | float: Astronomical classification confidence score. Set to -1 if not available\n'
+			'        - tags | List[str]: List of user flags, usually empty\n'
+			'        - resolved | int: Flag indicating if the island is resolved (=1) or not (=0) according to XXL radio survey criterion\n'
+			'        - beam_area_ratio_par | float: Number of beams in island, set to number of pixels divided by number of pixels in beam\n'
+			'        - circ_ratio_par | float: Circularity ratio parameter (4 x pi x Area/pow(Perymeter,2)) of island contour\n'
+			'        - elongation_par | float: Elongation parameter (1.-BoundingBoxMin/BoundingBoxMaj) of island contour\n'
+			'        - min_bbox_par | float: Smallest dimension of minimum rotated bounding box containing island contour\n'
+			'        - min_size/max_size | float: Min/max island size in pixel. Set to -999 (not evailable).\n'
+			'        - crossmatch_info | List: placeholder container for island cross-matching information, empty by default\n'
+			'        - spectral_info | dict: placeholder container for island spectral data information (e.g. spectral index), empty by default\n'
+			'        - fit_info | dict: Island fitting information, described below. Empty when --fitsources is disabled or when no fit info was found (e.g. failed fitting)\n'
+			'\n'
+			'        *fit_info: Dictionary containing island fitting parameters when computed/found, described below:\n'
+			'            - ncomponents | int: Number of 2D fit components found\n'
+			'            - model | str: Fit component model {"gaus"}\n'
+			'            - ndata | int: Number of island pixels used in fitting\n'
+			'            - npars | int: Total number of parameters used in island fitting\n'
+			'            - npars_free | int: Number of parameters kept free during island fitting\n'
+			'            - chi2 | float: Fit chi2 parameter\n'
+			'            - ndf | int: Fit number of degrees of freedom parameter\n'
+			'            - cov_matrix | List[float]: Fit parameter covariance matrix\n'
+			'            - fit_quality | str: Fit quality flag {UNKNOWN,BAD,LOW,MEDIUM,HIGH}\n'
+			'            - flux | float: Island integrated flux from component superposition (unit: Jy)\n'
+			'            - flux_err | float: Error on island integrated flux (unit: Jy)\n'
+			'            - components | List(dict): Collection of fit component parameters, described below\n'
+			'\n'
+			'            *components: List of dictionaries, each containing individual component fit info, described below:\n'
+			'                - iau_name | str: Component name in IAU notation\n'
+			'                - x/y | float: Component centroid position in image coordinates\n'
+			'                - x_err/y_err | float: Error on component centroid position in image coordinates\n'
+			'                - ra/dec | float: Component centroid position in sky WCS coordinates (unit: deg)\n'
+			'                - ra_err/dec_err | float: Error on component centroid position in sky WCS coordinates (unit: deg)\n'
+			'                - Speak/Speak_err | float: Component peak flux parameter and its error (unit: Jy/beam)\n'
+			'                - S/S_err | float: Component integrated flux density (already divided by beam area) and its error (unit: Jy)\n'
+			'                - sx/sx_err | float: Component sigmaX parameter and its error in pixel coordinates\n'
+			'                - sy/sy_err | float: Component sigmaY parameter and its error in pixel coordinates\n'
+			'                - theta/theta_err | float: Component theta parameter and its error (unit: deg)\n'
+			'                - bmaj/bmin/pa | float: Component fit ellipse major/minor axis (unit: arcsec) and position angle (unit: deg, measured counterclock-wise from North)\n'
+			'                - bmaj_err/bmin_err/pa_err | float: Errors on fit ellipse major/minor axis (unit: arcsec) and position angle (unit: deg) \n'
+			'                - bmaj_deconv/bmin_deconv/pa_deconv | float: Beam-deconvolved fit ellipse major/minor axis (unit: arcsec) and position angle (unit: deg)\n'
+			'                - morph_label | str: Component morphology label {UNKNOWN-MORPH,COMPACT,EXTENDED,COMPACT-EXTENDED,DIFFUSE}\n'
+			'                - sourceness_label | str: Component sourceness label {REAL,CANDIDATE,FALSE}\n'
+			'                - sourceness_score | float: Component sourceness confidence score in range [0,1]. Set to -1 if not available\n'
+			'                - resolved | int: Flag indicating if the component is resolved (=1) or not (=0) according to XXL radio survey criterion\n'
+			'                - eccentricity_ratio | float: Ratio between fit ellipse & beam ellipse eccentricities\n'
+			'                - area_ratio | float: Ratio between component fit ellipse and beam ellipse areas\n'
+			'                - rot_angle_vs_beam | float: Difference between component fit ellipse and beam ellipse rotation angles (unit: deg)\n'
+		)
+			
+		json_fitcomp_catalog_out_desc= (
+			'JSON dictionary containing list of fitted components for all extracted source islands along with their measured parameters'
+		)	
+			
+		json_fitcomp_catalog_out_format= (
+			'JSON dictionary follows the format below: \n\n'
+			'{\n'
+			'  "components" : [\n'
+			'      {\n'
+			'        "A" : 0.07,\n'
+			'        "Aerr" : 0.001,\n'
+			'        ...\n'
+			'      },\n'
+			'      ...\n'
+			'  ]\n'
+			'}\n'
+			'where each dictionary contains fitted component parameters (peak amplitude, ellipse pars, flux densities, etc).'
+		)	
+			
+		ascii_catalog_out_desc= (
+			'Ascii tabular data file containing extracted source islands (rows), and their measured parameters (columns)'
+		)
+			
+		ascii_catalog_out_format= (
+			'Ascii tabular data file follows this format: each row is a source island, while columns represent island parameters, described below:\n'
+			'- Col 1: name | str: Source name assigned by finder\n'
+			'- Col 2: iauName | str: Source name in IAU notation\n'
+			'- Col 3: npix | int: Number of pixels in island\n'
+			'- Col 4: nComponents | int: Number of fitted components (=0 if fit not performed or failed)\n'
+			'- Col 5: nNested | int: Number of nested sources found in island\n'
+			'- Col 6-7: x/y | float: Island centroid along x/y axis in image coordinates\n'
+			'- Col 8-9: x_w/y_w | float: Island centroid along x/y axis in image coordinates, weighted by pixel fluxes\n'
+			'- Col 10-11: x_wcs/y_wcs | float: Island centroid in selected sky WCS coordinate along x/y axis (unit: deg)\n'
+			'- Col 12-13: x_w_wcs/y_w_wcs | float: Island centroid in selected sky WCS coordinate along x/y axis, weighted by pixel fluxes (unit: deg)\n'
+			'- Col 14-17: xmin/xmax/ymin/ymax | float: Min/max coordinates of island bounding box rectangle in image coordinates\n'
+			'- Col 18-21: xmin_wcs/xmax_wcs/ymin_wcs/ymax_wcs | float: Min/max coordinates of island bounding box rectangle in sky WCS coordinates (unit: deg)\n'
+			'- Col 22: nu | float: Spectral axis value extracted from image header. If frequency it is given in GHz units.\n'
+			'- Col 23: Stot | float: Sum of island pixel brightness (unit: Jy/beam)\n'
+			'- Col 24: Smax | float: Max pixel brightness in island (unit: Jy/beam)\n'
+			'- Col 25-26: S/Serr | float: Island fitted flux brightness (not corrected by beam area) and its error (unit: Jy/beam)\n'
+			'- Col 27: beamArea | float: Number of pixels in beam. Used to convert flux parameters from Jy/beam to Jy/pixel (e.g. Jy/pixel=Jy/beam/beamarea)\n'
+			'- Col 28: bkgSum | float: Background estimator summed over all island pixels (unit: Jy/beam)\n'
+			'- Col 29: rmsSum | float: Noise (rms) estimator summed over all island pixels (unit: Jy/beam)\n'
+			'- Col 30: morphId | int: Island morphology flag {1=COMPACT,2=POINT-LIKE, 3=EXTENDED,4=COMPACT-EXTENDED}\n'
+			'- Col 31: sourcenessId | int: Sourceness flag {1=REAL,2=CANDIDATE,3=FAKE}\n'
+			'- Col 32: isGoodSource | int: Flag indicating if source was tagged as good (=1) or bad (=0) in finding process\n'
+			'- Col 33: sourceNestedLevel | int: Island depth level flag {0=mother/parent island,1=nested source,...}'
+		)
+		
+		ascii_fitcomp_catalog_out_desc= (
+			'Ascii tabular data file containing fitted components (rows) found in extracted source islands, , and their measured parameters (columns)'
+		)
+		
+		ascii_fitcomp_catalog_out_format= (
+			'Ascii tabular data file follows this format: each row is a fitted component, while columns represent component parameters, described below:\n'
+			'- Col 1: name | str: Island source name assigned by finder\n'
+			'- Col 2: npix | int: Number of pixels in island\n'
+			'- Col 3: componentId | int: Fitted component id\n'
+			'- Col 4: iauName | str: Fitted component name in IAU notation\n'
+			'- Col 5-6: x/y | float: Fitted component centroid in image coordinates along x/y axis\n'
+			'- Col 7-8: x_err/y_err | float: Fitted component centroid error in image coordinates along x/y axis\n'
+			'- Col 9-10: x_wcs/y_wcs | float: Fitted component centroid in selected sky WCS coordinates along x/y axis (unit: deg)\n'
+			'- Col 11-12: x_wcs_err/y_wcs_err | float: Fitted component centroid error in selected sky WCS coordinate along x/y axis (unit: deg)\n'
+			'- Col 13: nu | float: Spectral axis value extracted from image header. If frequency it is given in GHz units\n'
+			'- Col 14-15: Speak/Speak_err | float: Fitted component peak brightness and its error (unit: Jy/beam)\n'
+			'- Col 16-17: S/S_err | float: Fitted component brightness (not corrected by beam area) and its error (unit: Jy/beam)\n'
+			'- Col 18-19: S_island/S_island_err | float: Island brightness (not corrected by beam area) and its error (unit: Jy/beam)\n'
+			'- Col 20: beamArea | float: Number of pixels in beam. Used to convert flux parameters from Jy/beam to Jy/pixel (e.g. Jy/pixel=Jy/beam/beamarea).\n'
+			'- Col 21-23: bmaj/bmin/pa | float: Fitted component ellipse major/minor axis and position angle (unit: deg, measured counterclock-wise from North) in image coordinates\n'
+			'- Col 24-26: bmaj_err/bmin_err/pa_err | float: Errors on fitted component ellipse pars in image coordinates\n'
+			'- Col 27-29: bmaj_wcs/bmin_wcs/pa_wcs | float: Fitted component ellipse major/minor axis (unit: arcsec) and position angle (unit: deg, measured counterclock-wise from North) in selected sky WCS coordinates\n'
+			'- Col 30-32: bmaj_wcs_err/bmin_wcs_err/pa_wcs_err | float: Errors on fitted component ellipse pars in sky WCS coordinates\n'
+			'- Col 33-35: bmaj_beam/bmin_beam/pa_beam | float: Beam ellipse major/minor axis (unit: arcsec) and position angle (unit: deg) in sky WCS coordinates\n'
+			'- Col 36-38: bmaj_deconv_wcs/bmin_deconv_wcs/pa_deconv_wcs | float: Fitted component beam-deconvolved ellipse major/minor axis (unit: arcsec) and position angle (unit: deg, measured counterclock-wise from North) in sky WCS coordinates\n'
+			'- Col 39: eccentricity_ratio | float: Ratio between fit ellipse & beam ellipse eccentricities\n'
+			'- Col 40: area_ratio | float: Ratio between component fit ellipse and beam ellipse areas\n'
+			'- Col 41: rot_angle_vs_beam | float: Difference between component fit ellipse and beam ellipse rotation angles (unit: deg)\n'
+			'- Col 42: bkgSum | float: Background estimator summed over all island pixels (unit: Jy/beam)\n'
+			'- Col 43: rmsSum | float: Noise (rms) estimator summed over all island pixels (unit: Jy/beam)\n'
+			'- Col 44-45: chi2/ndf | float: Source island fit chisquare and degrees of freedom\n'
+			'- Col 46: fit_quality | int: Fit quality flag {0=BAD,1=LOW,2=MEDIUM,3=HIGH}\n'
+			'- Col 47: sourcenessId | int: Component sourceness flag {1=REAL,2=CANDIDATE,3=FAKE}\n'
+			'- Col 48: morphId | int: Component morphology flag {0=UNKNOWN,1=COMPACT,2=POINT-LIKE,3=EXTENDED, 4=COMPACT-EXTENDED}'
+		)
+		
+		root_catalog_out_desc= (
+			'ROOT binary file containing full raw tool output with different stored objects'
+		)
+		
+		root_catalog_out_format= (
+			'ROOT binary file contains the following objects (depending on the activated options):\n'
+			'* SourceInfo ROOT TTree: containing caesar Source object collections, each containing summary parameters plus detailed information at pixel level (see Source API section);\n'
+			'* PerformanceInfo ROOT TTree: containing list of run parameters (runtimes at different stages, used memory, etc);\n'
+			'* Input map: stored as a caesar Image object (see Image API section)\n'
+			'* Background, noise and significance maps: stored as caesar Image objects\n'
+			'* Residual map: stored as a caesar Image object\n'
+			'* Segmentation and saliency maps: stored as a caesar Image object'
+		)
+
+
+		# - Define job outputs		
+		self.job_outputs= {
+			"catalog_json": {
+				"path": None,
+				"glob": "catalog-*.json",
+				"type": "application/json",
+				"role": "primary_result",
+				"description": json_catalog_out_desc,
+				"format": json_catalog_out_format,
+				"parser": "json",
+				"required": True,
+				"notes": (
+					"The json catalog output file is only produced with option --save-catalog-to-json"
+				)
+			},
+			"catalog_components_json": {
+				"path": None,
+				"glob": "catalog_fitcomp-*.json",
+				"type": "application/json",
+				"role": "catalog",
+				"description": json_fitcomp_catalog_out_desc,
+				"format": json_fitcomp_catalog_out_format,
+				"parser": "json",
+				"required": False,
+				"notes": (
+					"The json component catalog output file is only produced with option --save-catalog-to-json and --fitsources"
+				)
+			},
+			"catalog_ascii": {
+				"path": None,
+				"glob": "catalog-*.dat",
+				"type": "text/plain",
+				"role": "catalog",
+				"description": ascii_catalog_out_desc,
+				"format": ascii_catalog_out_format,
+				"parser": "text",
+				"required": False,
+				"notes": (
+					"The ascii island catalog output file is produced when 'saveToCatalogFile' caesar INI configuration option is enabled. Always enabled."
+				)
+			},
+			"catalog_components_ascii": {
+				"path": None,
+				"glob": "catalog_fitcomp-*.dat",
+				"type": "text/plain",
+				"role": "catalog",
+				"description": ascii_fitcomp_catalog_out_desc,
+				"format": ascii_fitcomp_catalog_out_format,
+				"parser": "text",
+				"required": False,
+				"notes": (
+					"The ascii component catalog output file is is produced when 'saveToCatalogFile' caesar INI configuration option is enabled (always) AND also with option --fitsources enabled"
+				)
+			},
+			"catalog_root": {
+				"path": None,
+				"glob": "out_*.root",
+				"type": "application/x-root",
+				"role": "catalog",
+				"description": root_catalog_out_desc,
+				"format": root_catalog_out_format,
+				"parser": "text",
+				"required": True,
+				"notes": (
+					"ROOT output is produced when 'saveToFile' caesar INI configuration option is enabled. Always enabled."
+				)
+			},
+			"plot": {
+				"path": None,
+				"glob": "plot_*.png",
+				"type": "image/png",
+				"role": "visualization",
+				"description": "Image with detections overlaid.",
+				"format": "",
+				"parser": "image",
+				"required": False,
+				"notes": (
+					"The plot output filename is only produced with option --save-summaryplot"
+				)
+			},
+			"region": {
+				"path": None,
+				"glob": "ds9-*.reg",
+				"type": "application/x-ds9",
+				"role": "visualization",
+				"description": "A DS9 region file containing detected sources as colored and tagged polygon regions.",
+				"format": "",
+				"parser": "ds9",
+				"required": False,
+				"notes": (
+					"The region output filename is only produced with option --save-regions"
+				)
+			},
+			"region_components": {
+				"path": None,
+				"glob": "ds9_fitcomp-*.reg",
+				"type": "application/x-ds9",
+				"role": "visualization",
+				"description": "A DS9 region file containing fitted components inside detected sources as colored and tagged ellipse regions.",
+				"format": "",
+				"parser": "ds9",
+				"required": False,
+				"notes": (
+					"The region output filename is only produced with option --save-regions and --fitsources"
+				)
+			},
+			"script": {
+				"path": None,
+				"glob": "*.sh",
+				"type": "text/plain",
+				"role": "diagnostic",
+				"description": "Caesar bash run script file that was executed to produce the provided output",
+				"format": "",
+				"parser": "text",
+				"required": False,
+				"notes": (
+					""
+				)
+			},
+			"config": {
+				"path": None,
+				"glob": "*.cfg",
+				"type": "text/plain",
+				"role": "diagnostic",
+				"description": "Caesar configuration file with run options in INI format.",
+				"format": "",
+				"parser": "text",
+				"required": False,
+				"notes": (
+					""
+				)
+			},
+			"log": {
+				"path": None,
+				"glob": "*.log",
+				"type": "text/plain",
+				"role": "diagnostic",
+				"description": "Execution logs.",
+				"format": "",
+				"parser": "text",
+				"required": False,
+				"notes": (
+					""
+				)
+			}
+		
+		} ## close job outputs
 
 		# - Define option value transformers
 		self.option_value_transformer= {
@@ -1682,8 +1974,6 @@ class CaesarAppConfigurator(AppConfigurator):
 		self.cmd_args.append("--save-catalog-to-json ")
 
 
-
-	
 	def set_data_input_option_value(self):
 		""" Set app input option value """
 
@@ -1831,10 +2121,13 @@ class CaesarAppConfigurator(AppConfigurator):
 		""" Transform input file from uuid to actual path """		
 	
 		# - Get aai info
-		username= 'anonymous'
-		if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info):
-			email= g.oidc_token_info['email']
-			username= utils.sanitize_username(email)
+		#username= 'anonymous'
+		#if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info):
+		#	email= g.oidc_token_info['email']
+		#	username= utils.sanitize_username(email)
+
+		# - Get authenticated user storage identifier
+		username = utils.get_storage_username()
 
 		# - Inspect inputfile (expect it is a uuid, so convert to filename)
 		logger.info("Finding inputfile uuid %s ..." % file_uuid, action="submitjob")

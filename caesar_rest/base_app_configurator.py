@@ -165,10 +165,12 @@ class AppConfigurator(object):
 		self.batch_processing_support= False
 		self.run_options= {
 			"ncores": 1,
-			"nproc": 1
+			"nproc": 1,
+			"container_variant": ""
 		}
 		self.job_outputs= {}
 		self.description= ""
+		self.tool_categories= []
 		self.input_requirements= {}
 		self.limitations= []
 
@@ -180,6 +182,7 @@ class AppConfigurator(object):
 		d= {
 			"name": self.app_name,
 			"description": self.description,
+			"tool_categories": self.tool_categories,
 			"input_requirements": self.input_requirements,
 			"job_options": {},
 			"job_outputs": self.job_outputs,
@@ -293,6 +296,37 @@ class AppConfigurator(object):
 		return valid
 
 
+	def normalize_bool_option_value(self, opt_name, value):
+		"""Normalize a boolean option value.
+
+		Accept native booleans and string representations "true"/"false".
+		Reject all other values.
+		"""
+
+		if isinstance(value, bool):
+			return value
+
+		if isinstance(value, str):
+			value_norm= value.strip().lower()
+
+			if value_norm == "true":
+				logger.warn(
+					"Bool option %s was provided as string '%s'; "
+					"normalizing to True." % (opt_name, value),
+					action="submitjob"
+				)
+				return True
+
+			if value_norm == "false":
+				logger.warn(
+					"Bool option %s was provided as string '%s'; "
+					"normalizing to False." % (opt_name, value),
+					action="submitjob"
+				)
+				return False
+
+		return None
+
 	def validate_options(self):
 		""" Validate parsed options against valid expected options (provided in derived class) """
 
@@ -403,12 +437,38 @@ class AppConfigurator(object):
 			else: # No value required
 
 				# - Check boolean value given
-				parsed_value= self.job_options[opt_name]
-				parsed_value_type= type(parsed_value)
-				if not isinstance(parsed_value, bool):
-					self.validation_status= ''.join(["Failed to parse bool option ",opt_name," (parsed value type is not a boolean)!"])
-					logger.warn(self.validation_status, action="submitjob")
+				#parsed_value= self.job_options[opt_name]
+				#parsed_value_type= type(parsed_value)
+				#if not isinstance(parsed_value, bool):
+				#	self.validation_status= ''.join(["Failed to parse bool option ",opt_name," (parsed value type is not a boolean)!"])
+				#	logger.warn(self.validation_status, action="submitjob")
+				#	return False
+
+				# - Normalize and validate boolean value
+				parsed_value_raw= self.job_options[opt_name]
+				parsed_value= self.normalize_bool_option_value(
+					opt_name,
+					parsed_value_raw
+				)
+
+				if parsed_value is None:
+					self.validation_status= ''.join([
+						"Failed to parse bool option ",
+						opt_name,
+						" (value=",
+						repr(parsed_value_raw),
+						", type=",
+						str(type(parsed_value_raw)),
+						")!"
+					])
+					logger.warn(
+						self.validation_status,
+						action="submitjob"
+					)
 					return False
+
+				# - Store normalized value back in parsed job options
+				self.job_options[opt_name]= parsed_value
 
 				# - Add option only if parsed flag is True, if not skip
 				if not parsed_value:

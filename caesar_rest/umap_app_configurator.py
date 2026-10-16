@@ -45,21 +45,48 @@ class UMAPAppConfigurator(AppConfigurator):
 		
 		# - Describe app
 		self.description = (
-			""
+			"Run UMAP data dimensionality reduction tool to produce a low-dimensional embedding of a dataset (N observations, M features → K<M embedding features)."	
 		)
 		
+		self.tool_categories= ["tabular"]
+		
+		input_json_format= (
+			'Input JSON file has this format: \n\n'
+			'{\n'
+			'  "data": [\n'
+			'    {\n'
+			'      "sname": "f572b6faffb34f5680bccb12c02aacf5", \n'
+			'      "id": "2", \n'
+			'      "label": "EXTENDED", \n'
+			'      "feats": [0.9604316353797913, 2.2406632900238037, 0.0, 0.0, 0.5951219797134399], \n'
+			'    } \n'
+			'} \n'
+			'\n'
+			'where: \n'
+			'* sname | str: Observation identifier, usually set to filepath/uid without file extension \n'
+			'* id | int or list(int): Class identifier(s) \n'
+			'* label | str or list(str): Class label(s) \n'
+			'* feats | list(float): Feature parameters (high-D embedding) \n'
+			'Additional metadata fields specified will be preserved in the json output format.'
+		)
+		
+		input_ascii_format= (
+			'Input ascii tabular data file has this format:\n'
+			'- Col 1: sname | str: Observation identifier, usually set to filepath/uid without file extension \n'
+			'- Col 2,3,...,M+1: feats | float: M feature parameters (high-D embedding) for the observation \n'
+			'- Col M+2: id | int or label | str: Class identifier (if int) or class label (if str) for the observation'
+		)
+		
+		input_data_expected= input_json_format + ' \n ' + input_ascii_format
+			
 		self.input_requirements = {
-			"supported_formats": ["uid", "abspath", "dataset"],
-			"expected_data": "TBD",
-			"notes": [
-				"TBD",
-				"TBD"
-			]
+			"supported_formats": ["json","ascii"],
+			"expected_data": input_data_expected,
+			"notes": [],
 		}
 		
 		self.limitations = [
-			"TBD",
-			"TBD"
+			"Low-dimensional embedding produced by UMAP significantly depends on nneighbors and mindist algorithm parameters. See parameter documentation."
 		]
 		
 		# - Define dictionary with allowed options
@@ -70,7 +97,7 @@ class UMAPAppConfigurator(AppConfigurator):
 				name='datalist-key',
 				value='',
 				value_type=str, 
-				description='Dictionary key name to be read in input datalist (default=data)',
+				description='Dictionary key name to be read in input json datalist (default=data)',
 				category='INPUT',
 				default_value='data'
 			),
@@ -78,7 +105,7 @@ class UMAPAppConfigurator(AppConfigurator):
 				name='selcols',
 				value='',
 				value_type=str, 
-				description='Data column ids to be selected from input data, separated by commas (default=all columns)',
+				description='Data column indices to be selected from input data, separated by dashes. If empty, all columns are selected.',
 				category='INPUT',
 				default_value=''
 			),
@@ -88,7 +115,7 @@ class UMAPAppConfigurator(AppConfigurator):
 				name='nfeats',
 				value='',
 				value_type=int, 
-				description='Encoded data dim in UMAP (default=2)',
+				description='Dimension of low-dimensional embedding produced by UMAP (e.g. number of output features)',
 				category='PROCESSING',
 				default_value=2,
 				min_value=2,
@@ -98,7 +125,7 @@ class UMAPAppConfigurator(AppConfigurator):
 				name='mindist',
 				value='',
 				value_type=float, 
-				description=' Min dist UMAP parameter (default=0.1)',
+				description='Min dist UMAP parameter. Controls compactness of clusters (how close points are allowed to get in low-D before considered fully similar). With small values (close to 0), points can pack tightly, tight/dense clusters are produced with sharper cluster separation. With high values (close to 1), points are forced to be more spread out, looser clusters are produced.',
 				category='PROCESSING',
 				default_value=0.1,
 				min_value=0.0,
@@ -108,7 +135,7 @@ class UMAPAppConfigurator(AppConfigurator):
 				name='nneighbors',
 				value='',
 				value_type=int, 
-				description='N neighbors UMAP parameter (default=15)',
+				description='N neighbors UMAP parameter. Controls how many nearby points each sample considers when defining the structure of the dataset. With small values (0-10), focus more on very local structure, producing many small clusters, sensitive to noise. With high values (>50), larger-scale structure is captured, clusters may merge, embedding looks smoother, and more global relationships appear.',
 				category='PROCESSING',
 				default_value=15,
 				min_value=1,
@@ -117,26 +144,38 @@ class UMAPAppConfigurator(AppConfigurator):
 
 			# == PRE-PROCESSING OPTIONS ==
 			'normalize' : Option(
-				name='normalize_minmax', 
-				description='Normalize each channel in range', 
-				category='PREPROCESSING'
+				name='normalize', 
+				description='If True, normalize feature data in range [0,1] before applying UMAP. If features have very different units or numerical ranges, features with larger scales will completely dominate the distance calculations, so it is suggested to normalize in that case.', 
+				category='PREPROCESSING',
+				default_value=True
+			),
+			'ids-excluded-in-train' : ValueOption(
+				name='ids-excluded-in-train',
+				value='',
+				value_type=str, 
+				description='List of observation ids (separated by colons) not included for training supervised UMAP as they are considered unknown classes (default=-1:0)',
+				category='INPUT',
+				default_value='-1:0'
 			),
 			
 			# == SAVE OPTIONS ==
 			'no-save-ascii' : Option(
 				name='no-save-ascii', 
-				description='Do not save output in ascii format', 
-				category='OUTPUT'
+				description='If True, disable saving outputs to ascii format', 
+				category='OUTPUT',
+				default_value=False
 			),
 			'no-save-json' : Option(
 				name='no-save-json', 
-				description='Do not save output in json format', 
-				category='OUTPUT'
+				description='If True, disable saving outputs to json format', 
+				category='OUTPUT',
+				default_value=False
 			),
 			'no-save-model' : Option(
 				name='no-save-model', 
-				description='Do not save model', 
-				category='OUTPUT'
+				description='If True, disable saving UMAP leaned model', 
+				category='OUTPUT',
+				default_value=False
 			),
 			'outfile-sup' : ValueOption(
 				name='outfile-sup',
@@ -167,20 +206,138 @@ class UMAPAppConfigurator(AppConfigurator):
 			'no-logredir' : Option(
 				name='no-logredir', 
 				description='Do not redirect logs to output file in script',
-				category='RUN'
+				category='RUN',
+				default_value=False
 			),
 			'run-supervised' : Option(
 				name='run-supervised', 
 				description='Run UMAP also on labelled data alone (if available)',
-				category='RUN'
+				category='RUN',
+				default_value=False
 			),
 			
 		
 		} ## close valid options
 		
 		# - Define dictionary with job outputs produced
-		self.job_outputs= {
+		json_out_desc= (
+			'JSON file containing the input data embeddings produced by UMAP in unsupervised run mode.'
+		)
 		
+		json_out_format= (
+			'Output JSON embeddings file has this format: \n\n'
+			'{\n'
+			'  "data": [\n'
+			'    {\n'
+			'      "sname": "f572b6faffb34f5680bccb12c02aacf5", \n'
+			'      "id": "2", \n'
+			'      "label": "EXTENDED", \n'
+			'      "feats": [0.9604316353797913, 2.2406632900238037], \n'
+			'    } \n'
+			'} \n'
+			'\n'
+			'where: \n'
+			'* sname | str: Observation identifier, usually set to filepath/uid without file extension \n'
+			'* id | int or list(int): Class identifier(s) \n'
+			'* label | str or list(str): Class label(s) \n'
+			'* feats | list(float): Feature parameters produced by UMAP (low-D embeddings) \n'
+			'Additional metadata fields present in the input dataset will be preserved in the json output format.'
+		)
+		
+		ascii_out_desc= (
+			'Ascii tabular file containing the input data embeddings produced by UMAP in unsupervised run mode.'
+		)
+		ascii_sup_out_desc= (
+			'Ascii tabular file containing the input data embeddings produced by UMAP in supervised run mode.'
+		)
+		
+		ascii_out_format= (
+			'Output ascii tabular data file has this format:\n'
+			'- First row: header, starting with #, e.g. # sname z1 z2 id \n'
+			'- Col 1: sname | str: Observation identifier, usually set to filepath/uid without file extension \n'
+			'- Col 2,3,...,M+1: feats | float: M feature parameters produced by UMAP (low-D embedding) for the observation \n'
+			'- Col M+2: id | int or label | str: Class identifier (if int) or class label (if str) for the observation'
+		)
+				
+		self.job_outputs= {
+			"embeddings-json": {
+				"path": None,
+				"glob": "*.json",
+				"type": "application/json",
+				"role": "primary_result",
+				"description": json_out_desc,
+				"format": json_out_format,
+				"parser": "json",
+				"required": True,
+				"notes": (
+					"The embeddings json output filename produced by UMAP in unsupervised run mode is by default set to 'latent_data_umap_unsupervised.json', but it can be configured by the user with the option 'outfile-unsup-json'"
+				)
+			},
+			"embeddings-ascii": {
+				"path": None,
+				"glob": "*.dat",
+				"type": "text/plain",
+				"role": "primary_result",
+				"description": ascii_out_desc,
+				"format": ascii_out_format,
+				"parser": "text",
+				"required": True,
+				"notes": (
+					"The embeddings ascii output filename produced by UMAP in unsupervised run mode is by default set to 'latent_data_umap_unsupervised.dat', but it can be configured by the user with the option 'outfile-unsup'"
+				)
+			},
+			"embeddings-ascii-supervised": {
+				"path": None,
+				"glob": "*.dat",
+				"type": "text/plain",
+				"role": "primary_result",
+				"description": ascii_sup_out_desc,
+				"format": ascii_out_format,
+				"parser": "text",
+				"required": False,
+				"notes": (
+					"The embeddings ascii output filename produced by UMAP in supervised run mode is by default set to 'latent_data_umap_supervised.dat', but it can be configured by the user with the option 'outfile-sup'"
+				)
+			},
+			"datascaler": {
+				"path": None,
+				"glob": "datascaler.sav",
+				"type": "application/octet-stream",
+				"role": "model",
+				"description": "A scikit-learn data scaler used to pre-process the input data.",
+				"format": "",
+				"parser": "scikit-learn",
+				"required": False,
+				"notes": (
+					""
+				)
+			},
+			"model": {
+				"path": None,
+				"glob": "umap_model.sav",
+				"type": "application/octet-stream",
+				"role": "model",
+				"description": "A scikit-learn model file including trained UMAP model.",
+				"format": "",
+				"parser": "scikit-learn",
+				"required": False,
+				"notes": (
+					""
+				)
+			},
+			"log": {
+				"path": None,
+				"glob": "*.log",
+				"type": "text/plain",
+				"role": "diagnostic",
+				"description": "Execution logs.",
+				"format": "",
+				"parser": "text",
+				"required": False,
+				"notes": (
+					""
+				)
+			}
 		}
 		
 		# - Define option value transformers

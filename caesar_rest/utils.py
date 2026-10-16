@@ -1,7 +1,7 @@
 ##############################
 #   MODULE IMPORTS
 ##############################
-# Import standard modules
+# - Import standard modules
 import os
 import sys
 import json
@@ -13,13 +13,17 @@ import hashlib
 import tarfile
 import subprocess
 import uuid
+import re
 
-# Import astro modules
+# - Import Flask modules
+from flask import current_app, g, abort
+
+# - Import astro modules
 from astropy.io import fits
 from astropy.visualization import ZScaleInterval, LinearStretch, ImageNormalize, MinMaxInterval
 import regions
 
-## Graphics modules
+# - Graphics modules
 import matplotlib as mpl
 mpl.rcParams['xtick.direction'] = 'in'
 mpl.rcParams['ytick.direction'] = 'in'
@@ -27,9 +31,7 @@ mpl.rcParams['ytick.direction'] = 'in'
 from matplotlib import pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-
-# Get logger
-#logger = logging.getLogger(__name__)
+# - Get logger
 from caesar_rest import logger
 
 def get_uuid():
@@ -85,6 +87,63 @@ def sanitize_username(s):
 	username= username.replace('.', '_')
 
 	return username
+
+def get_storage_username():
+	"""
+	Return a readable, user-specific storage identifier.
+
+	AAI enabled:
+		<preferred_username>_<OIDC_subject_UUID>
+
+	AAI disabled:
+		anonymous
+
+	The identifier is used for filesystem directories and
+	user-specific MongoDB collections.
+	"""
+
+	if not current_app.config.get('USE_AAI', False):
+		return 'anonymous'
+
+	claims = getattr(g, 'oidc_token_info', None)
+
+	if not isinstance(claims, dict):
+		abort(401, description='Authenticated OIDC identity required')
+
+	issuer = claims.get('iss')
+	subject = claims.get('sub')
+
+	if not isinstance(issuer, str) or not issuer.strip():
+		abort(401, description='OIDC issuer missing')
+
+	if not isinstance(subject, str) or not subject.strip():
+		abort(401, description='OIDC subject missing')
+
+	# Keycloak uses UUIDs for user subjects.
+	try:
+		subject_uuid = str(uuid.UUID(subject))
+	except (ValueError, AttributeError, TypeError):
+		abort(401, description='Invalid Keycloak user subject')
+
+	# Use the human-readable Keycloak username.
+	username = claims.get('preferred_username')
+
+	if not isinstance(username, str) or not username.strip():
+		username = 'user'
+
+	# Restrict the directory component to safe ASCII characters.
+	username = re.sub(
+		r'[^a-zA-Z0-9_-]',
+		'_',
+		username.strip()
+	)
+
+	username = username.strip('_-')[:64]
+
+	if not username:
+		username = 'user'
+
+	return username + '_' + subject_uuid
 
 def get_dir_size(dirname,unit='K'):
 	""" Return the directory size in specified units """

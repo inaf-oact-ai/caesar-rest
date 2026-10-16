@@ -9,7 +9,7 @@ uwsgi
 pyyaml
 pymongo
 flask-pymongo
-flask_oidc_ex
+flask-oidc-ex @ git+https://github.com/inaf-oact-ai/flask-oidc-ex.git@master
 extension-helpers
 astropy
 regions

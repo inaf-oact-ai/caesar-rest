@@ -63,10 +63,13 @@ def get_accounting_info():
 	""" Retrieve accounting info for this user """
 
 	# - Get aai info
-	username= 'anonymous'
-	if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info):
-		email= g.oidc_token_info['email']
-		username= utils.sanitize_username(email)
+	#username= 'anonymous'
+	#if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info):
+	#	email= g.oidc_token_info['email']
+	#	username= utils.sanitize_username(email)
+
+	# - Get authenticated user storage identifier
+	username = utils.get_storage_username()
 
 	# - Get accounting info from DB
 	res= {}	
@@ -99,11 +102,14 @@ def get_appstats_info():
 	""" Retrieve app basic stats info cumulated over all users """
 
 	# - Get aai info
-	username= 'anonymous'
-	if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info):
-		email= g.oidc_token_info['email']
-		username= utils.sanitize_username(email)
+	#username= 'anonymous'
+	#if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info):
+	#	email= g.oidc_token_info['email']
+	#	username= utils.sanitize_username(email)
 
+	# - Get authenticated user storage identifier
+	username = utils.get_storage_username()
+	
 	# - Get app stats info from DB
 	res= {}	
 	collection_name= 'appstats'

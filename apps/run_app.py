@@ -124,19 +124,231 @@ def get_args():
 	parser.add_argument('-rclone_storage_path','--rclone_storage_path', dest='rclone_storage_path', default='.', required=False, type=str, help='rclone remote storage path (default=.)')
 	
 	# - Singularity container app options
-	parser.add_argument('-caesar_container','--caesar_container', dest='caesar_container', default='/opt/containers/caesar/caesar-job_latest.sif', required=False, type=str, help='Path to caesar job Singularity container (default=/opt/containers/caesar/caesar-job_latest.sif)')
-	parser.add_argument('-aegean_container','--aegean_container', dest='aegean_container', default='/opt/containers/aegean/aegean-job_latest.sif', required=False, type=str, help='Path to aegean job Singularity container (default=/opt/containers/aegean/aegean-job_latest.sif)')
-	parser.add_argument('-cutex_container','--cutex_container', dest='cutex_container', default='/opt/containers/cutex/cutex-job_latest.sif', required=False, type=str, help='Path to cutex job Singularity container (default=/opt/containers/cutex/cutex-job_latest.sif)')
-	parser.add_argument('-mrcnn_container','--mrcnn_container', dest='mrcnn_container', default='/opt/containers/mrcnn/mrcnn-detect_latest.sif', required=False, type=str, help='Path to caesar-mrcnn job Singularity container (default=/opt/containers/mrcnn/mrcnn-detect_latest.sif)')
-	parser.add_argument('-cnn_classifier_container','--cnn_classifier_container', dest='cnn_classifier_container', default='/opt/containers/sclassifier/cnn-classifier_latest.sif', required=False, type=str, help='Path to CNN classifier Singularity container (default=/opt/containers/sclassifier/cnn-classifier_latest.sif)')
-	parser.add_argument('-vit_classifier_container','--vit_classifier_container', dest='vit_classifier_container', default='/opt/containers/sclassifier-vit/vit-classifier_latest.sif', required=False, type=str, help='Path to VIT classifier Singularity container (default=/opt/containers/sclassifier/cnn-classifier_latest.sif)')
-	parser.add_argument('-umap_container','--umap_container', dest='umap_container', default='/opt/containers/sclassifier/umap_latest.sif', required=False, type=str, help='Path to UMAP Singularity container (default=/opt/containers/sclassifier/umap_latest.sif)')
-	parser.add_argument('-outlier_finder_container','--outlier_finder_container', dest='outlier_finder_container', default='/opt/containers/sclassifier/outlier_finder_latest.sif', required=False, type=str, help='Path to OutlierFinder Singularity container (default=/opt/containers/sclassifier/outlier_finder_latest.sif)')
-	parser.add_argument('-hdbscan_container','--hdbscan_container', dest='hdbscan_container', default='/opt/containers/sclassifier/hdbscan_latest.sif', required=False, type=str, help='Path to HDBSCAN Singularity container (default=/opt/containers/sclassifier/hdbscan_latest.sif)')
-	parser.add_argument('-simsearch_container','--simsearch_container', dest='simsearch_container', default='/opt/containers/sclassifier/similarity-search_latest.sif', required=False, type=str, help='Path to Similarity Search Singularity container (default=/opt/containers/sclassifier/similarity-search_latest.sif)')
-	parser.add_argument('-caesar_yolo_container','--caesar_yolo_container', dest='caesar_yolo_container', default='/opt/containers/caesar-yolo/caesar-yolo-job_latest.sif', required=False, type=str, help='Path to CAESAR-YOLO Singularity container (default=/opt/containers/caesar-yolo/caesar-yolo-job_latest.sif)')
+	parser.add_argument(
+		'-caesar_container',
+		'--caesar_container', 
+		dest='caesar_container', 
+		default='/opt/containers/caesar/caesar-job_latest.sif', 
+		required=False, 
+		type=str, 
+		help='Path to caesar job Singularity container (default=/opt/containers/caesar/caesar-job_latest.sif)'
+	)
 	
-	# - Dataset options
+	parser.add_argument(
+		'-aegean_container',
+		'--aegean_container', 
+		dest='aegean_container', 
+		default='/opt/containers/aegean/aegean-job_latest.sif', 
+		required=False, 
+		type=str, 
+		help='Path to aegean job Singularity container (default=/opt/containers/aegean/aegean-job_latest.sif)'
+	)
+	
+	parser.add_argument(
+		'-cutex_container',
+		'--cutex_container', 
+		dest='cutex_container', 
+		default='/opt/containers/cutex/cutex-job_latest.sif', 
+		required=False, 
+		type=str, 
+		help='Path to cutex job Singularity container (default=/opt/containers/cutex/cutex-job_latest.sif)'
+	)
+	
+	parser.add_argument(
+		'-mrcnn_container',
+		'--mrcnn_container', 
+		dest='mrcnn_container', 
+		default='/opt/containers/mrcnn/mrcnn-detect_latest.sif', 
+		required=False, 
+		type=str, 
+		help='Path to caesar-mrcnn job Singularity container (default=/opt/containers/mrcnn/mrcnn-detect_latest.sif)'
+	)
+	
+	parser.add_argument(
+		'-cnn_classifier_container',
+		'--cnn_classifier_container', 
+		dest='cnn_classifier_container', 
+		default='/opt/containers/sclassifier/cnn-classifier_latest.sif', 
+		required=False, 
+		type=str, 
+		help='Path to CNN classifier Singularity container (default=/opt/containers/sclassifier/cnn-classifier_latest.sif)'
+	)
+	
+	parser.add_argument(
+		'-vit_classifier_container',
+		'--vit_classifier_container', 
+		dest='vit_classifier_container', 
+		default='/opt/containers/sclassifier-vit/vit-classifier_latest.sif', 
+		required=False, 
+		type=str, 
+		help='Path to VIT classifier Singularity container (default=/opt/containers/sclassifier/cnn-classifier_latest.sif)'
+	)
+	
+	parser.add_argument(
+		'-umap_container',
+		'--umap_container', 
+		dest='umap_container', 
+		default='/opt/containers/sclassifier/umap_latest.sif', 
+		required=False, 
+		type=str, 
+		help='Path to UMAP Singularity container (default=/opt/containers/sclassifier/umap_latest.sif)'
+	)
+	
+	parser.add_argument(
+		'-outlier_finder_container',
+		'--outlier_finder_container', 
+		dest='outlier_finder_container', 
+		default='/opt/containers/sclassifier/outlier_finder_latest.sif', 
+		required=False, 
+		type=str, 
+		help='Path to OutlierFinder Singularity container (default=/opt/containers/sclassifier/outlier_finder_latest.sif)'
+	)
+	
+	parser.add_argument(
+		'-hdbscan_container',
+		'--hdbscan_container', 
+		dest='hdbscan_container', 
+		default='/opt/containers/sclassifier/hdbscan_latest.sif', 
+		required=False, 
+		type=str, 
+		help='Path to HDBSCAN Singularity container (default=/opt/containers/sclassifier/hdbscan_latest.sif)'
+	)
+	
+	parser.add_argument(
+		'-simsearch_container',
+		'--simsearch_container', 
+		dest='simsearch_container', 
+		default='/opt/containers/sclassifier/similarity-search_latest.sif', 
+		required=False, 
+		type=str, 
+		help='Path to Similarity Search Singularity container (default=/opt/containers/sclassifier/similarity-search_latest.sif)'
+	)
+	
+	parser.add_argument(
+		'-caesar_yolo_container',
+		'--caesar_yolo_container', 
+		dest='caesar_yolo_container', 
+		default='/opt/containers/caesar-yolo/caesar-yolo-job_latest.sif', 
+		required=False, 
+		type=str, 
+		help='Path to CAESAR-YOLO Singularity container (default=/opt/containers/caesar-yolo/caesar-yolo-job_latest.sif)'
+	)
+	
+	parser.add_argument(
+		'-sfforecaster_container',
+		'--sfforecaster_container', 
+		dest='sfforecaster_container', 
+		default='/opt/containers/sfforecaster/sfforecaster-job_latest.sif', 
+		required=False, 
+		type=str, 
+		help='Path to Solar Flare Forecaster Singularity container (default=/opt/containers/sfforecaster/sfforecaster-job_latest.sif)'
+	)
+	
+	parser.add_argument(
+		'-fextractor_tf_container', 
+		'--fextractor_tf_container', 
+		dest='fextractor_tf_container', 
+		default='/opt/containers/fextractor/fextractor-tf_latest.sif', 
+		required=False, 
+		type=str, 
+		help='Path to TensorFlow fextractor Singularity container'
+	)
+	
+	parser.add_argument(
+		'-fextractor_torch_container', 
+		'--fextractor_torch_container', 
+		dest='fextractor_torch_container', 
+		default='/opt/containers/fextractor/fextractor-torch_latest.sif', 
+		required=False, 
+		type=str, 
+		help='Path to PyTorch fextractor Singularity container'
+	)
+	
+	parser.add_argument(
+		'-fextractor_chronos_container', 
+		'--fextractor_chronos_container', 
+		dest='fextractor_chronos_container', 
+		default='/opt/containers/fextractor/fextractor-chronos_latest.sif', 
+		required=False, 
+		type=str, 
+		help='Path to Chronos fextractor Singularity container'
+	)
+	
+	parser.add_argument(
+		'-fextractor_moirai_container', 
+		'--fextractor_moirai_container', 
+		dest='fextractor_moirai_container', 
+		default='/opt/containers/fextractor/fextractor-moirai_latest.sif', 
+		required=False, 
+		type=str, 
+		help='Path to Moirai fextractor Singularity container'
+	)
+	
+	parser.add_argument(
+		'-fextractor_fats_container', 
+		'--fextractor_fats_container', 
+		dest='fextractor_fats_container', 
+		default='/opt/containers/fextractor/fextractor-fats_latest.sif', 
+		required=False, 
+		type=str, 
+		help='Path to FATS fextractor Singularity container'
+	)
+	
+	parser.add_argument(
+		'-fextractor_licu_container', 
+		'--fextractor_licu_container', 
+		dest='fextractor_licu_container', 
+		default='/opt/containers/fextractor/fextractor-licu_latest.sif', 
+		required=False, 
+		type=str, 
+		help='Path to LightCurve (LICU) fextractor Singularity container'
+	)
+	
+	parser.add_argument(
+		'-fextractor_falcon_container', 
+		'--fextractor_falcon_container', 
+		dest='fextractor_falcon_container', 
+		default='/opt/containers/fextractor/fextractor-falcon_latest.sif', 
+		required=False, 
+		type=str, 
+		help='Path to Falcon1 fextractor Singularity container'
+	)
+	
+	parser.add_argument(
+		'-oxkat_container',
+		'--oxkat_container', 
+		dest='oxkat_container', 
+		default='/opt/containers/oxkat/oxkat-caesar.sif', 
+		required=False, 
+		type=str, 
+		help='Path to OxKAT Singularity container (default=/opt/containers/oxkat/oxkat-caesar.sif)'
+	)
+	
+	# - Dynamic dataset registry options
+	parser.add_argument(
+		'--dataset_registry_enabled',
+		dest='dataset_registry_enabled',
+		action='store_true',
+		help='Enable MongoDB-backed dynamic dataset registry'
+	)
+
+	parser.add_argument(
+		'--dataset_allowed_roots',
+		dest='dataset_allowed_roots',
+		default='',
+		type=str,
+		help='Comma-separated absolute directory paths permitted for registered datasets'
+	)
+
+	parser.add_argument(
+		'--dataset_admin_identities',
+		dest='dataset_admin_identities',
+		default='',
+		type=str,
+		help='Comma-separated administrator OIDC identities (issuer|subject)'
+	)
+
+	# - Legacy Dataset options
 	parser.add_argument('-dataset_smgps','--dataset_smgps', dest='dataset_smgps', default='', required=False, type=str, help='Path to smgps dataset json filelist')
 	parser.add_argument('-dataset_smgps_feats_simclr','--dataset_smgps_feats_simclr', dest='dataset_smgps_feats_simclr', default='', required=False, type=str, help='Path to smgps_feats_simclr dataset json filelist')
 	parser.add_argument('-dataset_smgps_feats_siglip','--dataset_smgps_feats_siglip', dest='dataset_smgps_feats_siglip', default='', required=False, type=str, help='Path to smgps_feats_siglip dataset json filelist')
@@ -290,8 +502,17 @@ outlier_finder_container= args.outlier_finder_container
 hdbscan_container= args.hdbscan_container
 simsearch_container= args.simsearch_container
 caesar_yolo_container= args.caesar_yolo_container
+sfforecaster_container= args.sfforecaster_container
+fextractor_tf_container= args.fextractor_tf_container
+fextractor_torch_container= args.fextractor_torch_container
+fextractor_chronos_container= args.fextractor_chronos_container
+fextractor_moirai_container= args.fextractor_moirai_container
+fextractor_fats_container= args.fextractor_fats_container
+fextractor_licu_container= args.fextractor_licu_container
+fextractor_falcon_container= args.fextractor_falcon_container
+oxkat_container= args.oxkat_container
 
-# - Dataset options
+# - Legacy dataset options
 dataset_smgps= args.dataset_smgps
 dataset_smgps_feats_simclr= args.dataset_smgps_feats_simclr
 dataset_smgps_feats_siglip= args.dataset_smgps_feats_siglip
@@ -300,6 +521,53 @@ dataset_emu_pilot= args.dataset_emu_pilot
 dataset_emu= args.dataset_emu
 dataset_emu_scorpio_pilot= args.dataset_emu_scorpio_pilot
 dataset_emu_gp_pilot= args.dataset_emu_gp_pilot
+
+# - Dynamic dataset registry options
+dataset_registry_enabled = args.dataset_registry_enabled
+
+dataset_allowed_roots = [
+	os.path.realpath(path.strip())
+	for path in args.dataset_allowed_roots.split(',')
+	if path.strip()
+]
+
+
+dataset_admin_identities = [
+	identity.strip().replace(r'\|', '|')
+	for identity in args.dataset_admin_identities.split(',')
+	if identity.strip()
+]
+logger.info("Parsed dataset admin identities: %r", dataset_admin_identities)
+
+# Validate administrator identities.
+for identity in dataset_admin_identities:
+	if '|' not in identity:
+		logger.error("Invalid dataset administrator identity: expected issuer|subject")
+		sys.exit(1)
+
+# Validate storage roots.
+for path in dataset_allowed_roots:
+	if not os.path.isdir(path):
+		logger.error("Dataset storage root does not exist or is not a directory: %s", path)
+		sys.exit(1)
+
+# Registry requires AAI and MongoDB.
+if dataset_registry_enabled:
+	if not use_aai or oidc is None:
+		logger.error("Dynamic dataset registry requires AAI")
+		sys.exit(1)
+
+	if not use_db or mongo is None:
+		logger.error("Dynamic dataset registry requires MongoDB")
+		sys.exit(1)
+
+	if not dataset_allowed_roots:
+		logger.error("Dynamic dataset registry requires allowed storage roots")
+		sys.exit(1)
+
+	if not dataset_admin_identities:
+		logger.error("Dynamic dataset registry requires administrator identities")
+		sys.exit(1)
 
 #===============================
 #==   INIT
@@ -369,6 +637,15 @@ config.SLURM_OUTLIER_FINDER_JOB_IMAGE= outlier_finder_container
 config.SLURM_HDBSCAN_JOB_IMAGE= hdbscan_container
 config.SLURM_SIMSEARCH_JOB_IMAGE= simsearch_container
 config.SLURM_CAESAR_YOLO_JOB_IMAGE= caesar_yolo_container
+config.SLURM_SFFORECASTER_JOB_IMAGE= sfforecaster_container
+config.SLURM_FEXTRACTOR_TF_JOB_IMAGE= fextractor_tf_container
+config.SLURM_FEXTRACTOR_TORCH_JOB_IMAGE= fextractor_torch_container
+config.SLURM_FEXTRACTOR_CHRONOS_JOB_IMAGE= fextractor_chronos_container
+config.SLURM_FEXTRACTOR_MOIRAI_JOB_IMAGE= fextractor_moirai_container
+config.SLURM_FEXTRACTOR_FATS_JOB_IMAGE= fextractor_fats_container
+config.SLURM_FEXTRACTOR_LICU_JOB_IMAGE= fextractor_licu_container
+config.SLURM_FEXTRACTOR_FALCON_JOB_IMAGE= fextractor_falcon_container
+config.SLURM_OXKAT_JOB_IMAGE= oxkat_container
 
 # - Create data manager (DEPRECATED BY MONGO)
 ##logger.info("Creating data manager ...")
@@ -383,7 +660,7 @@ jobcfg= JobConfigurator()
 celery.conf.result_backend= result_backend
 celery.conf.broker_url= broker_url
 
-# - Set dataset configs
+# - Set legacy dataset configs
 config.DATASETS["smgps"]["path"]= dataset_smgps
 config.DATASETS["smgps-feats-simclr"]["path"]= dataset_smgps_feats_simclr
 config.DATASETS["smgps-feats-siglip"]["path"]= dataset_smgps_feats_siglip
@@ -392,6 +669,11 @@ config.DATASETS["emu-pilot"]["path"]= dataset_emu_pilot
 config.DATASETS["emu"]["path"]= dataset_emu
 config.DATASETS["emu-scorpio-pilot"]["path"]= dataset_emu_scorpio_pilot
 config.DATASETS["emu-gp-pilot"]["path"]= dataset_emu_gp_pilot
+
+# - Dynamic dataset registry configuration
+config.DATASET_REGISTRY_ENABLED = dataset_registry_enabled
+config.DATASET_ALLOWED_ROOTS = dataset_allowed_roots
+config.DATASET_ADMIN_IDENTITIES = dataset_admin_identities
 
 #===============================
 #==   CREATE APP
@@ -405,14 +687,23 @@ app.app_context().push()
 #==   INIT OIDC TO APP
 #===============================
 # - Add Flask OIDC configuration
-if use_aai and oidc is not None:
+if use_aai:
+	if oidc is None:
+		logger.critical("AAI is enabled, but flask_oidc_ex could not be initialized")
+		raise RuntimeError("AAI requested but flask_oidc_ex is unavailable")
+
 	logger.info("Initializing OIDC to app ...")
 	try:
 		oidc.init_app(app)
-	except:
-		logger.error("Failed to initialize OIDC to app!")
+		logger.info("OIDC initialization completed successfully")
+
+	except Exception as e:
+		logger.exception(f"Failed to initialize OIDC to app (err={str(e)})!")
+		raise
+
 else:
 	logger.info("Starting app without AAI ...")
+
 
 #===============================
 #==   INIT MONGO TO APP

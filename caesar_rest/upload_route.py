@@ -59,11 +59,13 @@ def upload_file():
 	""" Upload image """
 
 	# - Get aai info
-	username= 'anonymous'
-	if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info):
-		email= g.oidc_token_info['email']
-		username= utils.sanitize_username(email)
+	#username= 'anonymous'
+	#if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info):
+	#	email= g.oidc_token_info['email']
+	#	username= utils.sanitize_username(email)
 		
+	# - Get authenticated user storage identifier
+	username = utils.get_storage_username()
 
 	# - Init response
 	res= {

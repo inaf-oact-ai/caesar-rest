@@ -70,7 +70,17 @@ class Config(object):
 	SLURM_OUTLIER_FINDER_JOB_IMAGE= '/opt/containers/sclassifier/outlier_finder_latest.sif'
 	SLURM_HDBSCAN_JOB_IMAGE= '/opt/containers/sclassifier/hdbscan_latest.sif'
 	SLURM_SIMSEARCH_JOB_IMAGE= '/opt/containers/sclassifier/similarity-search_latest.sif'
-	SLURM_CAESAR_YOLO_JOB_IMAGE= '/opt/containers/caesar-yolo/caesar-yolo-job_latest.sif'	
+	SLURM_CAESAR_YOLO_JOB_IMAGE= '/opt/containers/caesar-yolo/caesar-yolo-job_latest.sif'
+	SLURM_SFFORECASTER_JOB_IMAGE= '/opt/containers/sfforecaster/sfforecaster-job_latest.sif'
+	SLURM_FEXTRACTOR_TF_JOB_IMAGE= '/opt/containers/fextractor/fextractor-tf_latest.sif'
+	SLURM_FEXTRACTOR_TORCH_JOB_IMAGE= '/opt/containers/fextractor/fextractor-torch_latest.sif'
+	SLURM_FEXTRACTOR_CHRONOS_JOB_IMAGE= '/opt/containers/fextractor/fextractor-chronos_latest.sif'
+	SLURM_FEXTRACTOR_MOIRAI_JOB_IMAGE= '/opt/containers/fextractor/fextractor-moirai_latest.sif'
+	SLURM_FEXTRACTOR_FATS_JOB_IMAGE= '/opt/containers/fextractor/fextractor-fats_latest.sif'
+	SLURM_FEXTRACTOR_LICU_JOB_IMAGE= '/opt/containers/fextractor/fextractor-licu_latest.sif'
+	SLURM_FEXTRACTOR_FALCON_JOB_IMAGE= '/opt/containers/fextractor/fextractor-falcon_latest.sif'
+	SLURM_OXKAT_JOB_IMAGE= '/opt/containers/oxkat/oxkat-caesar.sif'
+
 	SLURM_MAX_CORE_PER_JOB= 4 # Maximum number of cores reserved for a job
 	
 	# - AAI options
@@ -120,7 +130,46 @@ class Config(object):
 	# - CAESAR-YOLO app options
 	CAESAR_YOLO_JOB_IMAGE= 'sriggi/caesar-yolo-job:latest'
 	
+	# - SFFORECASTER app options
+	SFFORECASTER_JOB_IMAGE= 'sriggi/sfforecaster-job:latest'
+	
+	# - FEXTRACTOR app options
+	FEXTRACTOR_TF_JOB_IMAGE= 'sriggi/fextractor-tf:latest'
+	FEXTRACTOR_TORCH_JOB_IMAGE= 'sriggi/fextractor-torch:latest'
+	FEXTRACTOR_CHRONOS_JOB_IMAGE= 'sriggi/fextractor-chronos:latest'
+	FEXTRACTOR_MOIRAI_JOB_IMAGE= 'sriggi/fextractor-moirai:latest'
+	FEXTRACTOR_FATS_JOB_IMAGE= 'sriggi/fextractor-fats:latest'
+	FEXTRACTOR_LICU_JOB_IMAGE= 'sriggi/fextractor-licu:latest'
+	FEXTRACTOR_FALCON_JOB_IMAGE= 'sriggi/fextractor-falcon:latest'
+	
+	# - OXKAT app options
+	OXKAT_JOB_IMAGE= 'sriggi/oxkat-caesar:latest' ## TO BE CREATED YET!
+
 	# - DATASET app options
+	# - Dynamic dataset registry options
+	#
+	# Disabled by default for backward compatibility.
+	# Requires MongoDB and authenticated OIDC identities.
+	DATASET_REGISTRY_ENABLED = False
+
+	# Only these physical storage roots may contain
+	# dynamically registered datasets.
+	#
+	# All paths must be absolute.
+	# Symlinks are resolved during registration.
+	DATASET_ALLOWED_ROOTS = []
+
+	# CAESAR-REST dataset administrators.
+	#
+	# Each identity is represented by:
+	#     <OIDC issuer>|<OIDC subject>
+	#
+	# Example:
+	#     https://identity.example.org|admin-subject
+	#
+	# Do not use email addresses or display names.
+	DATASET_ADMIN_IDENTITIES = []
+	
 	#   NB: paths are to be configured at app deployment phase.
 	DATASETS= {
 		"smgps": {

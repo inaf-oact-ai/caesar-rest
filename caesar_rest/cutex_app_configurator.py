@@ -48,6 +48,8 @@ class CutexAppConfigurator(AppConfigurator):
 			""
 		)
 		
+		self.tool_categories= ["image"]
+		
 		self.input_requirements = {
 			"supported_formats": ["uid", "abspath", "dataset"],
 			"expected_data": "TBD",
@@ -161,10 +163,13 @@ class CutexAppConfigurator(AppConfigurator):
 		""" Transform input file from uuid to actual path """		
 	
 		# - Get aai info
-		username= 'anonymous'
-		if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info):
-			email= g.oidc_token_info['email']
-			username= utils.sanitize_username(email)
+		#username= 'anonymous'
+		#if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info):
+		#	email= g.oidc_token_info['email']
+		#	username= utils.sanitize_username(email)
+
+		# - Get authenticated user storage identifier
+		username = utils.get_storage_username()
 
 		# - Inspect inputfile (expect it is a uuid, so convert to filename)
 		logger.info("Finding inputfile uuid %s ..." % file_uuid, action="submitjob")

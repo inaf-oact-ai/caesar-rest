@@ -393,7 +393,16 @@ class SlurmJobManager(object):
 	#===============================================
 	#==     CREATE JOB WITH PRE-MOUNTED VOLUME
 	#===============================================
-	def create_job(self, image, job_args, inputfile, job_name="", job_outdir="", job_run_opts={}):
+	def create_job(
+		self, 
+		image, 
+		job_args, 
+		inputfile, 
+		job_name="", 
+		job_outdir="", 
+		job_run_opts={},
+		app_mode="",
+	):
 		""" Create a standard job object with rclone mounted volume """
 
 		# - Check mandatory vars to be set
@@ -406,9 +415,16 @@ class SlurmJobManager(object):
 			logger.warn("Empty job args given!", action="submitjob")
 			return None
 
-		if inputfile=="":
-			logger.warn("Empty inputfile given!", action="submitjob")
-			return None	
+		if isinstance(inputfile, list):
+			for item in inputfile:
+				if item=="":
+					logger.warn("Empty inputfile entry given!", action="submitjob")
+					return None
+		else:
+			if inputfile=="":
+				logger.warn("Empty inputfile given!", action="submitjob")
+				return None	
+			
 
 		if job_name=="":
 			job_name= utils.get_uuid()
@@ -438,11 +454,26 @@ class SlurmJobManager(object):
 		#   by replacing app dirs with slurm dirs
 		inputfile_cluster= inputfile
 		if self.app_datadir!=self.cluster_datadir:
-			if inputfile.find(self.app_datadir)!=0:
-				logger.warn("Cannot find app data dir string (%s) in provided inputfile string (%s), this is not expected, return None!" % (self.app_datadir, inputfile), action="submitjob")
-				return None
-			inputfile_cluster= inputfile.replace(self.app_datadir, self.cluster_datadir)
-			logger.info("Convert given inputfile from app ref (%s) to cluster ref (%s) ..." % (inputfile, inputfile_cluster), action="submitjob")
+			if isinstance(inputfile, list):
+				inputfile_cluster= []
+
+				for item in inputfile:
+					if item.find(self.app_datadir)!=0:
+						logger.warn("Cannot find app data dir string (%s) in provided inputfile string (%s), this is not expected, return None!" % (self.app_datadir, item), action="submitjob")
+						return None
+
+					inputfile_cluster.append(item.replace(self.app_datadir, self.cluster_datadir))
+
+				logger.info("Convert given inputfiles from app refs (%s) to cluster refs (%s) ..." % (inputfile, inputfile_cluster), action="submitjob")
+
+			else:
+				if inputfile.find(self.app_datadir)!=0:
+					logger.warn("Cannot find app data dir string (%s) in provided inputfile string (%s), this is not expected, return None!" % (self.app_datadir, inputfile), action="submitjob")
+					return None
+
+				inputfile_cluster= inputfile.replace(self.app_datadir, self.cluster_datadir)
+				logger.info("Convert given inputfile from app ref (%s) to cluster ref (%s) ..." % (inputfile, inputfile_cluster), action="submitjob")
+
 
 		job_outdir_cluster= job_outdir
 		if job_outdir!="" and self.app_jobdir!=self.cluster_jobdir:
@@ -464,6 +495,8 @@ class SlurmJobManager(object):
 		env_vars+= "".join("--env JOB_OPTIONS=\'%s\' " % job_args)
 		env_vars+= "".join("--env JOB_OUTDIR=%s " % job_outdir)
 		env_vars+= "".join("--env MODEL_DIR=%s " % self.app_modeldir)
+		if app_mode:
+			env_vars+= "".join("--env APP_MODE=%s " % app_mode)
 		
 		logger.info("app_modeldir: %s" % (self.app_modeldir))
 

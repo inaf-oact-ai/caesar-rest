@@ -455,7 +455,19 @@ class KubeJobManager(object):
 	#===============================================
 	#==     CREATE JOB WITH RCLONE MOUNTED VOLUME
 	#===============================================
-	def create_job_rclone(self, image, job_args, label, job_name="", job_outdir="", rclone_storage_name="neanias-nextcloud", rclone_secret_name="rclone-secret", rclone_storage_path=".", rclone_mount_path="/mnt/storage"):
+	def create_job_rclone(
+		self, 
+		image, 
+		job_args, 
+		label, 
+		job_name="", 
+		job_outdir="", 
+		rclone_storage_name="neanias-nextcloud", 
+		rclone_secret_name="rclone-secret", 
+		rclone_storage_path=".", 
+		rclone_mount_path="/mnt/storage",
+		app_mode="",
+	):
 		""" Create a standard job object with rclone mounted volume """
 
 		# - Check job options
@@ -476,6 +488,9 @@ class KubeJobManager(object):
 			"MOUNT_VOLUME_PATH": rclone_mount_path,
 			"RCLONE_MOUNT_WAIT_TIME": "10"
 		}
+		
+		if app_mode:
+			env_vars["APP_MODE"]= app_mode
 
 		# - Set security context	
 		capabilities= client.V1Capabilities(add=["SYS_ADMIN"])

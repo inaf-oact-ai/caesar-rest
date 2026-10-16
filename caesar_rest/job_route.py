@@ -13,6 +13,7 @@ import numpy as np
 import glob
 import base64
 import errno
+import hashlib
 
 try:
 	FileNotFoundError  # python3
@@ -46,6 +47,7 @@ from caesar_rest import oidc
 from caesar_rest import utils
 from caesar_rest.decorators import custom_require_login
 from caesar_rest import mongo
+from caesar_rest import dataset_registry
 from caesar_rest import jobmgr_kube
 from caesar_rest import jobmgr_slurm
 
@@ -68,29 +70,55 @@ job_preview_bp = Blueprint('job_preview', __name__, url_prefix='/caesar/api/v1.0
 job_preview_file_bp = Blueprint('job_preview_file', __name__, url_prefix='/caesar/api/v1.0')
 dataset_names_bp = Blueprint('dataset_names', __name__, url_prefix='/caesar/api/v1.0')
 
+
 #=================================
 #===      DATASETS
 #=================================
-@job_bp.route('/datasets',methods=['GET'])
+#@job_bp.route('/datasets',methods=['GET'])
+#@custom_require_login
+#def get_dataset_names():
+#	""" Get supported datasets (with paths not empty) """
+
+#	datasets= current_app.config['DATASETS']
+#	dataset_names= {}
+#	for key, value in datasets.items():
+#		if value["path"]=="":
+#			continue
+#		dataset_names[key]= value.copy()
+#		del dataset_names[key]["path"]
+	
+#	return make_response(jsonify(dataset_names), 200)
+
+
+@job_bp.route('/datasets', methods=['GET'])
 @custom_require_login
 def get_dataset_names():
-	""" Get supported datasets (with paths not empty) """
+	"""Return datasets accessible to the current user."""
 
-	datasets= current_app.config['DATASETS']
-	dataset_names= {}
-	for key, value in datasets.items():
-		if value["path"]=="":
-			continue
-		dataset_names[key]= value.copy()
-		del dataset_names[key]["path"]
-	
-	return make_response(jsonify(dataset_names), 200)
+	try:
+		datasets = dataset_registry.available_datasets()
+
+	except dataset_registry.DatasetError as e:
+		return make_response(
+			jsonify({'error': str(e)}),
+			e.status
+		)
+
+	except Exception as e:
+		logger.error(
+			"Failed to retrieve available datasets (err=%s)!" % str(e),
+			action="getdatasets"
+		)
+		return make_response(
+			jsonify({'error': 'Failed to retrieve datasets'}),
+			500
+		)
+
+	return make_response(jsonify(datasets), 200)
 
 #=================================
 #===      JOB SUBMIT 
 #=================================
-
-
 @job_bp.route('/job', methods=['POST'])
 @custom_require_login
 def submit_job():
@@ -105,10 +133,13 @@ def submit_job():
 	res['submit_date']= ''
 
 	# - Get aai info
-	username= 'anonymous'
-	if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info):
-		email= g.oidc_token_info['email']
-		username= utils.sanitize_username(email)
+	#username= 'anonymous'
+	#if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info):
+	#	email= g.oidc_token_info['email']
+	#	username= utils.sanitize_username(email)
+
+	# - Get authenticated user storage identifier
+	username = utils.get_storage_username()
 
 	# - Get mongo info
 	mongo_dbhost= current_app.config['MONGO_HOST']
@@ -188,7 +219,7 @@ def submit_job():
 		submit_res= submit_job_celery(app_name, cmd, cmd_args, job_top_dir, username, mongo_dbhost, mongo_dbport, mongo_dbname)
 	
 	elif job_scheduler=='kubernetes':
-		submit_res= submit_job_kubernetes(app_name, cmd_args, job_top_dir, username)
+		submit_res= submit_job_kubernetes(app_name, cmd_args, job_top_dir, username, run_opts)
 
 	elif job_scheduler=='slurm':
 		submit_res= submit_job_slurm(app_name, inputfile, cmd_args, job_top_dir, username, run_opts)
@@ -291,7 +322,7 @@ def submit_job_celery(app_name, cmd, cmd_args, job_top_dir, username, mongo_dbho
 #=================================
 #===    SUBMIT JOB KUBERNETES
 #=================================
-def submit_job_kubernetes(app_name, cmd_args, job_top_dir, username):
+def submit_job_kubernetes(app_name, cmd_args, job_top_dir, username, run_opts):
 	""" Submit job to Kubernetes scheduler """
 
 	# - Init response
@@ -322,6 +353,7 @@ def submit_job_kubernetes(app_name, cmd_args, job_top_dir, username):
 			return None
 
 	# - Set job options
+	app_mode= ""
 	if app_name=="caesar":
 		image= current_app.config['CAESAR_JOB_IMAGE']
 		job_label= 'caesar-job'
@@ -345,6 +377,12 @@ def submit_job_kubernetes(app_name, cmd_args, job_top_dir, username):
 	elif app_name=="classifier-vit":
 		image= current_app.config['VIT_CLASSIFIER_JOB_IMAGE']
 		job_label= 'vit_classifier-job'
+		app_mode= 'image'
+		
+	elif app_name=="classifier-vit-catalog":
+		image= current_app.config["VIT_CLASSIFIER_JOB_IMAGE"]
+		job_label= "vit_classifier_catalog-job"
+		app_mode= 'catalog'
 		
 	elif app_name=="umap":
 		image= current_app.config['UMAP_JOB_IMAGE']
@@ -366,6 +404,66 @@ def submit_job_kubernetes(app_name, cmd_args, job_top_dir, username):
 		image= current_app.config['CAESAR_YOLO_JOB_IMAGE']
 		job_label= 'caesar-yolo-job'
 
+	elif app_name=="sfforecaster":
+		image= current_app.config['SFFORECASTER_JOB_IMAGE']
+		job_label= 'sfforecaster-job'
+		
+	elif app_name=="fextractor":
+		container_variant= run_opts.get(
+			"container_variant",
+			"",
+		)
+
+		if container_variant=="tf":
+			image= current_app.config[
+				'FEXTRACTOR_TF_JOB_IMAGE'
+			]
+
+		elif container_variant=="torch":
+			image= current_app.config[
+				'FEXTRACTOR_TORCH_JOB_IMAGE'
+			]
+			
+		elif container_variant=="chronos":
+			image= current_app.config[
+				'FEXTRACTOR_CHRONOS_JOB_IMAGE'
+			]
+			
+		elif container_variant=="moirai":
+			image= current_app.config[
+				'FEXTRACTOR_MOIRAI_JOB_IMAGE'
+			]
+			
+		elif container_variant=="fats":
+			image= current_app.config[
+				'FEXTRACTOR_FATS_JOB_IMAGE'
+			]
+			
+		elif container_variant=="licu":
+			image= current_app.config[
+				'FEXTRACTOR_LICU_JOB_IMAGE'
+			]
+			
+		elif container_variant=="falcon":
+			image= current_app.config[
+				'FEXTRACTOR_FALCON_JOB_IMAGE'
+			]
+
+		else:
+			logger.warn(
+				"Unknown fextractor container variant '%s'!" %
+				container_variant,
+				action="submitjob",
+				user=username,
+			)
+			return None
+
+		job_label= 'fextractor-job'	
+		
+	elif app_name=="oxkat":
+		image= current_app.config['OXKAT_JOB_IMAGE']
+		job_label= 'oxkat-job'	
+		
 	else:
 		logger.warn("Unknown/unsupported app %s!" % app_name, action="submitjob", user=username)
 		return None
@@ -382,7 +480,8 @@ def submit_job_kubernetes(app_name, cmd_args, job_top_dir, username):
 			rclone_storage_name=rclone_storage_name, 
 			rclone_secret_name=rclone_secret_name, 
 			rclone_storage_path=rclone_storage_path, 
-			rclone_mount_path=mount_vol_path
+			rclone_mount_path=mount_vol_path,
+			app_mode=app_mode,
 		)
 
 	else:
@@ -440,6 +539,7 @@ def submit_job_slurm(app_name, inputfile, cmd_args, job_top_dir, username, run_o
 
 	# - Set job options
 	image= ''
+	app_mode= ''
 	if app_name=="caesar":
 		image= current_app.config['SLURM_CAESAR_JOB_IMAGE']
 
@@ -457,7 +557,12 @@ def submit_job_slurm(app_name, inputfile, cmd_args, job_top_dir, username, run_o
 		
 	elif app_name=="classifier-vit":
 		image= current_app.config['SLURM_VIT_CLASSIFIER_JOB_IMAGE']
+		app_mode = "image"
 	
+	elif app_name=="classifier-vit-catalog":
+		image= current_app.config["SLURM_VIT_CLASSIFIER_JOB_IMAGE"]
+		app_mode = "catalog"
+		
 	elif app_name=="umap":
 		image= current_app.config['SLURM_UMAP_JOB_IMAGE']
 		
@@ -473,6 +578,62 @@ def submit_job_slurm(app_name, inputfile, cmd_args, job_top_dir, username, run_o
 	elif app_name=="caesar-yolo":
 		image= current_app.config['SLURM_CAESAR_YOLO_JOB_IMAGE']
 		
+	elif app_name=="sfforecaster":
+		image= current_app.config['SLURM_SFFORECASTER_JOB_IMAGE']
+			
+	elif app_name=="fextractor":
+		container_variant= run_opts.get(
+			"container_variant",
+			"",
+		)
+
+		if container_variant=="tf":
+			image= current_app.config[
+				'SLURM_FEXTRACTOR_TF_JOB_IMAGE'
+			]
+
+		elif container_variant=="torch":
+			image= current_app.config[
+				'SLURM_FEXTRACTOR_TORCH_JOB_IMAGE'
+			]
+			
+		elif container_variant=="chronos":
+			image= current_app.config[
+				'SLURM_FEXTRACTOR_CHRONOS_JOB_IMAGE'
+			]
+			
+		elif container_variant=="moirai":
+			image= current_app.config[
+				'SLURM_FEXTRACTOR_MOIRAI_JOB_IMAGE'
+			]
+			
+		elif container_variant=="fats":
+			image= current_app.config[
+				'SLURM_FEXTRACTOR_FATS_JOB_IMAGE'
+			]
+			
+		elif container_variant=="licu":
+			image= current_app.config[
+				'SLURM_FEXTRACTOR_LICU_JOB_IMAGE'
+			]
+			
+		elif container_variant=="falcon":
+			image= current_app.config[
+				'SLURM_FEXTRACTOR_FALCON_JOB_IMAGE'
+			]
+
+		else:
+			logger.warn(
+				"Unknown fextractor container variant '%s'!" %
+				container_variant,
+				action="submitjob",
+				user=username,
+			)
+			return None		
+			
+	elif app_name=="oxkat":
+		image= current_app.config['SLURM_OXKAT_JOB_IMAGE']
+				
 	else:
 		logger.warn("Unknown/unsupported app %s!" % app_name, action="submitjob", user=username)
 		return None
@@ -484,7 +645,8 @@ def submit_job_slurm(app_name, inputfile, cmd_args, job_top_dir, username, run_o
 		inputfile=inputfile,
 		job_name=job_id, 
 		job_outdir=job_dir,
-		job_run_opts=run_opts
+		job_run_opts=run_opts,
+		app_mode=app_mode,
 	)
 	
 	if job is None or job=="":
@@ -538,10 +700,13 @@ def get_job_ids():
 	""" Retrieve all job ids per user """
 
 	# - Get aai info
-	username= 'anonymous'
-	if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info):
-		email= g.oidc_token_info['email']
-		username= utils.sanitize_username(email)
+	#username= 'anonymous'
+	#if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info):
+	#	email= g.oidc_token_info['email']
+	#	username= utils.sanitize_username(email)
+
+	# - Get authenticated user storage identifier
+	username = utils.get_storage_username()
 
 	# - Get all job ids from DB
 	res= {}	
@@ -572,10 +737,13 @@ def cancel_job(task_id):
 	res['status']= ''
 
 	# - Get aai info
-	username= 'anonymous'
-	if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info):
-		email= g.oidc_token_info['email']
-		username= utils.sanitize_username(email)
+	#username= 'anonymous'
+	#if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info):
+	#	email= g.oidc_token_info['email']
+	#	username= utils.sanitize_username(email)
+
+	# - Get authenticated user storage identifier
+	username = utils.get_storage_username()
 
 	# - Get mongo info
 	mongo_dbhost= current_app.config['MONGO_HOST']
@@ -873,10 +1041,13 @@ def get_job_status(task_id):
 	res['tag']= ''
 
 	# - Get aai info
-	username= 'anonymous'
-	if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info):
-		email= g.oidc_token_info['email']
-		username= utils.sanitize_username(email)
+	#username= 'anonymous'
+	#if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info):
+	#	email= g.oidc_token_info['email']
+	#	username= utils.sanitize_username(email)
+
+	# - Get authenticated user storage identifier
+	username = utils.get_storage_username()
 
 	# - Search job id in user collection
 	collection_name= username + '.jobs'
@@ -1016,33 +1187,88 @@ def process_multi_data_inputs(req_data, res, current_app, username):
 				status= -1
 				return (status, res, [], [])
 	
-		elif data_format=="abspath":
-			# - This is already intended to be an absolute path
-			inputfile= data_input
-			inputfile_for_response= inputfile
+		#elif data_format=="abspath":
+		#	# - This is already intended to be an absolute path
+		#	inputfile= data_input
+		#	inputfile_for_response= inputfile
 		 
+		elif data_format=="abspath":
+			# - Validate direct absolute-path access
+			# - Managed dataset roots require dataset IDs
+
+			try:
+				dataset_registry.guard_abspath(data_input)
+
+			except dataset_registry.DatasetError as e:
+				logger.warn(
+					"Absolute-path input rejected for user %s: %s" %
+					(username, str(e)),
+					action="submitjob",
+					user=username
+				)
+
+				res['state']= 'ABORTED'
+				res['status']= str(e)
+				status= -1
+
+				return (status, res, [], [])
+
+			inputfile= data_input
+			inputfile_for_response= inputfile		 
+		 
+		 
+		#elif data_format=="dataset":
+		#	# - Set input to dataset path (if defined)
+		#	dataset_id= data_input
+		#	inputfile= ""
+		#	inputfile_for_response= dataset_id
+		
+		#	if dataset_id not in datasets:
+		#		logger.warn("Dataset id %s given by user %s not found among configured datasets!" % (dataset_id, username), action="submitjob", user=username)	
+		#		res['state']= 'ABORTED'	
+		#		res['status']= 'Dataset id not found among configured datasets!'
+		#		status= -1
+		#		return (status, res, [], [])
+	
+		#	if datasets[dataset_id]["path"]=="":
+		#		logger.warn("Dataset id %s required by user %s existing but its path was not configured when the app was deployed" % (dataset_id, username), action="submitjob", user=username)	
+		#		res['state']= 'ABORTED'	
+		#		res['status']= 'Dataset id existing but its path not configured when the app was deployed'
+		#		status= -1
+		#		return (status, res, [], [])
+		
+		#	inputfile= datasets[dataset_id]["path"]
+		#	inputfile_for_response= dataset_id
+		
+		
 		elif data_format=="dataset":
-			# - Set input to dataset path (if defined)
+			# - Resolve dataset ID from dynamic registry
+			# - Verify user access permissions
+			# - Fall back to legacy static datasets
+			#   according to registry migration policy
+
 			dataset_id= data_input
 			inputfile= ""
 			inputfile_for_response= dataset_id
-		
-			if dataset_id not in datasets:
-				logger.warn("Dataset id %s given by user %s not found among configured datasets!" % (dataset_id, username), action="submitjob", user=username)	
-				res['state']= 'ABORTED'	
-				res['status']= 'Dataset id not found among configured datasets!'
+
+			try:
+				inputfile= dataset_registry.resolve_input_dataset(
+					dataset_id
+				)
+
+			except dataset_registry.DatasetError as e:
+				logger.warn(
+					"Dataset %s rejected for user %s: %s" %
+					(dataset_id, username, str(e)),
+					action="submitjob",
+					user=username
+				)
+
+				res['state']= 'ABORTED'
+				res['status']= str(e)
 				status= -1
-				return (status, res, [], [])
-	
-			if datasets[dataset_id]["path"]=="":
-				logger.warn("Dataset id %s required by user %s existing but its path was not configured when the app was deployed" % (dataset_id, username), action="submitjob", user=username)	
-				res['state']= 'ABORTED'	
-				res['status']= 'Dataset id existing but its path not configured when the app was deployed'
-				status= -1
-				return (status, res, [], [])
-		
-			inputfile= datasets[dataset_id]["path"]
-			inputfile_for_response= dataset_id
+
+				return (status, res, [], [])		
 		
 		else:
 			logger.warn("Invalid data_inputs_format option value given by user %s!" % (username), action="submitjob", user=username)	
@@ -1101,35 +1327,84 @@ def process_single_data_inputs(req_data, res, current_app, username):
 			status= -1
 			return (status, res, inputfile, inputfile_for_response)
 			
+	#elif data_inputs_format=="abspath":
+	#	# - This is already intended to be an absolute path
+	#	#inputfile= req_data['data_inputs']
+	#	inputfile= data_inputs
+	#	inputfile_for_response= inputfile
+		
 	elif data_inputs_format=="abspath":
-		# - This is already intended to be an absolute path
-		#inputfile= req_data['data_inputs']
+		# - Validate direct absolute-path access
+		# - Managed dataset roots require dataset IDs
+
+		try:
+			dataset_registry.guard_abspath(data_inputs)
+
+		except dataset_registry.DatasetError as e:
+			logger.warn(
+				"Absolute-path input rejected for user %s: %s" %
+				(username, str(e)),
+				action="submitjob",
+				user=username
+			)
+
+			res['state']= 'ABORTED'
+			res['status']= str(e)
+			status= -1
+
+			return (status, res, "", "")
+
 		inputfile= data_inputs
-		inputfile_for_response= inputfile
+		inputfile_for_response= inputfile		
 		 
+	#elif data_inputs_format=="dataset":
+	#	# - Set input to dataset path (if defined)
+	#	dataset_id= data_inputs
+	#	inputfile= ""
+	#	inputfile_for_response= dataset_id
+	#	
+	#	if dataset_id not in datasets:
+	#		logger.warn("Dataset id %s given by user %s not found among configured datasets!" % (dataset_id, username), action="submitjob", user=username)	
+	#		res['state']= 'ABORTED'	
+	#		res['status']= 'Dataset id not found among configured datasets!'
+	#		status= -1
+	#		return (status, res, inputfile, inputfile_for_response)
+	#
+	#	if datasets[dataset_id]["path"]=="":
+	#		logger.warn("Dataset id %s required by user %s existing but its path was not configured when the app was deployed" % (dataset_id, username), action="submitjob", user=username)	
+	#		res['state']= 'ABORTED'	
+	#		res['status']= 'Dataset id existing but its path not configured when the app was deployed'
+	#		status= -1
+	#		return (status, res, inputfile, inputfile_for_response)
+	#	
+	#	inputfile= datasets[dataset_id]["path"]
+	#	inputfile_for_response= dataset_id
+		
 	elif data_inputs_format=="dataset":
-		# - Set input to dataset path (if defined)
+		# - Resolve and authorize the dataset ID
+
 		dataset_id= data_inputs
-		#dataset_id= req_data['data_inputs']
 		inputfile= ""
 		inputfile_for_response= dataset_id
-		
-		if dataset_id not in datasets:
-			logger.warn("Dataset id %s given by user %s not found among configured datasets!" % (dataset_id, username), action="submitjob", user=username)	
-			res['state']= 'ABORTED'	
-			res['status']= 'Dataset id not found among configured datasets!'
+
+		try:
+			inputfile= dataset_registry.resolve_input_dataset(
+				dataset_id
+			)
+
+		except dataset_registry.DatasetError as e:
+			logger.warn(
+				"Dataset %s rejected for user %s: %s" %
+				(dataset_id, username, str(e)),
+				action="submitjob",
+				user=username
+			)
+
+			res['state']= 'ABORTED'
+			res['status']= str(e)
 			status= -1
-			return (status, res, inputfile, inputfile_for_response)
-	
-		if datasets[dataset_id]["path"]=="":
-			logger.warn("Dataset id %s required by user %s existing but its path was not configured when the app was deployed" % (dataset_id, username), action="submitjob", user=username)	
-			res['state']= 'ABORTED'	
-			res['status']= 'Dataset id existing but its path not configured when the app was deployed'
-			status= -1
-			return (status, res, inputfile, inputfile_for_response)
-		
-		inputfile= datasets[dataset_id]["path"]
-		inputfile_for_response= dataset_id
+
+			return (status, res, "", "")		
 		
 	else:
 		logger.warn("Invalid data_inputs_format option value given by user %s!" % (username), action="submitjob", user=username)	
@@ -1162,10 +1437,13 @@ def get_job_out_file(task_id, label):
 	res['status']= ''
 
 	# - Get aai info
-	username= 'anonymous'
-	if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info):
-		email= g.oidc_token_info['email']
-		username= utils.sanitize_username(email)
+	#username= 'anonymous'
+	#if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info):
+	#	email= g.oidc_token_info['email']
+	#	username= utils.sanitize_username(email)
+
+	# - Get authenticated user storage identifier
+	username = utils.get_storage_username()
 
 	# - Search job id in user collection
 	collection_name= username + '.jobs'
@@ -1263,11 +1541,12 @@ def get_job_out_file(task_id, label):
 			res['status']= errmsg
 			return make_response(jsonify(res),500)
 
-		if image=='':
-			errmsg= 'Failed to convert file ' + filename + ' to b64 string (err=' + str(e) + ')!'
+		if not image:
+			errmsg = 'Failed to convert file ' + filename + ' to b64 string (empty result)!'
 			logger.warn(errmsg, action="joboutput", user=username)
-			res['status']= errmsg
-			return make_response(jsonify(res),500)
+			res['status'] = errmsg
+			return make_response(jsonify(res), 500)	
+			
 		else:
 			return make_response(jsonify({'status': '', 'image': image}), 200)
 	
