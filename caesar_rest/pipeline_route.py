@@ -5,11 +5,13 @@ from flask import Blueprint, jsonify, request
 from caesar_rest import utils
 from caesar_rest.decorators import custom_require_login
 from caesar_rest import pipeline_manager as manager
-
+from caesar_rest import pipeline_status_sync
 
 pipeline_bp = Blueprint('pipelines', __name__, url_prefix='/caesar/api/v1.0')
 
-
+###########################################
+###       HELPERS
+###########################################
 def invoke(callback, *args):
 	try:
 		owner = utils.get_storage_username()
@@ -17,7 +19,9 @@ def invoke(callback, *args):
 	except manager.PipelineError as exc:
 		return jsonify({'error': str(exc)}), exc.status
 
-
+############################################
+###      ROUTES
+############################################
 @pipeline_bp.route('/pipelines', methods=['POST'])
 @custom_require_login
 def create_pipeline():
@@ -65,3 +69,14 @@ def select_run(pipeline_id, node_id):
 			raise manager.PipelineError('run_id must be supplied as a string')
 		return jsonify(manager.select_run(owner, pipeline_id, node_id, payload['run_id']))
 	return invoke(action)
+	
+ 
+@pipeline_bp.route('/pipelines/<pipeline_id>/sync', methods=['POST'])
+@custom_require_login
+def sync_pipeline(pipeline_id):
+	"""Explicitly synchronize associated pipeline runs with job states."""
+	return invoke(lambda owner: jsonify(
+		pipeline_status_sync.synchronize_pipeline(owner, pipeline_id)
+	))
+	
+	
