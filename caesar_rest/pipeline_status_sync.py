@@ -33,6 +33,62 @@ def desired_status(job):
 	return None
 
 
+def synchronize_monitored_job(db, job_obj, state, exit_code=None):
+	"""Synchronize one pipeline run after its ordinary job DB update.
+
+	This function does not query the scheduler or modify the job record.
+	Standalone jobs are ignored.
+	"""
+
+	pipeline_id = job_obj.get('pipeline_id')
+	run_id = job_obj.get('run_id')
+	job_id = job_obj.get('job_id')
+
+	if not pipeline_id or not run_id or not job_id:
+		return False
+
+	# - Use the same mapping as explicit M1C synchronization.
+	job_state = {'state': state, 'exit_code': exit_code}
+	status = desired_status(job_state)
+	if status is None:
+		return False
+
+	# - Never regress RUNNING to SUBMITTED, or overwrite
+	#   a terminal run. The conditional update is atomic.
+	allowed_states = ['SUBMITTED']
+	if status != 'RUNNING':
+		allowed_states.append('RUNNING')
+
+	changes = {
+		'status': status,
+		'job_state': state,
+		'job_exit_code': exit_code,
+		'synchronized_at': manager.utcnow()
+	}
+
+	if status in ('COMPLETED', 'FAILED', 'CANCELLED'):
+		changes['finished_at'] = manager.utcnow()
+
+	# - Derive the owner from the existing per-user job collection
+	#   in the caller, not from client-supplied pipeline metadata.
+	owner = job_obj.get('_pipeline_sync_owner')
+	if not owner:
+		return False
+
+	result = db.pipeline_runs.update_one(
+		{
+			'owner': owner,
+			'pipeline_id': pipeline_id,
+			'run_id': run_id,
+			'job_id': job_id,
+			'status': {'$in': allowed_states}
+		},
+		{'$set': changes}
+	)
+
+	return result.modified_count == 1
+
+
 def synchronize_pipeline(owner, pipeline_id):
 	"""Refresh known associated runs using already persisted job states.
 

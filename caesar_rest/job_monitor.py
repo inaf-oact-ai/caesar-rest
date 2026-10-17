@@ -43,13 +43,13 @@ from caesar_rest.app import celery as celery_app
 from caesar_rest import utils
 from caesar_rest import jobmgr_kube
 from caesar_rest import jobmgr_slurm
+from caesar_rest import pipeline_status_sync
 
 # Import mongo
 from pymongo import MongoClient
 
 
 # Get logger
-#logger = logging.getLogger(__name__)
 from caesar_rest import logger
 
 ##############################
@@ -273,6 +273,36 @@ def monitor_jobs(db):
 
 	return 0
 	
+def safe_sync_monitored_pipeline_job(job_obj, job_collection, state, exit_code=None):
+	"""Best-effort pipeline sync; never interrupt legacy job monitoring."""
+
+	if not job_obj.get('pipeline_id') or not job_obj.get('run_id'):
+		return
+
+	try:
+		sync_job = dict(job_obj)
+		collection_name = job_collection.name
+
+		if not collection_name.endswith('.jobs'):
+			return
+
+		sync_job['_pipeline_sync_owner'] = collection_name[:-5]
+
+		pipeline_status_sync.synchronize_monitored_job(
+			job_collection.database,
+			sync_job,
+			state,
+			exit_code=exit_code
+		)
+
+	except Exception as exc:
+		logger.error(
+			"Pipeline status sync failed for job %s (err=%s)!" %
+			(job_obj.get('job_id'), str(exc)),
+			action="jobmonitor"
+		)
+
+
 
 ####################################
 ##   MONITOR KUBERNETES JOB
@@ -337,14 +367,20 @@ def monitor_kubernetes_job(job_obj, job_collection):
 			logger.warn("Won't create output data tar file %s as job output directory %s not found ..." % (tar_file, job_dir), action="jobmonitor")
 
 			
-	# - Update job status
+	# - Update job & pipeline-associated job status
 	try:
 		logger.info("Updating job %s state to %s (status=%s) ..." % (job_id, state, status), action="jobmonitor")
-		job_collection.update_one({'job_id':job_id},{'$set':{'state':state,'status':status,'elapsed_time':elapsed_time}},upsert=False)
+		#job_collection.update_one({'job_id':job_id},{'$set':{'state':state, 'status':status, 'elapsed_time':elapsed_time}}, upsert=False)
+		update_result= job_collection.update_one({'job_id':job_id},{'$set':{'state':state, 'status':status, 'elapsed_time': elapsed_time}}, upsert=False)
 	except Exception as e:
 		errmsg= 'Exception caught when updating job ' + str(job_id) + ' in DB (err=' + str(e) + ')!'
 		logger.warn(errmsg, action="jobmonitor")
 		return -1
+
+	if update_result.matched_count == 1:
+		safe_sync_monitored_pipeline_job(
+			job_obj, job_collection, state
+		)
 
 	# - If SUCCESS or FAILURE clear the pod
 	#   NB: ttl option not working when job is SUCCESS.
@@ -529,7 +565,7 @@ def monitor_slurm_job(job_obj, job_collection):
 			logger.warn("Won't create output data tar file %s as job output directory %s not found ..." % (tar_file, job_dir), action="jobmonitor")
 
 			
-	# - Update job status
+	# - Update job & pipeline-associated job status
 	try:
 		logger.info("Updating job %s state to %s (status=%s) ..." % (job_id, state, status), action="jobmonitor")
 		job_collection.update_one({'job_id':job_id},{'$set':{'state':state,'status':status,'exit_code':exit_code,'elapsed_time':elapsed_time}},upsert=False)
@@ -537,6 +573,11 @@ def monitor_slurm_job(job_obj, job_collection):
 		errmsg= 'Exception caught when updating job ' + str(job_id) + ' in DB (err=' + str(e) + ')!'
 		logger.warn(errmsg, action="jobmonitor")
 		return -1
+
+	if update_result.matched_count == 1:
+		safe_sync_monitored_pipeline_job(
+			job_obj, job_collection, state, exit_code=exit_code
+		)
 
 	return 0
 
@@ -584,7 +625,7 @@ def update_slurm_job(job_obj, res, job_collection):
 		else:
 			logger.warn("Won't create output data tar file %s as job output directory %s not found ..." % (tar_file, job_dir), action="jobmonitor")
 
-	# - Update job status
+	# - Update job & pipeline-associated job status
 	try:
 		logger.info("Updating job %s state to %s (status=%s) ..." % (job_id, state, status), action="jobmonitor")
 		job_collection.update_one({'job_id':job_id},{'$set':{'state':state,'status':status,'exit_code':exit_code,'elapsed_time':elapsed_time}},upsert=False)
@@ -592,6 +633,11 @@ def update_slurm_job(job_obj, res, job_collection):
 		errmsg= 'Exception caught when updating job ' + str(job_id) + ' in DB (err=' + str(e) + ')!'
 		logger.warn(errmsg, action="jobmonitor")
 		return -1
+
+	if update_result.matched_count == 1:
+		safe_sync_monitored_pipeline_job(
+			job_obj, job_collection, state, exit_code=exit_code
+		)
 
 	return 0
 
