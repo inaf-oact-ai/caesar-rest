@@ -51,6 +51,7 @@ from caesar_rest import dataset_registry
 from caesar_rest import jobmgr_kube
 from caesar_rest import jobmgr_slurm
 from caesar_rest import pipeline_job_binding
+from caesar_rest import pipeline_workspace
 
 # Get logger
 from caesar_rest import logger
@@ -364,6 +365,33 @@ def submit_job():
 			res['status'] = 'Job submitted; pipeline association requires reconciliation'
 			return make_response(jsonify(res), 202)
 
+
+	# - Record the existing per-job output workspace.
+	#   Failure to record workspace metadata must not affect a
+	#   successfully submitted job.
+	if pipeline_claim is not None:
+		try:
+			recorded = pipeline_workspace.record_workspace(
+				username,
+				pipeline_id,
+				run_id,
+				job_id,
+				job_top_dir
+			)
+			if not recorded:
+				logger.warn(
+					"Workspace metadata was not recorded for run %s" % run_id,
+					action="submitjob",
+					user=username
+				)
+		except Exception as exc:
+			logger.error(
+				"Failed to record workspace for run %s (err=%s)!" %
+				(run_id, str(exc)),
+				action="submitjob",
+				user=username
+			)
+	
 	# - Fill response
 	res['job_id']= job_id
 	res['submit_date']= submit_date
