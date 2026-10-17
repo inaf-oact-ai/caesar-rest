@@ -568,11 +568,11 @@ def monitor_slurm_job(job_obj, job_collection):
 	# - Update job & pipeline-associated job status
 	try:
 		logger.info("Updating job %s state to %s (status=%s) ..." % (job_id, state, status), action="jobmonitor")
-		job_collection.update_one({'job_id':job_id},{'$set':{'state':state,'status':status,'exit_code':exit_code,'elapsed_time':elapsed_time}},upsert=False)
+		update_result= job_collection.update_one({'job_id':job_id},{'$set':{'state':state, 'status':status, 'exit_code':exit_code, 'elapsed_time':elapsed_time}}, upsert=False)
 	except Exception as e:
 		errmsg= 'Exception caught when updating job ' + str(job_id) + ' in DB (err=' + str(e) + ')!'
 		logger.warn(errmsg, action="jobmonitor")
-		return -1
+		return -1	
 
 	if update_result.matched_count == 1:
 		safe_sync_monitored_pipeline_job(
@@ -628,11 +628,11 @@ def update_slurm_job(job_obj, res, job_collection):
 	# - Update job & pipeline-associated job status
 	try:
 		logger.info("Updating job %s state to %s (status=%s) ..." % (job_id, state, status), action="jobmonitor")
-		job_collection.update_one({'job_id':job_id},{'$set':{'state':state,'status':status,'exit_code':exit_code,'elapsed_time':elapsed_time}},upsert=False)
+		update_result= job_collection.update_one({'job_id':job_id},{'$set':{'state':state, 'status':status, 'exit_code':exit_code, 'elapsed_time':elapsed_time}}, upsert=False)
 	except Exception as e:
 		errmsg= 'Exception caught when updating job ' + str(job_id) + ' in DB (err=' + str(e) + ')!'
 		logger.warn(errmsg, action="jobmonitor")
-		return -1
+		return -1	
 
 	if update_result.matched_count == 1:
 		safe_sync_monitored_pipeline_job(
