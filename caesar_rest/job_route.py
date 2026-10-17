@@ -251,8 +251,13 @@ def submit_job():
 
 		elif job_scheduler == 'slurm':
 			submit_res = submit_job_slurm(
-				app_name, inputfile, cmd_args, job_top_dir, username, run_opts
+				app_name, inputfile, cmd_args, job_top_dir, username,
+				run_opts,
+				read_only_data=(
+					pipeline_claim is not None and app_name == 'oxkat'
+				)
 			)
+			
 
 	except Exception as exc:
 		logger.error(
@@ -632,7 +637,15 @@ def submit_job_kubernetes(app_name, cmd_args, job_top_dir, username, run_opts):
 #=================================
 #===    SUBMIT JOB SLURM
 #=================================
-def submit_job_slurm(app_name, inputfile, cmd_args, job_top_dir, username, run_opts):
+def submit_job_slurm(
+	app_name, 
+	inputfile, 
+	cmd_args, 
+	job_top_dir, 
+	username, 
+	run_opts,
+	read_only_data=False
+):
 	""" Submit job to Slurm scheduler """
 
 	# - Init response
@@ -764,6 +777,7 @@ def submit_job_slurm(app_name, inputfile, cmd_args, job_top_dir, username, run_o
 		job_outdir=job_dir,
 		job_run_opts=run_opts,
 		app_mode=app_mode,
+		read_only_data=read_only_data,
 	)
 	
 	if job is None or job=="":

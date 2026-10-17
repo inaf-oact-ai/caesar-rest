@@ -402,6 +402,7 @@ class SlurmJobManager(object):
 		job_outdir="", 
 		job_run_opts={},
 		app_mode="",
+		read_only_data=False,
 	):
 		""" Create a standard job object with rclone mounted volume """
 
@@ -507,20 +508,30 @@ class SlurmJobManager(object):
 		run_opts= "--containall --no-home "
 
 		# - Set singularity volume mount options
+		# - Optional read-only data mount for pipeline jobs, disabled by default for normal jobs for backward compatibility
+		data_bind_mode = "ro" if read_only_data else "rw"
+		
 		vol_opts= ""
 		vol_opts+= "".join("--scratch %s " % job_dir)
-		#vol_opts+= "".join("-B %s " % job_outdir)
-		#vol_opts+= "".join("-B %s " % inputfile)	
 		if job_outdir_cluster!="":
 			vol_opts+= "".join("-B %s:%s " % (job_outdir_cluster, job_outdir))
 			logger.info("Binding host %s to container %s ..." % (job_outdir_cluster, job_outdir))
 			
-		###vol_opts+= "".join("-B %s:%s " % (inputfile_cluster, inputfile)) ## ORIGINAL CODE (BUG?)
-		###vol_opts+= "".join("-B %s:%s " % (inputfile, inputfile_cluster)) ## TEST
-		vol_opts+= "".join("-B %s:%s " % (self.cluster_datadir, self.app_datadir)) # bind entire data volume (NB: this invalidate previous bind)
-		logger.info("Binding host %s to container %s ..." % (self.cluster_datadir, self.app_datadir))
+		# bind entire data volume (NB: this invalidate previous bind)	
+		#vol_opts+= "".join(
+		#	"-B %s:%s " % 
+		#	(self.cluster_datadir, self.app_datadir)
+		#) 
 		
-		vol_opts+= "".join("-B %s:%s " % (self.cluster_modeldir, self.app_modeldir)) # bind entire data volume (NB: this invalidate previous bind)
+		vol_opts+= "".join(
+			"-B %s:%s:%s " %
+			(self.cluster_datadir, self.app_datadir, data_bind_mode)
+		)
+
+		logger.info("Binding host %s to container %s (mode=%s) ..." % (self.cluster_datadir, self.app_datadir, data_bind_mode))
+		
+		# bind entire data volume (NB: this invalidate previous bind)
+		vol_opts+= "".join("-B %s:%s " % (self.cluster_modeldir, self.app_modeldir))
 		logger.info("Binding host %s to container %s ..." % (self.cluster_modeldir, self.app_modeldir))
 		
 		if nproc>1:
