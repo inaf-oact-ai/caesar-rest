@@ -7,6 +7,8 @@ associated pipeline runs. Invoke explicitly via the pipeline sync endpoint.
 
 from caesar_rest import mongo
 from caesar_rest import pipeline_manager as manager
+from caesar_rest import pipeline_artifact_registration
+from caesar_rest import logger
 
 # Match the persisted job states used by the existing job monitoring API.
 ACTIVE_STATES = {'STARTED', 'RUNNING'}
@@ -14,6 +16,20 @@ SUCCESS_STATES = {'SUCCESS'}
 FAILURE_STATES = {'FAILURE', 'TIMED-OUT', 'TIMEOUT', 'ABORTED'}
 CANCEL_STATES = {'CANCELED', 'CANCELLED'}
 
+def safe_register_artifacts(db, owner, pipeline_id, run_id, job_id):
+	"""Best-effort registration. Scientific status is independent of indexing."""
+	try:
+		return pipeline_artifact_registration.register_using_job_config(
+			db, owner, pipeline_id, run_id, job_id
+		)
+
+	except Exception as exc:
+		logger.error(
+			'Pipeline artifact registration failed for run %s (err=%s)' %
+			(run_id, str(exc)),
+			action='pipeline_artifacts'
+		)
+		return False
 
 def desired_status(job):
 	"""Return pipeline status or None when the job is not terminal/known."""
@@ -86,6 +102,13 @@ def synchronize_monitored_job(db, job_obj, state, exit_code=None):
 		{'$set': changes}
 	)
 
+	# - Register scientific artifacts when the job completes.
+	# - A repeated terminal synchronization can also retry registration.
+	if status == 'COMPLETED':
+		safe_register_artifacts(
+			db, owner, pipeline_id, run_id, job_id
+		)
+
 	return result.modified_count == 1
 
 
@@ -137,9 +160,38 @@ def synchronize_pipeline(owner, pipeline_id):
 		if status in ('COMPLETED', 'FAILED', 'CANCELLED'):
 			changes['finished_at'] = manager.utcnow()
 		result = runs.update_one(filter_doc, {'$set': changes})
+		
+		
 		if result.modified_count:
-			updated.append({'run_id': run['run_id'], 'job_id': job_id, 'status': status})
+			updated.append({
+				'run_id': run['run_id'],
+				'job_id': job_id,
+				'status': status
+			})
 		else:
 			unchanged += 1
-	return {'pipeline_id': pipeline_id, 'updated': updated,
-		'missing_job_run_ids': missing_jobs, 'unchanged': unchanged}
+
+	# - Register scientific artifacts for completed pipeline runs.
+	# - Include runs completed before artifact registration was deployed.
+	# - This is repeatable and does not query Slurm.
+	for completed_run in runs.find({
+		'owner': owner,
+		'pipeline_id': pipeline_id,
+		'status': 'COMPLETED',
+		'job_id': {'$type': 'string'}
+	}):
+		safe_register_artifacts(
+			mongo.db,
+			owner,
+			pipeline_id,
+			completed_run['run_id'],
+			completed_run['job_id']
+		)
+
+	return {
+		'pipeline_id': pipeline_id,
+		'updated': updated,
+		'missing_job_run_ids': missing_jobs,
+		'unchanged': unchanged
+	}
+	
