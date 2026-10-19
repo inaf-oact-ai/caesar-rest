@@ -403,6 +403,7 @@ class SlurmJobManager(object):
 		job_run_opts={},
 		app_mode="",
 		read_only_data=False,
+		preparation=None,
 	):
 		""" Create a standard job object with rclone mounted volume """
 
@@ -549,11 +550,63 @@ class SlurmJobManager(object):
 		cmd+= env_vars
 		cmd+= image
 		
+		#############################
+		###   CREATE JOB SCRIPT
+		#############################
 		# - Set job script
-		script= "#!/bin/bash \n "
-		if self.sleep_before_run:
-			script+= "".join("sleep %d \n " % self.sleeptime_before_run)
-		script+= "".join("%s" % cmd)
+		if preparation is None:
+			# - Standalone and existing pipeline jobs
+			script= "#!/bin/bash \n "
+			if self.sleep_before_run:
+				script+= "".join("sleep %d \n " % self.sleeptime_before_run)
+			script+= "".join("%s" % cmd)
+		
+		else:
+			# - Guarded staging preparation
+			from caesar_rest.pipeline_slurm_preparation import preparation_command
+		
+			# - Validate preparation mode
+			if not isinstance(preparation, dict) or preparation.get('mode') != 'prepare_only':
+				logger.error("Only guarded prepare_only mode is supported")
+				return None
+
+			# - Require private job workspace
+			if job_outdir == '':
+				logger.error("Preparation requires a per-job output directory")
+				return None
+				
+			# - Workspace must match cluster-side job output directory
+			if preparation.get('workspace') != job_outdir_cluster:
+				logger.error("Preparation workspace must match the private Slurm job directory")
+				return None
+
+			# - Workspace must reside under the configured cluster job root
+			if job_outdir_cluster == self.cluster_jobdir or not job_outdir_cluster.startswith(self.cluster_jobdir.rstrip('/') + '/'):
+				logger.error("Preparation workspace must be below the cluster job root")
+				return None
+
+			# - Build trusted preparation command
+			try:
+				prepare_cmd = preparation_command(
+					preparation.get('spec_path'),
+					preparation['workspace'],
+					preparation.get('runner_path'),
+					preparation.get('python_executable', '/usr/bin/python3')
+				)
+			except (ValueError, TypeError, KeyError) as e:
+				logger.error(
+					"Invalid pipeline preparation configuration (err=%s)" % str(e),
+					action="submitjob"
+				)
+				return None
+				
+			# - Build preparation-only Slurm script
+			script = '#!/bin/bash\nset -e\n'
+
+			if self.sleep_before_run:
+				script += 'sleep %d\n' % self.sleeptime_before_run
+
+			script += prepare_cmd + '\n'
 		
 		logger.info("Slurm script: %s" % script, action="submitjob")
 
