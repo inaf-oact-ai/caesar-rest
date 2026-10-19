@@ -37,7 +37,13 @@ from werkzeug.utils import secure_filename
 
 # Import celery modules
 from celery import states
-from celery.task.control import revoke
+# - Celery task revocation compatibility.
+# - Modern Celery uses app.control.revoke().
+# - Older installations may require celery.task.control.revoke.
+try:
+	from celery.task.control import revoke as legacy_celery_revoke
+except ImportError:
+	legacy_celery_revoke = None
 
 # Import caesar modules
 from caesar_rest.app import celery as celery_app
@@ -74,6 +80,27 @@ dataset_names_bp = Blueprint('dataset_names', __name__, url_prefix='/caesar/api/
 ##################################
 ##       HELPERS
 ##################################
+def revoke_celery_task(task_id, terminate=True, signal='SIGTERM'):
+	"""Revoke a Celery task across supported Celery versions."""
+	control = getattr(celery_app, 'control', None)
+
+	if control is not None and hasattr(control, 'revoke'):
+		return control.revoke(
+			task_id,
+			terminate=terminate,
+			signal=signal
+		)
+
+	if legacy_celery_revoke is not None:
+		return legacy_celery_revoke(
+			task_id,
+			terminate=terminate,
+			signal=signal
+		)
+
+	raise RuntimeError('Celery task revocation is unavailable')
+
+
 def safe_fail_pipeline_submission(claim, message, uncertain=False, job_id=None):
 	"""Record pipeline submission failure without masking the original error."""
 
@@ -1153,10 +1180,8 @@ def cancel_celery_task(task_id):
 	# - Revoke task
 	logger.info("Revoking task %s ..." % task_id, action="canceljob")
 	try:
-		#task.revoke(task_id,terminate=True,signal='SIGKILL')
-		#task.revoke(task_id,terminate=True,signal='SIGUSR1')
-		#revoke(task_id, terminate=True,signal='SIGUSR1') # force celery task to go to SOFT TIME OUT
-		revoke(task_id, terminate=True,signal='SIGTERM')
+		#revoke(task_id, terminate=True, signal='SIGTERM')
+		revoke_celery_task(task_id, terminate=True, signal='SIGTERM')
 		
 	except Exception as e:
 		errmsg= 'Exception caught when attempting to rekove task ' + task_id + ' (err=' + str(e) + ')!' 
