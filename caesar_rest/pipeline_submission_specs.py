@@ -98,10 +98,27 @@ def create_specs(workspace_app, workspace_cluster, inputfile, cmd_arg_list,
 		environment['APP_MODE'] = app_mode
 		
 	return (
-		{'version': 1, 'inputs': [{'source': source, 'name': name, 'mode': 'copy', 'writable': True}]},
-		{'version': 1, 'image': image, 'container_workspace': workspace_app,
-		 'arguments': remaining, 'input_options': {matches[0]: name},
-		 'execution_dir': 'execution', 'output_dir': 'results',	'environment': environment}
+		{
+			'version': 1, 
+			'inputs': [{
+				'source': source, 
+				'name': name, 
+				'mode': 'copy', 
+				'writable': True
+			}]
+		},
+		{
+			'version': 1, 
+			'image': image, 
+			'container_workspace': workspace_app,
+			'arguments': remaining, 
+			'input_options': {
+				matches[0]: name
+			},
+			'execution_dir': 'execution', 
+			'output_dir': 'results', 
+			'environment': environment
+		}
 	)
 
 
