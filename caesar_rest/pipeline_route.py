@@ -1,11 +1,13 @@
 """Generic pipeline metadata endpoints; no agent decisions or job submission."""
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, send_file
 
 from caesar_rest import utils
+from caesar_rest import mongo
 from caesar_rest.decorators import custom_require_login
 from caesar_rest import pipeline_manager as manager
 from caesar_rest import pipeline_status_sync
+from caesar_rest import pipeline_artifact_access as artifact_access
 
 pipeline_bp = Blueprint('pipelines', __name__, url_prefix='/caesar/api/v1.0')
 
@@ -79,4 +81,73 @@ def sync_pipeline(pipeline_id):
 		pipeline_status_sync.synchronize_pipeline(owner, pipeline_id)
 	))
 	
+############################################
+###      PIPELINE ARTIFACT LISTING
+############################################
+@pipeline_bp.route(
+	'/pipelines/<pipeline_id>/nodes/<node_id>/runs/<run_id>/artifacts',
+	methods=['GET']
+)
+@custom_require_login
+def list_run_artifacts(pipeline_id, node_id, run_id):
+	"""List registered artifacts belonging to an authenticated pipeline run."""
+
+	def action(owner):
+		run = artifact_access.get_run(
+			mongo.db,
+			owner,
+			pipeline_id,
+			node_id,
+			run_id
+		)
+
+		return jsonify({
+			'pipeline_id': pipeline_id,
+			'node_id': node_id,
+			'run_id': run_id,
+			'artifacts': artifact_access.public_artifacts(run)
+		})
+
+	return invoke(action)
 	
+	
+############################################
+###      PIPELINE ARTIFACT DOWNLOAD
+############################################
+@pipeline_bp.route(
+	'/pipelines/<pipeline_id>/nodes/<node_id>/runs/<run_id>/artifacts/<int:index>',
+	methods=['GET']
+)
+@custom_require_login
+def download_run_artifact(pipeline_id, node_id, run_id, index):
+	"""Download one registered artifact from an authenticated pipeline run."""
+
+	def action(owner):
+		run = artifact_access.get_run(
+			mongo.db,
+			owner,
+			pipeline_id,
+			node_id,
+			run_id
+		)
+
+		fileobj, filename, mime = artifact_access.open_registered_artifact(
+			mongo.db,
+			owner,
+			run,
+			index
+		)
+
+		try:
+			return send_file(
+				fileobj,
+				as_attachment=True,
+				download_name=filename,
+				mimetype=mime
+			)
+
+		except Exception:
+			fileobj.close()
+			raise
+
+	return invoke(action)
