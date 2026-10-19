@@ -1,6 +1,8 @@
 """Generic pipeline metadata endpoints; no agent decisions or job submission."""
 
 from flask import Blueprint, jsonify, request, send_file
+from werkzeug.exceptions import HTTPException
+from caesar_rest import logger
 
 from caesar_rest import utils
 from caesar_rest import mongo
@@ -15,11 +17,53 @@ pipeline_bp = Blueprint('pipelines', __name__, url_prefix='/caesar/api/v1.0')
 ###       HELPERS
 ###########################################
 def invoke(callback, *args):
+	"""Execute an authenticated pipeline operation with controlled errors."""
+
 	try:
 		owner = utils.get_storage_username()
 		return callback(owner, *args)
+
 	except manager.PipelineError as exc:
-		return jsonify({'error': str(exc)}), exc.status
+		return jsonify({
+			'error': str(exc)
+		}), exc.status
+
+	except HTTPException:
+		# Preserve Flask/Werkzeug HTTP handling, including 401/403/404.
+		raise
+
+	except Exception:
+		logger.exception(
+			'Unexpected pipeline API error',
+			action='pipeline_api'
+		)
+
+		return jsonify({
+			'error': 'internal_error',
+			'error_description': 'An unexpected server error occurred'
+		}), 500
+		
+def send_artifact_file(fileobj, filename, mime):
+	"""Send a registered artifact with Flask 1.x/2.x compatibility."""
+
+	try:
+		return send_file(
+			fileobj,
+			as_attachment=True,
+			download_name=filename,
+			mimetype=mime
+		)
+	except TypeError as exc:
+		# Retry only when the Flask API does not recognize download_name.
+		if 'download_name' not in str(exc):
+			raise
+
+	return send_file(
+		fileobj,
+		as_attachment=True,
+		attachment_filename=filename,
+		mimetype=mime
+	)
 
 ############################################
 ###      ROUTES
@@ -139,13 +183,7 @@ def download_run_artifact(pipeline_id, node_id, run_id, index):
 		)
 
 		try:
-			return send_file(
-				fileobj,
-				as_attachment=True,
-				download_name=filename,
-				mimetype=mime
-			)
-
+			return send_artifact_file(fileobj, filename, mime)
 		except Exception:
 			fileobj.close()
 			raise

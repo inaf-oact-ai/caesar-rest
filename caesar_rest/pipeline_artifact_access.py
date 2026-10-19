@@ -67,7 +67,14 @@ def open_registered_artifact(db, owner, run, index):
 	job_top_dir = job.get('job_top_dir')
 	if not isinstance(job_top_dir, str) or not os.path.isabs(job_top_dir):
 		raise ArtifactAccessError('Invalid registered workspace', 409)
-	workspace = workspace_for_job(job_top_dir, job_id)
+		
+	try:
+		workspace = workspace_for_job(job_top_dir, job_id)
+	except ValueError:
+		raise ArtifactAccessError(
+			'Invalid registered workspace', 409
+		)
+		
 	if run.get('artifact_workspace') != workspace:
 		raise ArtifactAccessError('Artifact workspace mismatch', 409)
 
