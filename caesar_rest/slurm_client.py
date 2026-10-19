@@ -566,23 +566,29 @@ class SlurmJobManager(object):
 			from caesar_rest.pipeline_slurm_preparation import preparation_command
 		
 			# - Validate preparation mode
-			if not isinstance(preparation, dict) or preparation.get('mode') != 'prepare_only':
-				logger.error("Only guarded prepare_only mode is supported")
+			if not isinstance(preparation, dict):
+				logger.error("Invalid preparation configuration", action="submitjob")
+				return None
+
+			preparation_mode = preparation.get('mode')
+
+			if preparation_mode not in ('prepare_only', 'prepare_then_execute_synthetic'):
+				logger.error("Unsupported preparation mode: %s" % preparation_mode, action="submitjob")
 				return None
 
 			# - Require private job workspace
 			if job_outdir == '':
-				logger.error("Preparation requires a per-job output directory")
+				logger.error("Preparation requires a per-job output directory", action="submitjob")
 				return None
 				
 			# - Workspace must match cluster-side job output directory
 			if preparation.get('workspace') != job_outdir_cluster:
-				logger.error("Preparation workspace must match the private Slurm job directory")
+				logger.error("Preparation workspace must match the private Slurm job directory", action="submitjob")
 				return None
 
 			# - Workspace must reside under the configured cluster job root
 			if job_outdir_cluster == self.cluster_jobdir or not job_outdir_cluster.startswith(self.cluster_jobdir.rstrip('/') + '/'):
-				logger.error("Preparation workspace must be below the cluster job root")
+				logger.error("Preparation workspace must be below the cluster job root", action="submitjob")
 				return None
 
 			# - Build trusted preparation command
@@ -600,13 +606,35 @@ class SlurmJobManager(object):
 				)
 				return None
 				
-			# - Build preparation-only Slurm script
+			# - Build guarded Slurm script
 			script = '#!/bin/bash\nset -e\n'
 
 			if self.sleep_before_run:
 				script += 'sleep %d\n' % self.sleeptime_before_run
 
+			# - Phase 1: PREPARE
 			script += prepare_cmd + '\n'
+
+			# - Phase 2: RESOLVE and EXECUTE (synthetic test only)
+			if preparation_mode == 'prepare_then_execute_synthetic':
+				from caesar_rest.pipeline_synthetic_execution import synthetic_execution_command
+
+				try:
+					execute_cmd = synthetic_execution_command(
+						preparation['workspace'],
+						preparation.get('execution_runner_path'),
+						preparation.get('python_executable', '/usr/bin/python3')
+					)
+
+				except (ValueError, TypeError, KeyError) as e:
+					logger.error(
+						"Invalid synthetic execution configuration (err=%s)" % str(e),
+						action="submitjob"
+					)
+					return None
+
+				script += execute_cmd + '\n'
+
 		
 		logger.info("Slurm script: %s" % script, action="submitjob")
 
