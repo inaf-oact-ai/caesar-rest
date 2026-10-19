@@ -575,7 +575,8 @@ class SlurmJobManager(object):
 			if preparation_mode not in (
 				'prepare_only',
 				'prepare_then_execute_synthetic',
-				'prepare_then_execute_singularity_synthetic'
+				'prepare_then_execute_singularity_synthetic',
+				'prepare_then_execute_container'
 			):
 				logger.error("Unsupported preparation mode: %s" % preparation_mode, action="submitjob")
 				return None
@@ -656,6 +657,29 @@ class SlurmJobManager(object):
 				except (ValueError, TypeError, KeyError) as e:
 					logger.error(
 						"Invalid synthetic Singularity configuration (err=%s)" % str(e),
+						action="submitjob"
+					)
+					return None
+
+				script += execute_cmd + '\n'
+
+			# - Phase 2: generic registered-container execution.
+			# - Runtime helper validates READY inputs and executes the
+			#   trusted image specified by the server-side execution spec.
+			elif preparation_mode == 'prepare_then_execute_container':
+				from caesar_rest.pipeline_container_execution import execution_command
+
+				try:
+					execute_cmd = execution_command(
+						preparation['workspace'],
+						preparation.get('execution_spec_path'),
+						preparation.get('container_execution_runner_path'),
+						preparation.get('python_executable', '/usr/bin/python3')
+					)
+
+				except (ValueError, TypeError, KeyError) as e:
+					logger.error(
+						"Invalid staged-container execution configuration (err=%s)" % str(e),
 						action="submitjob"
 					)
 					return None

@@ -215,6 +215,30 @@ def submit_job():
 	pipeline_claim = None
 	pipeline_id = req_data.get('pipeline_id')
 	run_id = req_data.get('run_id')
+		
+	# - Enable staged execution only for explicitly configured
+	#   pipeline applications on Slurm.
+	staged_submission = (
+		pipeline_id is not None
+		and run_id is not None
+		and job_scheduler == 'slurm'
+		and current_app.config.get('PIPELINE_STAGED_EXECUTION_ENABLED', False)
+		and app_name in current_app.config.get('PIPELINE_STAGED_APPLICATIONS', ())
+	)
+
+	if staged_submission:
+		data_spec = req_data.get('data_inputs')
+		if (
+			not current_app.config.get('DATASET_REGISTRY_ENABLED', False)
+			or not isinstance(data_spec, dict)
+			or data_spec.get('format') != 'dataset'
+			or not isinstance(data_spec.get('data'), str)
+			or not isinstance(inputfile, str)
+		):
+			res['state'] = 'ABORTED'
+			res['status'] = 'Staged pipeline execution requires one authorized dataset ID'
+			return make_response(jsonify(res), 400)
+
 
 	if pipeline_id is not None or run_id is not None:
 		if pipeline_id is None or run_id is None:
@@ -255,6 +279,9 @@ def submit_job():
 				run_opts,
 				read_only_data=(
 					pipeline_claim is not None and app_name == 'oxkat'
+				),
+				staged_cmd_arg_list=(
+					cmd_arg_list if staged_submission else None
 				)
 			)
 			
@@ -644,7 +671,8 @@ def submit_job_slurm(
 	job_top_dir, 
 	username, 
 	run_opts,
-	read_only_data=False
+	read_only_data=False,
+	staged_cmd_arg_list=None,
 ):
 	""" Submit job to Slurm scheduler """
 
@@ -768,6 +796,74 @@ def submit_job_slurm(
 		logger.warn("Unknown/unsupported app %s!" % app_name, action="submitjob", user=username)
 		return None
 
+	# - Prepare generic staged-container execution.
+	# - All image and application arguments originate from trusted
+	#   server-side configuration, not from a client execution spec.
+	preparation = None
+
+	if staged_cmd_arg_list is not None:
+		from caesar_rest.pipeline_submission_specs import (
+			create_specs,
+			write_specs,
+			PipelineSubmissionError
+		)
+
+		try:
+			app_job_root = jobmgr_slurm.app_jobdir
+			cluster_job_root = jobmgr_slurm.cluster_jobdir
+
+			# - Preserve the relative job path across the configured
+			#   application and Slurm storage roots.
+			relative_job_path = os.path.relpath(job_dir, app_job_root)
+
+			if relative_job_path == '..' or relative_job_path.startswith('../'):
+				raise PipelineSubmissionError('Job workspace is outside application job root')
+
+			cluster_workspace = os.path.join(
+				cluster_job_root, relative_job_path
+			)
+
+			staging_spec, execution_spec = create_specs(
+				workspace_app=job_dir,
+				workspace_cluster=cluster_workspace,
+				inputfile=inputfile,
+				cmd_arg_list=staged_cmd_arg_list,
+				image=image,
+				app_data_root=jobmgr_slurm.app_datadir,
+				cluster_data_root=jobmgr_slurm.cluster_datadir,
+				app_job_root=app_job_root,
+				cluster_job_root=cluster_job_root
+			)
+
+			write_specs(job_dir, staging_spec, execution_spec)
+
+			preparation = {
+				'mode': 'prepare_then_execute_container',
+				'workspace': cluster_workspace,
+				'spec_path': os.path.join(
+					cluster_workspace, 'staging_spec.json'
+				),
+				'runner_path': current_app.config['PIPELINE_STAGE_RUNNER_PATH'],
+				'execution_spec_path': os.path.join(
+					cluster_workspace, 'execution_spec.json'
+				),
+				'container_execution_runner_path': current_app.config[
+					'PIPELINE_CONTAINER_RUNNER_PATH'
+				],
+				'python_executable': current_app.config[
+					'PIPELINE_PYTHON_EXECUTABLE'
+				]
+			}
+
+		except (PipelineSubmissionError, OSError, ValueError, KeyError) as exc:
+			logger.error(
+				"Failed to prepare staged pipeline submission (err=%s)" % exc,
+				action="submitjob",
+				user=username
+			)
+			return None
+
+
 	# - Create job object
 	job= jobmgr_slurm.create_job(
 		image=image, 
@@ -778,6 +874,7 @@ def submit_job_slurm(
 		job_run_opts=run_opts,
 		app_mode=app_mode,
 		read_only_data=read_only_data,
+		preparation=preparation,
 	)
 	
 	if job is None or job=="":

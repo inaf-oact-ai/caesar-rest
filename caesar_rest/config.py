@@ -145,6 +145,21 @@ class Config(object):
 	# - OXKAT app options
 	OXKAT_JOB_IMAGE= 'sriggi/oxkat-caesar:latest' ## TO BE CREATED YET!
 
+
+	# - PIPELINE options	
+	# - Generic staged pipeline execution
+	# - Disabled by default to preserve existing /job behaviour.
+	PIPELINE_STAGED_EXECUTION_ENABLED = False
+
+	# - Applications approved for initial staged-container execution.
+	# - Scientific operations remain the responsibility of each container.
+	PIPELINE_STAGED_APPLICATIONS = ('oxkat',)
+
+	# - Absolute paths visible on Slurm compute nodes.
+	PIPELINE_STAGE_RUNNER_PATH = ''
+	PIPELINE_CONTAINER_RUNNER_PATH = ''
+	PIPELINE_PYTHON_EXECUTABLE = ''
+
 	# - DATASET app options
 	# - Dynamic dataset registry options
 	#
