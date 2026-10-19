@@ -35,7 +35,8 @@ def _translate(path, app_root, cluster_root):
 
 
 def create_specs(workspace_app, workspace_cluster, inputfile, cmd_arg_list,
-		image, app_data_root, cluster_data_root, app_job_root, cluster_job_root):
+		image, app_data_root, cluster_data_root, app_job_root, cluster_job_root,
+		model_dir=None, app_mode=''):
 	"""Build trusted generic PREPARE and EXECUTE specs, with one mapped input.
 
 	Current restricted adapter: one source and exactly one ordinary --key=<path>
@@ -84,11 +85,23 @@ def create_specs(workspace_app, workspace_cluster, inputfile, cmd_arg_list,
 		raise PipelineSubmissionError('Duplicate input option')
 	if source == workspace_cluster or _under(source, workspace_cluster) or _under(workspace_cluster, source):
 		raise PipelineSubmissionError('Input source overlaps workspace')
+		
+	environment = {}
+
+	if model_dir:
+		_clean_path(model_dir, 'Model directory')
+		environment['MODEL_DIR'] = model_dir
+
+	if app_mode:
+		if not isinstance(app_mode, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', app_mode):
+			raise PipelineSubmissionError('Invalid application mode')
+		environment['APP_MODE'] = app_mode
+		
 	return (
 		{'version': 1, 'inputs': [{'source': source, 'name': name, 'mode': 'copy', 'writable': True}]},
 		{'version': 1, 'image': image, 'container_workspace': workspace_app,
 		 'arguments': remaining, 'input_options': {matches[0]: name},
-		 'execution_dir': 'execution', 'output_dir': 'results'}
+		 'execution_dir': 'execution', 'output_dir': 'results',	'environment': environment}
 	)
 
 

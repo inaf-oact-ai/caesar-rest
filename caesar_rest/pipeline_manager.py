@@ -115,12 +115,31 @@ def create_run(owner, pipeline_id, node_id, payload):
 	get_pipeline(owner, pipeline_id)
 	if not isinstance(payload, dict):
 		raise PipelineError('Expected a JSON object')
-	if set(payload) - {'application', 'operation', 'parameters', 'input_runs'}:
+	
+	if set(payload) - {
+		'application', 'operation', 'parameters',
+		'input_runs', 'dataset_id'
+	}:
 		raise PipelineError('Unsupported run field')
+			
 	application = validate_identifier(payload.get('application'), 'application')
 	operation = validate_identifier(payload.get('operation'), 'operation')
 	parameters = payload.get('parameters', {})
 	input_runs = payload.get('input_runs', [])
+	
+	dataset_id = payload.get('dataset_id')
+
+	if dataset_id is not None:
+		from caesar_rest import dataset_registry
+
+		if not isinstance(dataset_id, str):
+			raise PipelineError('dataset_id must be a string')
+
+		try:
+			dataset_registry.resolve_input_dataset(dataset_id)
+		except dataset_registry.DatasetError as exc:
+			raise PipelineError(str(exc), exc.status)
+	
 	if not isinstance(parameters, dict) or not isinstance(input_runs, list):
 		raise PipelineError('parameters must be an object and input_runs a list')
 	if len(input_runs) != len(set(str(x) for x in input_runs)):
@@ -150,6 +169,7 @@ def create_run(owner, pipeline_id, node_id, payload):
 		'operation': operation,
 		'parameters': parameters,
 		'input_runs': list(input_runs),
+		'dataset_id': dataset_id,
 		'status': 'PLANNED',
 		'job_id': None,
 		'artifacts': [],

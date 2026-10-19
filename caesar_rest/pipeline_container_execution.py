@@ -39,8 +39,27 @@ def execution_command(workspace, spec_path, runner_path, python_executable='/usr
 
 
 def _validated_spec(spec, workspace):
-	if not isinstance(spec, dict) or set(spec) != {'version', 'image', 'container_workspace', 'arguments', 'input_options', 'execution_dir', 'output_dir'} or spec['version'] != 1:
+	
+	required_fields = {
+		'version',
+		'image',
+		'container_workspace',
+		'arguments',
+		'input_options',
+		'execution_dir',
+		'output_dir'
+	}
+
+	allowed_fields = required_fields | {'environment'}
+
+	if (
+		not isinstance(spec, dict)
+		or not required_fields.issubset(spec)
+		or set(spec) - allowed_fields
+		or spec['version'] != 1
+	):
 		raise ContainerExecutionError('Invalid trusted execution spec schema')
+	
 	image = _absolute(spec['image'], 'image')
 	container_ws = _absolute(spec['container_workspace'], 'container_workspace')
 	if container_ws == '/':
@@ -63,6 +82,29 @@ def _validated_spec(spec, workspace):
 			raise ContainerExecutionError('Invalid workspace subdirectory')
 	if spec['execution_dir'] == spec['output_dir'] or spec['execution_dir'] == 'input' or spec['output_dir'] == 'input':
 		raise ContainerExecutionError('Execution/output directories must be distinct from staging')
+		
+	environment = spec.get('environment', {})
+
+	if not isinstance(environment, dict):
+		raise ContainerExecutionError('Invalid application environment')
+
+	if set(environment) - {'MODEL_DIR', 'APP_MODE'}:
+		raise ContainerExecutionError('Unsupported application environment variable')
+
+	for key, value in environment.items():
+		if not isinstance(value, str):
+			raise ContainerExecutionError('Invalid application environment value')
+
+		if any(ch in value for ch in '\x00\r\n'):
+			raise ContainerExecutionError('Unsafe application environment value')
+
+		if key == 'MODEL_DIR':
+			_absolute(value, 'MODEL_DIR')
+
+		if key == 'APP_MODE':
+			if not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', value):
+				raise ContainerExecutionError('Invalid APP_MODE')
+	
 	return image, container_ws
 
 
@@ -111,6 +153,12 @@ def execute(workspace, spec_path, runner=subprocess.run):
 		'--env', 'JOB_OUTDIR=' + c_out,
 		image
 	]
+		
+	# - Insert only approved application environment variables.
+	# - These values originate from server-side application configuration.
+	for key, value in spec.get('environment', {}).items():
+		cmd[-1:-1] = ['--env', key + '=' + value]
+
 	return runner(cmd, check=False).returncode
 
 

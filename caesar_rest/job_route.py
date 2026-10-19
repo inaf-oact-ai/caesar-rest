@@ -93,6 +93,9 @@ def safe_fail_pipeline_submission(claim, message, uncertain=False, job_id=None):
 		)
 
 
+class SlurmPreSubmissionError(RuntimeError):
+	"""Slurm submission was not attempted; safe to classify as definite failure."""
+
 #=================================
 #===      DATASETS
 #=================================
@@ -225,6 +228,20 @@ def submit_job():
 		and current_app.config.get('PIPELINE_STAGED_EXECUTION_ENABLED', False)
 		and app_name in current_app.config.get('PIPELINE_STAGED_APPLICATIONS', ())
 	)
+	
+	# - Do not silently fall back to legacy execution when staged
+	#   pipeline execution is enabled but the application is unsupported.
+	if (
+		pipeline_id is not None
+		and run_id is not None
+		and job_scheduler == 'slurm'
+		and current_app.config.get('PIPELINE_STAGED_EXECUTION_ENABLED', False)
+		and not staged_submission
+	):
+		res['state'] = 'ABORTED'
+		res['status'] = 'Application is not enabled for staged pipeline execution'
+		return make_response(jsonify(res), 400)
+
 
 	if staged_submission:
 		data_spec = req_data.get('data_inputs')
@@ -246,10 +263,22 @@ def submit_job():
 			res['status'] = 'pipeline_id and run_id must be provided together'
 			return make_response(jsonify(res), 400)
 
-		try:
+		try:			
+			submitted_dataset_id = None
+			if isinstance(req_data.get('data_inputs'), dict):
+				if req_data['data_inputs'].get('format') == 'dataset':
+					submitted_dataset_id = req_data['data_inputs'].get('data')
+
 			pipeline_claim = pipeline_job_binding.claim_run(
-				username, pipeline_id, run_id, app_name, job_options
+				username,
+				pipeline_id,
+				run_id,
+				app_name,
+				job_options,
+				dataset_id=submitted_dataset_id,
+				require_dataset_binding=staged_submission
 			)
+
 		except pipeline_job_binding.manager.PipelineError as exc:
 			res['state'] = 'ABORTED'
 			res['status'] = str(exc)
@@ -285,6 +314,23 @@ def submit_job():
 				)
 			)
 			
+	
+	except SlurmPreSubmissionError as exc:
+		logger.error(
+			"Pipeline Slurm pre-submission validation failed (err=%s)" % exc,
+			action="submitjob",
+			user=username
+		)
+
+		safe_fail_pipeline_submission(
+			pipeline_claim,
+			str(exc),
+			uncertain=False
+		)
+
+		res['state'] = 'ABORTED'
+		res['status'] = 'Pipeline job preparation failed'
+		return make_response(jsonify(res), 400)
 
 	except Exception as exc:
 		logger.error(
@@ -347,6 +393,12 @@ def submit_job():
 	if pipeline_claim is not None:
 		job_obj['pipeline_id'] = pipeline_id
 		job_obj['run_id'] = run_id
+
+		if staged_submission:
+			job_obj['execution_mode'] = 'staged_container'
+			job_obj['workspace'] = submit_res['workspace']
+			job_obj['output_root'] = submit_res['output_root']
+			job_obj['output_layout'] = 'results_subdirectory_v1'
 
 	# - Create/retrieve job collection for user
 	collection_name= username + '.jobs'
@@ -832,7 +884,9 @@ def submit_job_slurm(
 				app_data_root=jobmgr_slurm.app_datadir,
 				cluster_data_root=jobmgr_slurm.cluster_datadir,
 				app_job_root=app_job_root,
-				cluster_job_root=cluster_job_root
+				cluster_job_root=cluster_job_root,
+				model_dir=jobmgr_slurm.app_modeldir,
+				app_mode=app_mode,
 			)
 
 			write_specs(job_dir, staging_spec, execution_spec)
@@ -861,7 +915,11 @@ def submit_job_slurm(
 				action="submitjob",
 				user=username
 			)
-			return None
+			#return None
+
+			raise SlurmPreSubmissionError(
+				"Staged pipeline preparation failed: %s" % exc
+			) from exc
 
 
 	# - Create job object
@@ -877,9 +935,20 @@ def submit_job_slurm(
 		preparation=preparation,
 	)
 	
-	if job is None or job=="":
-		logger.warn("Failed to create Slurm job data!", action="submitjob", user=username)
+	if job is None or job == "":
+		logger.warn(
+			"Failed to create Slurm job data!",
+			action="submitjob",
+			user=username
+		)
+
+		if staged_cmd_arg_list is not None:
+			raise SlurmPreSubmissionError(
+				"Failed to generate staged pipeline Slurm job"
+			)
+
 		return None
+	
 
 	# - Submit job
 	now = datetime.datetime.now()
@@ -908,7 +977,7 @@ def submit_job_slurm(
 
 	logger.info("Submitted job with id=%s (pid=%s) ..." % (job_id, pid), action="submitjob", user=username)
 	
-	# - Response
+	# - Fill response payload
 	res= {
 		"job_id": job_id,
 		"pid": pid,
@@ -916,6 +985,10 @@ def submit_job_slurm(
 		"state": "PENDING",
 		"status": "Job submitted to Slurm scheduler"
 	}
+	
+	if staged_cmd_arg_list is not None:
+		res['output_root'] = os.path.join(job_dir, 'results')
+		res['workspace'] = job_dir
 
 	return res
 

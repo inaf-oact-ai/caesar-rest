@@ -19,7 +19,8 @@ class SubmissionClaim(object):
 		self.token = token
 
 
-def claim_run(owner, pipeline_id, run_id, application, job_options):
+def claim_run(owner, pipeline_id, run_id, application, job_options, dataset_id=None,
+		require_dataset_binding=False):		
 	"""Claim a PLANNED run, preventing duplicate concurrent submission."""
 	
 	manager.get_pipeline(owner, pipeline_id)
@@ -44,6 +45,26 @@ def claim_run(owner, pipeline_id, run_id, application, job_options):
 			'Submission options differ from reserved run parameters',
 			409
 		)
+
+	
+	# - Require an immutable dataset binding for staged submissions.
+	if require_dataset_binding:
+		if (
+			not isinstance(dataset_id, str)
+			or not dataset_id
+			or run.get('dataset_id') != dataset_id
+		):
+			raise manager.PipelineError(
+				'Submitted dataset differs from the reserved pipeline input',
+				409
+			)
+
+	elif run.get('dataset_id') is not None and run.get('dataset_id') != dataset_id:
+		raise manager.PipelineError(
+			'Submitted dataset differs from the reserved pipeline input',
+			409
+		)
+
 
 	token = uuid.uuid4().hex
 	claimed = runs.update_one(
