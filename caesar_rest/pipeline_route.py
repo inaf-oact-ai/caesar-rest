@@ -126,6 +126,20 @@ def sync_pipeline(pipeline_id):
 	))
 	
 ############################################
+###      PIPELINE TREE
+############################################
+@pipeline_bp.route('/pipelines/<pipeline_id>/tree', methods=['GET'])
+@custom_require_login
+def get_pipeline_tree(pipeline_id):
+	"""Return the logical hierarchy of an authenticated pipeline."""
+
+	return invoke(
+		lambda owner: jsonify(
+			manager.get_pipeline_tree(owner, pipeline_id)
+		)
+	)
+	
+############################################
 ###      PIPELINE ARTIFACT LISTING
 ############################################
 @pipeline_bp.route(

@@ -204,3 +204,75 @@ def select_run(owner, pipeline_id, node_id, run_id):
 		{'$set': {'selections.' + node_id: {'run_id': run_id, 'selected_at': utcnow()}}}
 	)
 	return {'node_id': node_id, 'run_id': run_id}
+	
+def get_pipeline_tree(owner, pipeline_id):
+	"""Build an owner-scoped logical tree from existing pipeline/run metadata.
+
+	No filesystem access, scheduler calls, or database modifications.
+	Internal workspace paths and MongoDB identifiers are never exposed.
+	"""
+	pipeline = get_pipeline(owner, pipeline_id)
+	_, runs_collection, _ = collections()
+
+	selections = pipeline.get('selections') or {}
+	nodes = {}
+
+	cursor = runs_collection.find({
+		'owner': owner,
+		'pipeline_id': pipeline_id
+	}).sort([
+		('node_id', 1),
+		('sequence', 1)
+	])
+
+	for run in cursor:
+		node_id = run['node_id']
+
+		if node_id not in nodes:
+			selection = selections.get(node_id) or {}
+			nodes[node_id] = {
+				'node_id': node_id,
+				'selected_run_id': selection.get('run_id'),
+				'runs': []
+			}
+
+		artifacts = run.get('artifacts') or []
+		primary_count = sum(
+			1 for artifact in artifacts
+			if artifact.get('role') == 'primary_result'
+		)
+
+		nodes[node_id]['runs'].append({
+			'run_id': run['run_id'],
+			'run_name': run['run_name'],
+			'sequence': run['sequence'],
+			'application': run['application'],
+			'operation': run['operation'],
+			'parameters': run.get('parameters') or {},
+			'dataset_id': run.get('dataset_id'),
+			'input_runs': run.get('input_runs') or [],
+			'status': run['status'],
+			'job_id': run.get('job_id'),
+			'created_at': run.get('created_at'),
+			'finished_at': run.get('finished_at'),
+			'artifact_summary': {
+				'registered': bool(run.get('artifacts_registered_at')),
+				'count': len(artifacts),
+				'primary_count': primary_count
+			},
+			'selected': (
+				run['run_id'] == nodes[node_id]['selected_run_id']
+			)
+		})
+
+	return {
+		'pipeline_id': pipeline_id,
+		'name': pipeline.get('name', ''),
+		'description': pipeline.get('description', ''),
+		'status': pipeline.get('status'),
+		'created_at': pipeline.get('created_at'),
+		'nodes': [
+			nodes[node_id]
+			for node_id in sorted(nodes)
+		]
+	}
