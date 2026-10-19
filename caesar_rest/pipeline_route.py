@@ -10,6 +10,7 @@ from caesar_rest.decorators import custom_require_login
 from caesar_rest import pipeline_manager as manager
 from caesar_rest import pipeline_status_sync
 from caesar_rest import pipeline_artifact_access as artifact_access
+from caesar_rest import pipeline_artifact_resolver as artifact_resolver
 
 pipeline_bp = Blueprint('pipelines', __name__, url_prefix='/caesar/api/v1.0')
 
@@ -203,3 +204,24 @@ def download_run_artifact(pipeline_id, node_id, run_id, index):
 			raise
 
 	return invoke(action)
+	
+############################################
+###      PIPELINE ARTIFACT RESOLVE
+############################################	
+@pipeline_bp.route(
+	'/pipelines/<pipeline_id>/nodes/<node_id>/selected/artifacts/<artifact_name>',
+	methods=['GET']
+)
+@custom_require_login
+def resolve_selected_artifact(pipeline_id, node_id, artifact_name):
+	"""Resolve an available artifact of the selected upstream run."""
+
+	return invoke(lambda owner: jsonify(
+		artifact_resolver.resolve_selected_artifact(
+			mongo.db,
+			owner,
+			pipeline_id,
+			node_id,
+			artifact_name
+    )
+	))
