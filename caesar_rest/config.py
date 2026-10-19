@@ -155,9 +155,10 @@ class Config(object):
 	# - Scientific operations remain the responsibility of each container.
 	PIPELINE_STAGED_APPLICATIONS = ('oxkat',)
 
-	# - Absolute paths visible on Slurm compute nodes.
-	PIPELINE_STAGE_RUNNER_PATH = ''
-	PIPELINE_CONTAINER_RUNNER_PATH = ''
+	# - Optional Python interpreter on Slurm compute nodes.
+	# - The standalone worker does not require CAESAR-REST to be
+	#   installed in this Python environment.
+	# - Empty value selects /usr/bin/python3.
 	PIPELINE_PYTHON_EXECUTABLE = ''
 
 	# - DATASET app options

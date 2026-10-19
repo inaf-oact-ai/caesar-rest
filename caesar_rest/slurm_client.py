@@ -597,19 +597,47 @@ class SlurmJobManager(object):
 				return None
 
 			# - Build trusted preparation command
-			try:
-				prepare_cmd = preparation_command(
-					preparation.get('spec_path'),
-					preparation['workspace'],
-					preparation.get('runner_path'),
-					preparation.get('python_executable', '/usr/bin/python3')
-				)
-			except (ValueError, TypeError, KeyError) as e:
-				logger.error(
-					"Invalid pipeline preparation configuration (err=%s)" % str(e),
-					action="submitjob"
-				)
-				return None
+			#   Production pipeline jobs use the standalone worker.
+			#   Synthetic diagnostics retain the existing script-based
+			#   execution mechanism.
+			verify_cmd = None
+			worker_execute_cmd = None
+
+			if preparation_mode == 'prepare_then_execute_container':
+				from caesar_rest.pipeline_worker_slurm import worker_commands
+
+				try:
+					verify_cmd, prepare_cmd, worker_execute_cmd = worker_commands(
+						preparation['workspace'],
+						preparation.get('spec_path'),
+						preparation.get('execution_spec_path'),
+						preparation.get('worker_path'),
+						preparation.get('worker_sha256'),
+						preparation.get('python_executable') or '/usr/bin/python3'
+					)
+
+				except (ValueError, TypeError, KeyError) as e:
+					logger.error(
+						"Invalid pipeline worker configuration (err=%s)" % str(e),
+						action="submitjob"
+					)
+					return None
+
+			else:
+				try:
+					prepare_cmd = preparation_command(
+						preparation.get('spec_path'),
+						preparation['workspace'],
+						preparation.get('runner_path'),
+						preparation.get('python_executable', '/usr/bin/python3')
+					)
+
+				except (ValueError, TypeError, KeyError) as e:
+					logger.error(
+						"Invalid pipeline preparation configuration (err=%s)" % str(e),
+						action="submitjob"
+					)
+					return None
 				
 			# - Build guarded Slurm script
 			script = '#!/bin/bash\nset -e\n'
@@ -617,7 +645,10 @@ class SlurmJobManager(object):
 			if self.sleep_before_run:
 				script += 'sleep %d\n' % self.sleeptime_before_run
 
-			# - Phase 1: PREPARE
+			# - Phase 1: Verify worker and prepare private inputs.
+			if verify_cmd is not None:
+				script += verify_cmd + '\n'
+
 			script += prepare_cmd + '\n'
 
 			# - Phase 2: RESOLVE and EXECUTE (synthetic test only)
@@ -663,28 +694,11 @@ class SlurmJobManager(object):
 
 				script += execute_cmd + '\n'
 
-			# - Phase 2: generic registered-container execution.
-			# - Runtime helper validates READY inputs and executes the
-			#   trusted image specified by the server-side execution spec.
+			
+			# - Phase 2: Execute the registered scientific container
+			#   through the same standalone worker.
 			elif preparation_mode == 'prepare_then_execute_container':
-				from caesar_rest.pipeline_container_execution import execution_command
-
-				try:
-					execute_cmd = execution_command(
-						preparation['workspace'],
-						preparation.get('execution_spec_path'),
-						preparation.get('container_execution_runner_path'),
-						preparation.get('python_executable', '/usr/bin/python3')
-					)
-
-				except (ValueError, TypeError, KeyError) as e:
-					logger.error(
-						"Invalid staged-container execution configuration (err=%s)" % str(e),
-						action="submitjob"
-					)
-					return None
-
-				script += execute_cmd + '\n'
+				script += worker_execute_cmd + '\n'
 
 		
 		logger.info("Slurm script: %s" % script, action="submitjob")

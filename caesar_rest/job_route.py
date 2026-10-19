@@ -918,22 +918,30 @@ def submit_job_slurm(
 
 			write_specs(job_dir, staging_spec, execution_spec)
 
+			# - Package the shared pipeline runtime into a standalone
+			#   worker archive inside the private job workspace.
+			# - Deployment must complete before Slurm submission.
+			from caesar_rest.pipeline_worker_bundle import deploy_worker
+
+			worker_info = deploy_worker(job_dir)
+
 			preparation = {
 				'mode': 'prepare_then_execute_container',
 				'workspace': cluster_workspace,
 				'spec_path': os.path.join(
 					cluster_workspace, 'staging_spec.json'
 				),
-				'runner_path': current_app.config['PIPELINE_STAGE_RUNNER_PATH'],
 				'execution_spec_path': os.path.join(
 					cluster_workspace, 'execution_spec.json'
 				),
-				'container_execution_runner_path': current_app.config[
-					'PIPELINE_CONTAINER_RUNNER_PATH'
-				],
-				'python_executable': current_app.config[
-					'PIPELINE_PYTHON_EXECUTABLE'
-				]
+				'worker_path': os.path.join(
+					cluster_workspace, worker_info['name']
+				),
+				'worker_sha256': worker_info['sha256'],
+				'python_executable': (
+					current_app.config.get('PIPELINE_PYTHON_EXECUTABLE')
+					or '/usr/bin/python3'
+				)
 			}
 
 		except (PipelineSubmissionError, OSError, ValueError, KeyError) as exc:

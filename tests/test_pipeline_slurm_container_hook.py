@@ -22,9 +22,9 @@ class ContainerSlurmHookTests(unittest.TestCase):
 			'mode': 'prepare_then_execute_container',
 			'workspace': '/storage/jobs/owner/job_test',
 			'spec_path': '/storage/jobs/owner/job_test/staging_spec.json',
-			'runner_path': '/opt/src/caesar_rest/pipeline_stage_runner.py',
 			'execution_spec_path': '/storage/jobs/owner/job_test/execution_spec.json',
-			'container_execution_runner_path': '/opt/src/caesar_rest/pipeline_container_execution.py',
+			'worker_path': '/storage/jobs/owner/job_test/caesar-pipeline-worker.pyz',
+			'worker_sha256': 'a' * 64,
 			'python_executable': '/usr/bin/python3',
 		}
 
@@ -41,22 +41,59 @@ class ContainerSlurmHookTests(unittest.TestCase):
 	def test_two_commands_in_one_fail_closed_script(self):
 		body = self.create(self.preparation())
 		self.assertIsNotNone(body)
+
 		script = json.loads(body)['script']
+
+		# - Fail closed on any verification, staging or
+		#   scientific execution failure.
 		self.assertTrue(script.startswith('#!/bin/bash\nset -e\n'))
-		self.assertEqual(script.count('pipeline_stage_runner.py'), 1)
-		self.assertEqual(script.count('pipeline_container_execution.py'), 1)
-		self.assertLess(script.index('pipeline_stage_runner.py'), script.index('pipeline_container_execution.py'))
+
+		# - The same standalone worker handles both phases.
+		self.assertIn('caesar-pipeline-worker.pyz', script)
+		self.assertIn('sha256sum', script)
+		self.assertIn(' prepare ', script)
+		self.assertIn(' execute ', script)
+
+		# - Verify before preparing, then execute.
+		self.assertLess(script.index('sha256sum'), script.index(' prepare '))
+		self.assertLess(script.index(' prepare '), script.index(' execute '))
+
+		# - No dependency on the old host-side runner scripts.
+		self.assertNotIn('pipeline_stage_runner.py', script)
+		self.assertNotIn('pipeline_container_execution.py', script)
+
+		# - The scientific container is launched by the worker,
+		#   not directly by the generated Slurm script.
 		self.assertNotIn('singularity run', script)
-		self.assertEqual(subprocess.run(['bash', '-n'], input=script, text=True, capture_output=True).returncode, 0)
+
+		self.assertEqual(
+			subprocess.run(
+				['bash', '-n'],
+				input=script,
+				text=True,
+				capture_output=True
+			).returncode,
+			0
+		)
 
 	def test_missing_execution_spec_rejected(self):
 		p = self.preparation()
 		del p['execution_spec_path']
 		self.assertIsNone(self.create(p))
 
-	def test_missing_runner_rejected(self):
+	def test_missing_worker_rejected(self):
 		p = self.preparation()
-		del p['container_execution_runner_path']
+		del p['worker_path']
+		self.assertIsNone(self.create(p))
+
+	def test_missing_worker_checksum_rejected(self):
+		p = self.preparation()
+		del p['worker_sha256']
+		self.assertIsNone(self.create(p))
+
+	def test_invalid_worker_checksum_rejected(self):
+		p = self.preparation()
+		p['worker_sha256'] = 'invalid'
 		self.assertIsNone(self.create(p))
 
 	def test_execution_spec_outside_workspace_rejected(self):
@@ -74,9 +111,14 @@ class ContainerSlurmHookTests(unittest.TestCase):
 	def test_old_prepare_only_unaffected(self):
 		p = self.preparation()
 		p['mode'] = 'prepare_only'
+		p['runner_path'] = '/opt/src/caesar_rest/pipeline_stage_runner.py'
+
 		body = self.create(p)
 		self.assertIsNotNone(body)
+
 		script = json.loads(body)['script']
+		self.assertIn('pipeline_stage_runner.py', script)
+		self.assertNotIn('caesar-pipeline-worker.pyz', script)
 		self.assertNotIn('pipeline_container_execution.py', script)
 
 
