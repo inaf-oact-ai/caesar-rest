@@ -497,6 +497,14 @@ def monitor_slurm_jobs(job_objs, job_collection):
 
 	return 0
 	
+	
+def make_slurm_job_archive(job_obj, tar_file, job_dir):
+	"""Use input-excluding archives only for staged pipeline jobs."""
+
+	if job_obj.get('execution_mode') == 'staged_container':
+		utils.make_staged_pipeline_tar(tar_file, job_dir)
+	else:
+		utils.make_tar(tar_file, job_dir)	
 
 def monitor_slurm_job(job_obj, job_collection):
 	""" Monitor and update job status in DB """
@@ -560,7 +568,7 @@ def monitor_slurm_job(job_obj, job_collection):
 				logger.info("Job %s output tar file %s already existing, won't create it again ..." % (job_id, tar_file), action="jobmonitor")
 			else:
 				logger.info("Creating a tar file %s with job output data ..." % tar_file, action="jobmonitor")
-				utils.make_tar(tar_file, job_dir)
+				make_slurm_job_archive(job_obj, tar_file, job_dir)
 		else:
 			logger.warn("Won't create output data tar file %s as job output directory %s not found ..." % (tar_file, job_dir), action="jobmonitor")
 
@@ -621,7 +629,7 @@ def update_slurm_job(job_obj, res, job_collection):
 				logger.info("Job %s output tar file %s already existing, won't create it again ..." % (job_id, tar_file), action="jobmonitor")
 			else:
 				logger.info("Creating a tar file %s with job output data ..." % tar_file, action="jobmonitor")
-				utils.make_tar(tar_file, job_dir)
+				make_slurm_job_archive(job_obj, tar_file, job_dir)
 		else:
 			logger.warn("Won't create output data tar file %s as job output directory %s not found ..." % (tar_file, job_dir), action="jobmonitor")
 
