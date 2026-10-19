@@ -324,6 +324,30 @@ def get_args():
 		help='Path to OxKAT Singularity container (default=/opt/containers/oxkat/oxkat-caesar.sif)'
 	)
 	
+	# - Generic staged pipeline execution options
+	parser.add_argument(
+		'--pipeline_staged_execution_enabled',
+		dest='pipeline_staged_execution_enabled',
+		action='store_true',
+		help='Enable staged pipeline execution through Slurm'
+	)
+
+	parser.add_argument(
+		'--pipeline_staged_applications',
+		dest='pipeline_staged_applications',
+		default='oxkat',
+		type=str,
+		help='Comma-separated applications allowed for staged pipeline execution (default=oxkat)'
+	)
+
+	parser.add_argument(
+		'--pipeline_python_executable',
+		dest='pipeline_python_executable',
+		default='/usr/bin/python3',
+		type=str,
+		help='Absolute path to the Python interpreter available on Slurm compute nodes'
+	)
+	
 	# - Dynamic dataset registry options
 	parser.add_argument(
 		'--dataset_registry_enabled',
@@ -522,6 +546,38 @@ dataset_emu= args.dataset_emu
 dataset_emu_scorpio_pilot= args.dataset_emu_scorpio_pilot
 dataset_emu_gp_pilot= args.dataset_emu_gp_pilot
 
+# - Generic staged pipeline execution options
+pipeline_staged_execution_enabled = args.pipeline_staged_execution_enabled
+
+pipeline_staged_applications = tuple(
+	name.strip().lower()
+	for name in args.pipeline_staged_applications.split(',')
+	if name.strip()
+)
+
+pipeline_python_executable = args.pipeline_python_executable
+
+# - Validate staged execution configuration
+if pipeline_staged_execution_enabled:
+	if job_scheduler != 'slurm':
+		logger.error("Staged pipeline execution requires the Slurm scheduler")
+		sys.exit(1)
+
+	if not args.dataset_registry_enabled:
+		logger.error("Staged pipeline execution requires the dynamic dataset registry")
+		sys.exit(1)
+
+	if not pipeline_staged_applications:
+		logger.error("No staged pipeline applications configured")
+		sys.exit(1)
+
+	if (
+		not os.path.isabs(pipeline_python_executable)
+		or os.path.normpath(pipeline_python_executable) != pipeline_python_executable
+	):
+		logger.error("Pipeline Python executable must be a normalized absolute path")
+		sys.exit(1)
+		
 # - Dynamic dataset registry options
 dataset_registry_enabled = args.dataset_registry_enabled
 
@@ -646,6 +702,11 @@ config.SLURM_FEXTRACTOR_FATS_JOB_IMAGE= fextractor_fats_container
 config.SLURM_FEXTRACTOR_LICU_JOB_IMAGE= fextractor_licu_container
 config.SLURM_FEXTRACTOR_FALCON_JOB_IMAGE= fextractor_falcon_container
 config.SLURM_OXKAT_JOB_IMAGE= oxkat_container
+
+# - Generic staged pipeline execution
+config.PIPELINE_STAGED_EXECUTION_ENABLED = pipeline_staged_execution_enabled
+config.PIPELINE_STAGED_APPLICATIONS = pipeline_staged_applications
+config.PIPELINE_PYTHON_EXECUTABLE = pipeline_python_executable
 
 # - Create data manager (DEPRECATED BY MONGO)
 ##logger.info("Creating data manager ...")
