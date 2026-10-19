@@ -572,7 +572,11 @@ class SlurmJobManager(object):
 
 			preparation_mode = preparation.get('mode')
 
-			if preparation_mode not in ('prepare_only', 'prepare_then_execute_synthetic'):
+			if preparation_mode not in (
+				'prepare_only',
+				'prepare_then_execute_synthetic',
+				'prepare_then_execute_singularity_synthetic'
+			):
 				logger.error("Unsupported preparation mode: %s" % preparation_mode, action="submitjob")
 				return None
 
@@ -629,6 +633,29 @@ class SlurmJobManager(object):
 				except (ValueError, TypeError, KeyError) as e:
 					logger.error(
 						"Invalid synthetic execution configuration (err=%s)" % str(e),
+						action="submitjob"
+					)
+					return None
+
+				script += execute_cmd + '\n'
+
+			
+			# - Phase 2: RESOLVE, MAP and EXECUTE inside Singularity
+			elif preparation_mode == 'prepare_then_execute_singularity_synthetic':
+				from caesar_rest.pipeline_singularity_synthetic import singularity_synthetic_command
+
+				try:
+					execute_cmd = singularity_synthetic_command(
+						preparation['workspace'],
+						preparation.get('container_image'),
+						preparation.get('container_workspace'),
+						preparation.get('container_execution_runner_path'),
+						preparation.get('python_executable', '/usr/bin/python3')
+					)
+
+				except (ValueError, TypeError, KeyError) as e:
+					logger.error(
+						"Invalid synthetic Singularity configuration (err=%s)" % str(e),
 						action="submitjob"
 					)
 					return None
