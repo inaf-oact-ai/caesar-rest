@@ -13,7 +13,7 @@ import json
 from caesar_rest import pipeline_manager as manager
 from caesar_rest import pipeline_artifact_binding as binding
 from caesar_rest import pipeline_artifact_retention as retention
-from caesar_rest import pipeline_multi_input_specs as specs
+from caesar_rest.pipeline.staging import multi_input_specs as specs
 from caesar_rest.pipeline_directory_retention import _open_directory
 
 _NAME = re.compile(r'^[A-Za-z][A-Za-z0-9_-]{0,63}$')
