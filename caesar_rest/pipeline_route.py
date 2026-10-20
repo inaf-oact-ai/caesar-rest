@@ -250,6 +250,21 @@ def retain_run_artifacts(pipeline_id, node_id, run_id):
 			'PIPELINE_ARTIFACT_RETENTION_MAX_FILE_BYTES',
 			1024 * 1024 * 1024
 		)
+		
+		directory_bytes = current_app.config.get(
+			'PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_BYTES',
+			1024 * 1024 * 1024 * 1024
+		)
+
+		directory_entries = current_app.config.get(
+			'PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_ENTRIES',
+			100000
+		)
+
+		directory_depth = current_app.config.get(
+			'PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_DEPTH',
+			16
+		)		
 
 		return jsonify(retention.promote_run(
 			mongo.db,
@@ -258,7 +273,10 @@ def retain_run_artifacts(pipeline_id, node_id, run_id):
 			node_id,
 			run_id,
 			root,
-			limit
+			limit,
+			directory_bytes,
+			directory_entries,
+			directory_depth
 		))
 
 	return invoke(action)

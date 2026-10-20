@@ -52,6 +52,19 @@ def open_registered_artifact(db, owner, run, index, retention_root=None):
 	Returns (binary_file, filename, media_type). Caller owns and closes file.
 	"""
 	
+	# Directory artifacts require a separate verified access mechanism.
+	# Do not attempt to open them through the regular-file endpoint.
+	items = run.get('artifacts') or []
+
+	if (
+		type(index) is int
+		and 0 <= index < len(items)
+		and items[index].get('kind') == 'directory'
+	):
+		raise ArtifactAccessError(
+			'Directory artifact download is not implemented', 409
+	)	
+	
 	# Retained artifacts take precedence over original job workspaces.
 	# Once retention is recorded, never silently fall back to the source.
 	if run.get('retained_artifacts') is not None:

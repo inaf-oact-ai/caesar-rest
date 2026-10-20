@@ -40,14 +40,44 @@ def _mkdir_safe(path):
 			raise manager.PipelineError('Invalid artifact retention directory', 409)
 
 
-def promote_run(db, owner, pipeline_id, node_id, run_id, root,
-				max_file_bytes=1024 * 1024 * 1024):
+def promote_run(
+	db, 
+	owner, 
+	pipeline_id, 
+	node_id, 
+	run_id, 
+	root,
+	max_file_bytes=1024 * 1024 * 1024,
+	max_directory_bytes=1024 * 1024 * 1024 * 1024,
+	max_directory_entries=100000,
+	max_directory_depth=1
+):			
 	"""Copy every registered artifact and publish a durable per-run record.
 
 	Returns a public summary. Safe to retry after partial copy; never deletes
 	source files. A concurrent successful promotion wins the DB update.
 	"""
+		
 	run = access.get_run(db, owner, pipeline_id, node_id, run_id)
+
+	# Route mixed file/directory runs through the directory-aware
+	# retention coordinator. Preserve the existing file-only path.
+	if any(a.get('kind') == 'directory' for a in run.get('artifacts') or []):
+		from caesar_rest import pipeline_directory_promotion as mixed
+
+		return mixed.promote_mixed_run(
+			db,
+			owner,
+			pipeline_id,
+			node_id,
+			run_id,
+			root,
+			max_file_bytes,
+			max_directory_bytes,
+			max_directory_entries,
+			max_directory_depth
+		)
+		
 	if run.get('status') != 'COMPLETED' or not run.get('artifacts_registered_at'):
 		raise manager.PipelineError('Run artifacts are not registered', 409)
 	existing = run.get('retained_artifacts')
