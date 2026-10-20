@@ -41,7 +41,8 @@ def prepare_v2_submission(db, owner, pipeline_id, node_id, run_id, job_id,
 		job_root_app, job_root_cluster, retention_root_app,
 		retention_root_cluster, image, arguments, input_options,
 		max_directory_bytes=1024 * 1024 * 1024 * 1024,
-		max_directory_entries=100000, max_directory_depth=16):
+		max_directory_entries=100000, max_directory_depth=16,
+		submission_token=None):
 	"""Create one fresh workspace with trusted V2 specs and isolated worker.
 
 	Returns *internal* workspace and asset paths for a subsequent trusted
@@ -52,12 +53,37 @@ def prepare_v2_submission(db, owner, pipeline_id, node_id, run_id, job_id,
 		raise manager.PipelineError('Invalid server-generated job identifier', 409)
 	manager.validate_identifier(node_id, 'node_id')
 	manager.get_pipeline(owner, pipeline_id)
-	run = db.pipeline_runs.find_one({
-		'owner': owner, 'pipeline_id': pipeline_id, 'node_id': node_id,
-		'run_id': run_id, 'status': 'PLANNED'
-	})
+	
+	query = {
+		'owner': owner,
+		'pipeline_id': pipeline_id,
+		'node_id': node_id,
+		'run_id': run_id
+	}
+
+	if submission_token is None:
+		# Preserve the original preparation-only behavior.
+		query['status'] = 'PLANNED'
+	else:
+		# Only the request holding the active submission claim
+		# may prepare this run.
+		if (
+			not isinstance(submission_token, str)
+			or not re.fullmatch(r'[0-9a-f]{32}', submission_token)
+		):
+			raise manager.PipelineError('Invalid submission claim token', 409)
+
+		query['status'] = 'SUBMITTING'
+		query['submission_token'] = submission_token
+
+	run = db.pipeline_runs.find_one(query)
+
 	if run is None:
-		raise manager.PipelineError('PLANNED downstream run not found', 409)
+		raise manager.PipelineError(
+			'Downstream run not available for V2 preparation', 409
+		)
+	
+	
 	if not run.get('input_artifacts'):
 		raise manager.PipelineError('Downstream run has no frozen inputs', 409)
 
