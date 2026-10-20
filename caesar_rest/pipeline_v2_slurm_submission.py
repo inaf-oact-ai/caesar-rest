@@ -7,7 +7,7 @@ import json
 import re
 
 from caesar_rest import pipeline_manager as manager
-from caesar_rest import pipeline_job_binding as binding
+from caesar_rest.pipeline.submission import job_binding as binding
 from caesar_rest import pipeline_v2_claimed_preparation as preparation
 from caesar_rest import pipeline_worker_slurm as worker_slurm
 from caesar_rest.pipeline_v2_identity_reconciliation import attempt_comment
