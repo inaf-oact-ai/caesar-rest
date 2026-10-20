@@ -195,3 +195,58 @@ def test_accepted_job_failure_recording_also_fails(monkeypatch, events):
 	# Never submit the accepted job again.
 	assert len(scheduler.calls) == 1
 	
+@pytest.mark.parametrize(
+	'reply',
+	[
+		None,
+		{'errors': [{'error': 'invalid partition'}]}
+	]
+)
+def test_scheduler_reply_failure_recording_fails(
+		monkeypatch, events, reply):
+
+	def fail_record(*args, **kwargs):
+		raise manager.PipelineError(
+			'Simulated database persistence failure', 500
+		)
+
+	monkeypatch.setattr(
+		binding, 'fail_submission', fail_record
+	)
+
+	scheduler = Scheduler(reply)
+
+	with pytest.raises(
+		manager.PipelineError,
+		match='administrative reconciliation required'
+	):
+		submission.submit_claimed_v2(
+			_prepared(), scheduler, 'pipeline1'
+		)
+
+	assert len(scheduler.calls) == 1
+
+
+def test_scheduler_exception_failure_recording_fails(
+		monkeypatch, events):
+
+	def fail_record(*args, **kwargs):
+		raise manager.PipelineError(
+			'Simulated database persistence failure', 500
+		)
+
+	monkeypatch.setattr(
+		binding, 'fail_submission', fail_record
+	)
+
+	scheduler = Scheduler(TimeoutError('Slurm timeout'))
+
+	with pytest.raises(
+		manager.PipelineError,
+		match='administrative reconciliation required'
+	):
+		submission.submit_claimed_v2(
+			_prepared(), scheduler, 'pipeline1'
+		)
+
+	assert len(scheduler.calls) == 1

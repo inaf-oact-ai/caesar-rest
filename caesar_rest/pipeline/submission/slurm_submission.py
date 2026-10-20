@@ -147,33 +147,59 @@ def submit_claimed_v2(prepared, slurm_manager, job_name, cpus_per_task=1,
 	# No automatic retry is permitted after this point.
 	try:
 		reply = slurm_manager.submit_job(payload)
+		
 	except Exception as exc:
-		binding.fail_submission(
-			claim,
-			'Slurm submission outcome unknown',
-			uncertain=True,
-			job_id=assets.get('job_id')
-		)
+		# Slurm may have accepted the job before the exception.
+		# Never retry automatically.
+		try:
+			binding.fail_submission(
+				claim,
+				'Slurm submission outcome unknown',
+				uncertain=True,
+				job_id=assets.get('job_id')
+			)
+		except Exception as persistence_exc:
+			raise manager.PipelineError(
+				'Slurm submission outcome uncertain and '
+				'failure recording failed; '
+				'administrative reconciliation required',
+				503
+			) from persistence_exc
+
 		raise manager.PipelineError(
 			'Slurm submission outcome uncertain', 503
-		) from exc
-
+		) from exc		
+		
 	pid, rejected = _scheduler_result(reply)
 
+		
 	if pid is None:
-		binding.fail_submission(
-			claim,
-			'Slurm explicitly rejected submission'
-			if rejected else 'Slurm submission outcome unknown',
-			uncertain=not rejected,
-			job_id=assets.get('job_id')
-		)
+		try:
+			binding.fail_submission(
+				claim,
+				'Slurm explicitly rejected submission'
+				if rejected else 'Slurm submission outcome unknown',
+				uncertain=not rejected,
+				job_id=assets.get('job_id')
+			)
 
+		except Exception as persistence_exc:
+			outcome = (
+				'Slurm rejected submission'
+				if rejected else 'Slurm submission outcome uncertain'
+			)
+			raise manager.PipelineError(
+				outcome + '; failure recording failed; '
+				'administrative reconciliation required',
+				503
+			) from persistence_exc
+						
 		raise manager.PipelineError(
 			'Slurm rejected submission'
 			if rejected else 'Slurm submission outcome uncertain',
 			409 if rejected else 503
-		)
+		)		
+		
 
 	try:
 		binding.finish_submission(
