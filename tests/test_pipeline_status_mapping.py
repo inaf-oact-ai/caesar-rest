@@ -37,3 +37,24 @@ def test_state_mapping_is_case_insensitive():
 		'state': 'success',
 		'exit_code': 0
 	}) == 'COMPLETED'
+	
+def test_cleared_slurm_job_has_unknown_outcome():
+	assert desired_status({
+		'state': 'CLEARED',
+		'exit_code': -1
+	}) is None
+	
+@pytest.mark.parametrize(
+	'exit_code',
+	[
+		1,
+		-1,
+		'1',
+		'-1'
+	]
+)
+def test_nonzero_success_exit_code_is_failure(exit_code):
+	assert desired_status({
+		'state': 'SUCCESS',
+		'exit_code': exit_code
+	}) == 'FAILED'
