@@ -1,1 +1,1 @@
-"""Dependency-free execution runtime for CAESAR pipeline jobs."""
+"""Compatibility package for the renamed pipeline_runtime package."""

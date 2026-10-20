@@ -10,8 +10,8 @@ import shlex
 import sys
 from pathlib import Path
 
-from caesar_pipeline_runtime.staging import StagingError
-from caesar_pipeline_runtime.resolver import resolve_staged_inputs
+from pipeline_runtime.staging import StagingError
+from pipeline_runtime.resolver import resolve_staged_inputs
 
 
 def synthetic_execution_command(workspace, runner_path, python_executable='/usr/bin/python3'):

@@ -10,7 +10,7 @@ import stat
 import tempfile
 import zipfile
 
-from caesar_pipeline_runtime import __file__ as runtime_init
+from pipeline_runtime import __file__ as runtime_init
 
 WORKER_NAME = 'caesar-pipeline-worker.pyz'
 RUNTIME_MODULES = (
@@ -23,7 +23,7 @@ RUNTIME_MODULES = (
 	'paths.py',
 	'executor.py'
 )
-ENTRYPOINT = '''"""Offline Slurm pipeline worker."""\nimport sys\nfrom caesar_pipeline_runtime.stage_runner import main as prepare_main\nfrom caesar_pipeline_runtime.executor import main as execute_main\n\ndef main(argv=None):\n	args = sys.argv[1:] if argv is None else argv\n	if not args or args[0] not in ('prepare', 'execute'):\n		print('Usage: caesar-pipeline-worker.pyz {prepare|execute} --workspace PATH --spec PATH', file=sys.stderr)\n		return 2\n	return (prepare_main if args[0] == 'prepare' else execute_main)(args[1:])\n\nif __name__ == '__main__':\n	sys.exit(main())\n'''
+ENTRYPOINT = '''"""Offline Slurm pipeline worker."""\nimport sys\nfrom pipeline_runtime.stage_runner import main as prepare_main\nfrom pipeline_runtime.executor import main as execute_main\n\ndef main(argv=None):\n	args = sys.argv[1:] if argv is None else argv\n	if not args or args[0] not in ('prepare', 'execute'):\n		print('Usage: caesar-pipeline-worker.pyz {prepare|execute} --workspace PATH --spec PATH', file=sys.stderr)\n		return 2\n	return (prepare_main if args[0] == 'prepare' else execute_main)(args[1:])\n\nif __name__ == '__main__':\n	sys.exit(main())\n'''
 
 
 def build_archive(destination):
@@ -47,8 +47,10 @@ def build_archive(destination):
 				info.external_attr = (0o644 << 16)
 				zf.writestr(info, data)
 			put('__main__.py', ENTRYPOINT.encode('utf-8'))
+				
 			for name in RUNTIME_MODULES:
-				put('caesar_pipeline_runtime/' + name, (source / name).read_bytes())
+				put('pipeline_runtime/' + name, (source / name).read_bytes())
+								
 		dest.chmod(0o600)
 		return hashlib.sha256(dest.read_bytes()).hexdigest()
 	

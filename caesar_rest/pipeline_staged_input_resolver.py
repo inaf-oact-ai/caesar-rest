@@ -1,5 +1,5 @@
 """Backward-compatible facade; implementation lives in caesar_pipeline_runtime."""
-from caesar_pipeline_runtime import resolver as _impl
+from pipeline_runtime import resolver as _impl
 
 for _name in dir(_impl):
 	if not _name.startswith("__"):

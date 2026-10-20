@@ -10,9 +10,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-from caesar_pipeline_runtime.staging import StagingError
-from caesar_pipeline_runtime.resolver import resolve_staged_inputs
-from caesar_pipeline_runtime.paths import map_staged_inputs, map_host_path
+from pipeline_runtime.staging import StagingError
+from pipeline_runtime.resolver import resolve_staged_inputs
+from pipeline_runtime.paths import map_staged_inputs, map_host_path
 
 
 # A fixed program executed IN the container. Positional parameters are paths,

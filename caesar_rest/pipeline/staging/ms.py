@@ -1,7 +1,7 @@
 """Backward-compatible Measurement Set adapter for generic staging."""
 from pathlib import Path
 
-from caesar_pipeline_runtime.staging import StagingError, stage_input
+from pipeline_runtime.staging import StagingError, stage_input
 
 
 def stage_ms(source, workspace):

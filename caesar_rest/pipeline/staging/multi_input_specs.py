@@ -7,7 +7,7 @@ adapter and worker remain unchanged until H2C2b.
 import os
 import re
 
-from caesar_pipeline_runtime.integrity import validate_expected
+from pipeline_runtime.integrity import validate_expected
 
 
 class MultiInputSpecError(ValueError):
