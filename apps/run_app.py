@@ -348,6 +348,23 @@ def get_args():
 		help='Absolute path to the Python interpreter available on Slurm compute nodes'
 	)
 	
+	# - Pipeline artifact retention options
+	parser.add_argument(
+		'--pipeline_artifact_retention_root',
+		dest='pipeline_artifact_retention_root',
+		default='',
+		type=str,
+		help='Absolute directory for retained pipeline artifacts (empty disables retention)'
+	)
+
+	parser.add_argument(
+		'--pipeline_artifact_retention_max_file_bytes',
+		dest='pipeline_artifact_retention_max_file_bytes',
+		default=1024 * 1024 * 1024,
+		type=int,
+		help='Maximum size in bytes of each retained artifact (default: 1 GiB)'
+	)
+	
 	# - Dynamic dataset registry options
 	parser.add_argument(
 		'--dataset_registry_enabled',
@@ -557,6 +574,7 @@ pipeline_staged_applications = tuple(
 
 pipeline_python_executable = args.pipeline_python_executable
 
+
 # - Validate staged execution configuration
 if pipeline_staged_execution_enabled:
 	if job_scheduler != 'slurm':
@@ -577,6 +595,31 @@ if pipeline_staged_execution_enabled:
 	):
 		logger.error("Pipeline Python executable must be a normalized absolute path")
 		sys.exit(1)
+		
+# - Pipeline artifact retention options
+pipeline_artifact_retention_root = args.pipeline_artifact_retention_root.strip()
+
+pipeline_artifact_retention_max_file_bytes = (
+	args.pipeline_artifact_retention_max_file_bytes
+)
+
+# - Validate retention configuration
+if pipeline_artifact_retention_root:
+	if (
+		not os.path.isabs(pipeline_artifact_retention_root)
+		or os.path.normpath(pipeline_artifact_retention_root)
+		!= pipeline_artifact_retention_root
+	):
+		logger.error(
+			"Pipeline artifact retention root must be a normalized absolute path"
+		)
+		sys.exit(1)
+
+if pipeline_artifact_retention_max_file_bytes <= 0:
+	logger.error(
+		"Pipeline artifact retention maximum file size must be positive"
+	)
+	sys.exit(1)		
 		
 # - Dynamic dataset registry options
 dataset_registry_enabled = args.dataset_registry_enabled
@@ -707,6 +750,9 @@ config.SLURM_OXKAT_JOB_IMAGE= oxkat_container
 config.PIPELINE_STAGED_EXECUTION_ENABLED = pipeline_staged_execution_enabled
 config.PIPELINE_STAGED_APPLICATIONS = pipeline_staged_applications
 config.PIPELINE_PYTHON_EXECUTABLE = pipeline_python_executable
+config.PIPELINE_ARTIFACT_RETENTION_ROOT = pipeline_artifact_retention_root
+config.PIPELINE_ARTIFACT_RETENTION_MAX_FILE_BYTES = pipeline_artifact_retention_max_file_bytes
+
 
 # - Create data manager (DEPRECATED BY MONGO)
 ##logger.info("Creating data manager ...")
