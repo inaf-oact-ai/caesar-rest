@@ -6,9 +6,9 @@ associated pipeline runs. Invoke explicitly via the pipeline sync endpoint.
 """
 
 from caesar_rest import mongo
-from caesar_rest import pipeline_manager as manager
-from caesar_rest import pipeline_artifact_registration
 from caesar_rest import logger
+from caesar_rest.pipeline import manager
+from caesar_rest.pipeline.artifacts import registration as pipeline_artifact_registration
 
 # Match the persisted job states used by the existing job monitoring API.
 ACTIVE_STATES = {'STARTED', 'RUNNING'}

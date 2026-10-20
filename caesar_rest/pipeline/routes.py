@@ -10,7 +10,7 @@ from caesar_rest import mongo
 from caesar_rest.decorators import custom_require_login
 
 from caesar_rest.pipeline import manager
-from caesar_rest import pipeline_status_sync
+from caesar_rest.pipeline import status as pipeline_status_sync
 from caesar_rest.pipeline.artifacts import access as artifact_access
 from caesar_rest.pipeline.artifacts import resolver as artifact_resolver
 from caesar_rest.pipeline.artifacts import retention
