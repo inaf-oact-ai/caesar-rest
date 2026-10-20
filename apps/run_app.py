@@ -365,6 +365,30 @@ def get_args():
 		help='Maximum size in bytes of each retained artifact (default: 1 GiB)'
 	)
 	
+	parser.add_argument(
+		'--pipeline_artifact_retention_max_directory_bytes',
+		dest='pipeline_artifact_retention_max_directory_bytes',
+		default=1024 * 1024 * 1024 * 1024,
+		type=int,
+		help='Maximum total size in bytes of a retained directory artifact (default: 1 TiB)'
+	)
+
+	parser.add_argument(
+		'--pipeline_artifact_retention_max_directory_entries',
+		dest='pipeline_artifact_retention_max_directory_entries',
+		default=100000,
+		type=int,
+		help='Maximum number of files and subdirectories per retained directory artifact'
+	)
+
+	parser.add_argument(
+		'--pipeline_artifact_retention_max_directory_depth',
+		dest='pipeline_artifact_retention_max_directory_depth',
+		default=16,
+		type=int,
+		help='Maximum nesting depth of a retained directory artifact'
+	)	
+	
 	# - Dynamic dataset registry options
 	parser.add_argument(
 		'--dataset_registry_enabled',
@@ -598,10 +622,10 @@ if pipeline_staged_execution_enabled:
 		
 # - Pipeline artifact retention options
 pipeline_artifact_retention_root = args.pipeline_artifact_retention_root.strip()
-
-pipeline_artifact_retention_max_file_bytes = (
-	args.pipeline_artifact_retention_max_file_bytes
-)
+pipeline_artifact_retention_max_file_bytes = args.pipeline_artifact_retention_max_file_bytes
+pipeline_artifact_retention_max_directory_bytes = args.pipeline_artifact_retention_max_directory_bytes
+pipeline_artifact_retention_max_directory_entries = args.pipeline_artifact_retention_max_directory_entries
+pipeline_artifact_retention_max_directory_depth = args.pipeline_artifact_retention_max_directory_depth
 
 # - Validate retention configuration
 if pipeline_artifact_retention_root:
@@ -620,6 +644,17 @@ if pipeline_artifact_retention_max_file_bytes <= 0:
 		"Pipeline artifact retention maximum file size must be positive"
 	)
 	sys.exit(1)		
+		
+if (
+	pipeline_artifact_retention_max_directory_bytes <= 0
+	or pipeline_artifact_retention_max_directory_entries <= 0
+	or pipeline_artifact_retention_max_directory_depth <= 0
+):
+	logger.error(
+		"Pipeline artifact retention directory limits must be positive"
+	)
+	sys.exit(1)
+
 		
 # - Dynamic dataset registry options
 dataset_registry_enabled = args.dataset_registry_enabled
@@ -752,7 +787,9 @@ config.PIPELINE_STAGED_APPLICATIONS = pipeline_staged_applications
 config.PIPELINE_PYTHON_EXECUTABLE = pipeline_python_executable
 config.PIPELINE_ARTIFACT_RETENTION_ROOT = pipeline_artifact_retention_root
 config.PIPELINE_ARTIFACT_RETENTION_MAX_FILE_BYTES = pipeline_artifact_retention_max_file_bytes
-
+config.PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_BYTES = pipeline_artifact_retention_max_directory_bytes
+config.PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_ENTRIES = pipeline_artifact_retention_max_directory_entries
+config.PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_DEPTH = pipeline_artifact_retention_max_directory_depth
 
 # - Create data manager (DEPRECATED BY MONGO)
 ##logger.info("Creating data manager ...")
