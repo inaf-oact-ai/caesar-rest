@@ -11,9 +11,9 @@ from caesar_rest.decorators import custom_require_login
 
 from caesar_rest.pipeline import manager
 from caesar_rest import pipeline_status_sync
-from caesar_rest import pipeline_artifact_access as artifact_access
-from caesar_rest import pipeline_artifact_resolver as artifact_resolver
-from caesar_rest import pipeline_artifact_retention as retention
+from caesar_rest.pipeline.artifacts import access as artifact_access
+from caesar_rest.pipeline.artifacts import resolver as artifact_resolver
+from caesar_rest.pipeline.artifacts import retention
 from caesar_rest import pipeline_directory_resolver as directory_resolver
 
 pipeline_bp = Blueprint('pipelines', __name__, url_prefix='/caesar/api/v1.0')

@@ -165,8 +165,9 @@ def create_run(
 		if parent is None or parent['status'] != 'COMPLETED':
 			raise PipelineError('Input run must exist and be completed: %s' % parent_id, 409)
 	
-	
-	from caesar_rest import pipeline_artifact_binding
+	# Import lazily to avoid circular dependencies:
+	# artifacts.binding -> artifacts.access -> pipeline.manager.
+	from caesar_rest.pipeline.artifacts import binding as pipeline_artifact_binding
 
 	bindings = pipeline_artifact_binding.bind_inputs(
 		mongo.db,
