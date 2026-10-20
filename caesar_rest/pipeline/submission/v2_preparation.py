@@ -11,7 +11,7 @@ from pathlib import Path
 from caesar_rest.pipeline import manager
 from caesar_rest.pipeline.submission import v2_adapter as adapter
 from caesar_rest.pipeline.staging import submission_specs as spec_writer
-from caesar_rest import pipeline_worker_bundle as worker_bundle
+from caesar_rest.pipeline.submission import worker_bundle
 
 _JOB_ID = re.compile(r'^[A-Za-z0-9_-]{1,128}$')
 

@@ -9,7 +9,7 @@ import re
 from caesar_rest.pipeline import manager
 from caesar_rest.pipeline.submission import job_binding as binding
 from caesar_rest.pipeline.submission import claimed_preparation as preparation
-from caesar_rest import pipeline_worker_slurm as worker_slurm
+from caesar_rest.pipeline.submission import worker_slurm
 from caesar_rest.pipeline.submission.identity_reconciliation import attempt_comment
 
 _JOB_NAME = re.compile(r'^[A-Za-z0-9_-]{1,128}$')
