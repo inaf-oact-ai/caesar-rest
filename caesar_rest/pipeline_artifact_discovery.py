@@ -1,7 +1,7 @@
-"""Discover completed pipeline output files from an application output contract.
+"""Discover completed pipeline outputs from an application output contract.
 
-No database writes or job-state transitions occur in this module. Call only
-with a trusted job workspace and server-owned application output contract.
+This module performs metadata discovery only. Directory artifacts are not yet
+supported by registration, retention, download, or downstream staging.
 """
 
 import glob
@@ -22,20 +22,64 @@ def _safe_relative(value):
 	return value
 
 
-def discover_artifacts(workspace, contract, max_files=1000):
-	"""Return deterministic metadata for files declared in ``job_outputs``.
+def _directory_summary(path, max_depth, max_entries, max_bytes):
+	"""Inspect a directory tree without following symlinks.
 
-	Only regular files within ``workspace/results`` are accepted. Symlinks in
-	any component of the path are rejected, including the workspace itself.
-	Glob patterns are restricted to a single results-directory level.
-	Required exact paths must exist. Optional patterns may match nothing.
+	Depth is measured from the artifact root. Regular files and directories
+	both count towards the entry limit. This is discovery, not a filesystem
+	snapshot; copy-time validation remains necessary in a later milestone.
+	"""
+	files = 0
+	directories = 0
+	total = 0
+	stack = [(path, 0)]
+	while stack:
+		current, depth = stack.pop()
+		try:
+			with os.scandir(str(current)) as entries:
+				children = sorted(list(entries), key=lambda entry: entry.name)
+		except OSError as exc:
+			raise ArtifactDiscoveryError('Cannot inspect directory artifact') from exc
+		for entry in children:
+			if entry.is_symlink():
+				raise ArtifactDiscoveryError('Symlink artifact rejected: %s' % entry.name)
+			try:
+				info = entry.stat(follow_symlinks=False)
+			except OSError as exc:
+				raise ArtifactDiscoveryError('Cannot inspect directory artifact') from exc
+			if stat.S_ISDIR(info.st_mode):
+				if depth + 1 > max_depth:
+					raise ArtifactDiscoveryError('Artifact directory depth limit exceeded')
+				directories += 1
+				stack.append((Path(entry.path), depth + 1))
+			elif stat.S_ISREG(info.st_mode):
+				files += 1
+				total += info.st_size
+				if total > max_bytes:
+					raise ArtifactDiscoveryError('Artifact directory size limit exceeded')
+			else:
+				raise ArtifactDiscoveryError('Special file in directory artifact')
+			if files + directories > max_entries:
+				raise ArtifactDiscoveryError('Artifact directory entry limit exceeded')
+	return {'size_bytes': total, 'file_count': files, 'directory_count': directories}
+
+
+def discover_artifacts(workspace, contract, max_files=1000, max_directory_entries=100000,
+						max_directory_depth=16, max_directory_bytes=1024 * 1024 * 1024 * 1024):
+	"""Discover declared files and directories under ``workspace/results``.
+
+	``kind`` defaults to ``file`` for backwards compatibility. The directory
+	limits are independent from the number of top-level registered artifacts.
+	Only flat glob patterns are supported. A discovered directory never gets
+	a checksum until later retention work.
 	"""
 	if not isinstance(workspace, (str, os.PathLike)) or not os.path.isabs(workspace):
 		raise ArtifactDiscoveryError('Workspace must be absolute')
 	if not isinstance(contract, dict):
 		raise ArtifactDiscoveryError('Output contract must be an object')
-	if not isinstance(max_files, int) or isinstance(max_files, bool) or max_files < 1:
-		raise ArtifactDiscoveryError('Invalid artifact limit')
+	for value in (max_files, max_directory_entries, max_directory_depth, max_directory_bytes):
+		if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+			raise ArtifactDiscoveryError('Invalid artifact discovery limit')
 
 	root = Path(os.path.abspath(workspace))
 	results = root / 'results'
@@ -48,6 +92,9 @@ def discover_artifacts(workspace, contract, max_files=1000):
 	for key, spec in sorted(contract.items()):
 		if not isinstance(key, str) or not key or not isinstance(spec, dict):
 			raise ArtifactDiscoveryError('Invalid output contract entry')
+		kind = spec.get('kind', 'file')
+		if kind not in ('file', 'directory'):
+			raise ArtifactDiscoveryError('Invalid artifact kind')
 		exact = spec.get('path')
 		pattern = spec.get('glob')
 		if bool(exact) == bool(pattern):
@@ -65,7 +112,6 @@ def discover_artifacts(workspace, contract, max_files=1000):
 		for relative in relatives:
 			_safe_relative(relative)
 			path = results / relative
-			# lstat every component: never follow symlinks, including in subdirs.
 			current = results
 			for component in relative.split('/'):
 				current = current / component
@@ -77,18 +123,25 @@ def discover_artifacts(workspace, contract, max_files=1000):
 				if exact and not spec.get('required'):
 					continue
 				raise ArtifactDiscoveryError('Missing required artifact: %s' % relative)
-			if not stat.S_ISREG(info.st_mode):
+			if kind == 'file' and not stat.S_ISREG(info.st_mode):
 				raise ArtifactDiscoveryError('Artifact is not a regular file: %s' % relative)
+			if kind == 'directory' and not stat.S_ISDIR(info.st_mode):
+				raise ArtifactDiscoveryError('Artifact is not a directory: %s' % relative)
 			if relative in seen:
 				raise ArtifactDiscoveryError('Duplicate artifact: %s' % relative)
+			if len(artifacts) >= max_files:
+				raise ArtifactDiscoveryError('Artifact count limit exceeded')
 			seen.add(relative)
-			artifacts.append({
+			item = {
 				'name': key,
 				'relative_path': 'results/' + relative,
 				'type': spec.get('type') or 'application/octet-stream',
 				'role': spec.get('role') or 'output',
 				'size_bytes': info.st_size,
-			})
-			if len(artifacts) > max_files:
-				raise ArtifactDiscoveryError('Artifact count limit exceeded')
+			}
+			if kind == 'directory':
+				item.update(_directory_summary(path, max_directory_depth,
+					max_directory_entries, max_directory_bytes))
+				item['kind'] = 'directory'
+			artifacts.append(item)
 	return artifacts
