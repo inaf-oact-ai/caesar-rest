@@ -92,22 +92,46 @@ def finish_submission(claim, job_id, scheduler, pid):
 		raise manager.PipelineError('Run submission record could not be finalized', 500)
 
 
-def fail_submission(claim, message, uncertain=False, job_id=None):
-	"""Record a failed submission, or an uncertain post-submission failure.
 
-	An uncertain submission must never be treated as a safe automatic retry:
-	the scheduler may already be running the job.
+def fail_submission(claim, message, uncertain=False, job_id=None):
+	"""Record a failed or uncertain submission.
+
+	An uncertain submission must never be automatically retried.
+	Failure persistence must not silently succeed when no run is updated.
 	"""
 	_, runs, _ = manager.collections()
-	status = 'SUBMISSION_UNCERTAIN' if uncertain else 'SUBMISSION_FAILED'
-	runs.update_one(
-		{'owner': claim.owner, 'pipeline_id': claim.pipeline_id,
-		 'run_id': claim.run_id, 'submission_token': claim.token,
-		 'status': 'SUBMITTING'},
-		{'$set': {'status': status, 'submission_error': str(message),
-		          'job_id': job_id}, '$unset': {'submission_token': ''}}
+
+	status = (
+		'SUBMISSION_UNCERTAIN'
+		if uncertain else 'SUBMISSION_FAILED'
 	)
-	
+
+	result = runs.update_one(
+		{
+			'owner': claim.owner,
+			'pipeline_id': claim.pipeline_id,
+			'run_id': claim.run_id,
+			'submission_token': claim.token,
+			'status': 'SUBMITTING'
+		},
+		{
+			'$set': {
+				'status': status,
+				'submission_error': str(message),
+				'job_id': job_id
+			},
+			'$unset': {
+				'submission_token': ''
+			}
+		}
+	)
+
+	if result.modified_count != 1:
+		raise manager.PipelineError(
+			'Submission failure state could not be recorded; '
+			'administrative reconciliation required',
+			500
+		)	
 
 def begin_submission_intent(claim, assets):
 	"""Atomically authorize exactly one V2 scheduler submission attempt.
