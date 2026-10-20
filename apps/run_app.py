@@ -823,8 +823,7 @@ config.DATASET_ADMIN_IDENTITIES = dataset_admin_identities
 #==   CREATE APP
 #===============================
 logger.info("Creating and configuring app ...")
-##app= create_app(config,datamgr,jobcfg)
-app= create_app(config,jobcfg)
+app= create_app(config, jobcfg)
 app.app_context().push()
 
 #===============================
