@@ -15,7 +15,7 @@ from caesar_rest.pipeline import manager
 from caesar_rest.pipeline.artifacts import access
 from caesar_rest.pipeline.artifacts import directory_retention as directory_copy
 from caesar_rest.pipeline.artifacts import directory_integrity
-from caesar_rest.pipeline_workspace import workspace_for_job
+from caesar_rest.pipeline.staging.workspace import workspace_for_job
 
 
 def _source_directory(db, owner, run, artifact):

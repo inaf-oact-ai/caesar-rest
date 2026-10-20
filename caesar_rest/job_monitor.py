@@ -43,7 +43,7 @@ from caesar_rest.app import celery as celery_app
 from caesar_rest import utils
 from caesar_rest import jobmgr_kube
 from caesar_rest import jobmgr_slurm
-from caesar_rest import pipeline_status_sync
+from caesar_rest.pipeline import status as pipeline_status_sync
 
 # Import mongo
 from pymongo import MongoClient

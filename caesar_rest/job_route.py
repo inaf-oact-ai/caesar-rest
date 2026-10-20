@@ -56,8 +56,8 @@ from caesar_rest import mongo
 from caesar_rest import dataset_registry
 from caesar_rest import jobmgr_kube
 from caesar_rest import jobmgr_slurm
-from caesar_rest import pipeline_job_binding
-from caesar_rest import pipeline_workspace
+from caesar_rest.pipeline.submission import job_binding as pipeline_job_binding
+from caesar_rest.pipeline.staging import workspace as pipeline_workspace
 
 # Get logger
 from caesar_rest import logger
@@ -881,7 +881,7 @@ def submit_job_slurm(
 	preparation = None
 
 	if staged_cmd_arg_list is not None:
-		from caesar_rest.pipeline_submission_specs import (
+		from caesar_rest.pipeline.staging.submission_specs import (
 			create_specs,
 			write_specs,
 			PipelineSubmissionError
@@ -921,7 +921,7 @@ def submit_job_slurm(
 			# - Package the shared pipeline runtime into a standalone
 			#   worker archive inside the private job workspace.
 			# - Deployment must complete before Slurm submission.
-			from caesar_rest.pipeline_worker_bundle import deploy_worker
+			from caesar_rest.pipeline.submission.worker_bundle import deploy_worker
 
 			worker_info = deploy_worker(job_dir)
 

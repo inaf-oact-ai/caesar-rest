@@ -9,7 +9,7 @@ import re
 import stat
 
 from caesar_rest.pipeline import manager
-from caesar_rest.pipeline_workspace import workspace_for_job
+from caesar_rest.pipeline.staging.workspace import workspace_for_job
 
 
 class ArtifactAccessError(manager.PipelineError):

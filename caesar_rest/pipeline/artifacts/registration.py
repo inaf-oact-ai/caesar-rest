@@ -8,7 +8,7 @@ import os
 
 from caesar_rest.pipeline.artifacts import discovery
 from caesar_rest.pipeline import manager
-from caesar_rest.pipeline_workspace import workspace_for_job
+from caesar_rest.pipeline.staging.workspace import workspace_for_job
 from caesar_rest.job_configurator import JobConfigurator
 
 class ArtifactRegistrationError(ValueError):

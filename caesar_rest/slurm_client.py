@@ -563,8 +563,8 @@ class SlurmJobManager(object):
 		
 		else:
 			# - Guarded staging preparation
-			from caesar_rest.pipeline_slurm_preparation import preparation_command
-		
+			from caesar_rest.pipeline.submission.slurm_preparation import preparation_command
+			
 			# - Validate preparation mode
 			if not isinstance(preparation, dict):
 				logger.error("Invalid preparation configuration", action="submitjob")
@@ -604,8 +604,8 @@ class SlurmJobManager(object):
 			worker_execute_cmd = None
 
 			if preparation_mode == 'prepare_then_execute_container':
-				from caesar_rest.pipeline_worker_slurm import worker_commands
-
+				from caesar_rest.pipeline.submission.worker_slurm import worker_commands
+				
 				try:
 					verify_cmd, prepare_cmd, worker_execute_cmd = worker_commands(
 						preparation['workspace'],
@@ -653,7 +653,7 @@ class SlurmJobManager(object):
 
 			# - Phase 2: RESOLVE and EXECUTE (synthetic test only)
 			if preparation_mode == 'prepare_then_execute_synthetic':
-				from caesar_rest.pipeline_synthetic_execution import synthetic_execution_command
+				from caesar_rest.pipeline.execution.synthetic import synthetic_execution_command
 
 				try:
 					execute_cmd = synthetic_execution_command(
@@ -674,7 +674,7 @@ class SlurmJobManager(object):
 			
 			# - Phase 2: RESOLVE, MAP and EXECUTE inside Singularity
 			elif preparation_mode == 'prepare_then_execute_singularity_synthetic':
-				from caesar_rest.pipeline_singularity_synthetic import singularity_synthetic_command
+				from caesar_rest.pipeline.execution.singularity_synthetic import singularity_synthetic_command
 
 				try:
 					execute_cmd = singularity_synthetic_command(
