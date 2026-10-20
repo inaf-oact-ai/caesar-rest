@@ -182,15 +182,24 @@ def submit_claimed_v2(prepared, slurm_manager, job_name, cpus_per_task=1,
 			'slurm',
 			pid
 		)
+		
 	except Exception as exc:
-		# The scheduler may already be running this job.
-		# Preserve the intent and require reconciliation.
-		binding.fail_submission(
-			claim,
-			'Scheduler accepted job; database finalization uncertain',
-			uncertain=True,
-			job_id=assets['job_id']
-		)
+		# Slurm has accepted the job. Never submit it again.
+		# The durable submission intent remains available for reconciliation.
+		try:
+			binding.fail_submission(
+				claim,
+				'Scheduler accepted job; database finalization uncertain',
+				uncertain=True,
+				job_id=assets['job_id']
+			)
+		except Exception as persistence_exc:
+			raise manager.PipelineError(
+				'Slurm accepted the job, but both submission '
+				'finalization and uncertainty recording failed; '
+				'administrative reconciliation required',
+				503
+			) from persistence_exc
 
 		raise manager.PipelineError(
 			'Job accepted but persistence uncertain', 503

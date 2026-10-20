@@ -144,4 +144,54 @@ def test_failure_after_intent_before_slurm(monkeypatch, events):
 		)
 	]
 	
+def test_accepted_job_finalization_failure_is_uncertain(monkeypatch, events):
+	def fail_finish(*args):
+		raise manager.PipelineError(
+			'Simulated database finalization failure', 500
+		)
+
+	monkeypatch.setattr(binding, 'finish_submission', fail_finish)
+
+	scheduler = Scheduler({'job_id': 123, 'errors': []})
+
+	with pytest.raises(
+		manager.PipelineError,
+		match='Job accepted but persistence uncertain'
+	):
+		submission.submit_claimed_v2(
+			_prepared(), scheduler, 'pipeline1'
+		)
+
+	assert len(scheduler.calls) == 1
+	assert events == [
+		('fail', {'uncertain': True, 'job_id': 'j1'})
+	]
+
+
+def test_accepted_job_failure_recording_also_fails(monkeypatch, events):
+	def fail_finish(*args):
+		raise manager.PipelineError(
+			'Simulated database finalization failure', 500
+		)
+
+	def fail_record(*args, **kwargs):
+		raise manager.PipelineError(
+			'Submission failure state could not be recorded', 500
+		)
+
+	monkeypatch.setattr(binding, 'finish_submission', fail_finish)
+	monkeypatch.setattr(binding, 'fail_submission', fail_record)
+
+	scheduler = Scheduler({'job_id': 123, 'errors': []})
+
+	with pytest.raises(
+		manager.PipelineError,
+		match='administrative reconciliation required'
+	):
+		submission.submit_claimed_v2(
+			_prepared(), scheduler, 'pipeline1'
+		)
+
+	# Never submit the accepted job again.
+	assert len(scheduler.calls) == 1
 	
