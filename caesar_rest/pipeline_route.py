@@ -13,6 +13,7 @@ from caesar_rest import pipeline_status_sync
 from caesar_rest import pipeline_artifact_access as artifact_access
 from caesar_rest import pipeline_artifact_resolver as artifact_resolver
 from caesar_rest import pipeline_artifact_retention as retention
+from caesar_rest import pipeline_directory_resolver as directory_resolver
 
 pipeline_bp = Blueprint('pipelines', __name__, url_prefix='/caesar/api/v1.0')
 
@@ -228,7 +229,37 @@ def resolve_selected_artifact(pipeline_id, node_id, artifact_name):
 			artifact_name,
 			retention_root=current_app.config.get('PIPELINE_ARTIFACT_RETENTION_ROOT')
 		)
-	))	
+	))
+	
+@pipeline_bp.route(
+	'/pipelines/<pipeline_id>/nodes/<node_id>/selected/directories/<artifact_name>',
+	methods=['GET']
+)
+@custom_require_login
+def resolve_selected_directory(pipeline_id, node_id, artifact_name):
+	"""Verify a selected retained directory; return identifiers, never paths."""
+
+	def action(owner):
+		return jsonify(directory_resolver.resolve_selected_directory(
+			mongo.db,
+			owner,
+			pipeline_id,
+			node_id,
+			artifact_name,
+			current_app.config.get('PIPELINE_ARTIFACT_RETENTION_ROOT') or '',
+			max_entries=current_app.config.get(
+				'PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_ENTRIES', 100000
+			),
+			max_bytes=current_app.config.get(
+				'PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_BYTES',
+				1024 * 1024 * 1024 * 1024
+			),
+			max_depth=current_app.config.get(
+				'PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_DEPTH', 16
+			)
+		))
+
+	return invoke(action)
 	
 ############################################
 ###      PIPELINE ARTIFACT RETENTION
