@@ -22,7 +22,7 @@ class WorkerBundleTests(unittest.TestCase):
 			# Ensure all runtime dependencies are packaged into the zipapp.
 			with zipfile.ZipFile(worker, 'r') as archive:
 				self.assertIn(
-					'caesar_pipeline_runtime/version.py',
+					'pipeline_runtime/version.py',
 					archive.namelist()
 				)
 				
