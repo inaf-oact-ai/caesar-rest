@@ -10,7 +10,7 @@ import stat
 
 from caesar_rest.pipeline import manager
 from caesar_rest.pipeline_workspace import workspace_for_job
-from caesar_rest.pipeline.artifacts import retention
+
 
 class ArtifactAccessError(manager.PipelineError):
 	pass
@@ -68,7 +68,8 @@ def open_registered_artifact(db, owner, run, index, retention_root=None):
 	# Retained artifacts take precedence over original job workspaces.
 	# Once retention is recorded, never silently fall back to the source.
 	if run.get('retained_artifacts') is not None:
-		
+		# Lazy import avoids the artifact access/retention dependency cycle.
+		from caesar_rest.pipeline.artifacts import retention
 
 		return retention.open_retained_artifact(
 			owner, run, index, retention_root or ''
