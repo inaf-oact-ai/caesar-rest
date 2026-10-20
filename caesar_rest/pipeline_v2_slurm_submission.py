@@ -10,6 +10,7 @@ from caesar_rest import pipeline_manager as manager
 from caesar_rest import pipeline_job_binding as binding
 from caesar_rest import pipeline_v2_claimed_preparation as preparation
 from caesar_rest import pipeline_worker_slurm as worker_slurm
+from caesar_rest.pipeline_v2_identity_reconciliation import attempt_comment
 
 _JOB_NAME = re.compile(r'^[A-Za-z0-9_-]{1,128}$')
 
@@ -109,7 +110,13 @@ def submit_claimed_v2(prepared, slurm_manager, job_name, cpus_per_task=1,
 	# Atomic one-shot authorization. If another invocation already recorded
 	# an intent, this raises 409 before any scheduler interaction.
 	# Never mark the original claim failed on a duplicate request.
-	binding.begin_submission_intent(claim, assets)
+	intent = binding.begin_submission_intent(claim, assets)
+
+	prepared_payload = json.loads(payload)
+	prepared_payload['job']['comment'] = attempt_comment(
+		intent['attempt_id']
+	)
+	payload = json.dumps(prepared_payload)
 
 	# No automatic retry is permitted after this point.
 	try:

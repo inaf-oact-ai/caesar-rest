@@ -106,13 +106,23 @@ def prepare_v2_submission(db, owner, pipeline_id, node_id, run_id, job_id,
 		raise manager.PipelineError('Cannot create private V2 workspace', 503) from exc
 
 	try:
+		
 		staging, execution = adapter.build_bound_v2_specs(
-			db, owner, run, retention_root_app, retention_root_cluster,
-			cluster_ws, image, arguments, input_options,
+			db,
+			owner,
+			run,
+			retention_root_app,
+			retention_root_cluster,
+			cluster_ws,
+			image,
+			arguments,
+			input_options,
 			max_directory_bytes=max_directory_bytes,
 			max_directory_entries=max_directory_entries,
-			max_directory_depth=max_directory_depth
-		)
+			max_directory_depth=max_directory_depth,
+			submission_token=submission_token
+		)		
+		
 		if staging.get('version') != 2 or execution.get('version') != 2:
 			raise manager.PipelineError('Unexpected specification version', 409)
 		spec_paths = spec_writer.write_specs(app_ws, staging, execution)

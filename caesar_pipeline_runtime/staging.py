@@ -10,6 +10,7 @@ import stat
 import uuid
 from pathlib import Path
 
+from caesar_pipeline_runtime.integrity import verify_copy
 
 class StagingError(Exception):
 	"""Invalid staging request or incomplete preparation."""
@@ -166,6 +167,11 @@ def stage_inputs(inputs, workspace):
 
 				if _measured_size(dest) != original['size_bytes']:
 					raise StagingError('v2 staged size mismatch')
+
+				try:
+					verify_copy(dest, original)
+				except ValueError as exc:
+					raise StagingError('v2 staged digest mismatch') from exc
 
 			_set_writable(dest, writable)
 			

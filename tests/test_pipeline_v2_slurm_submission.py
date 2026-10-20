@@ -44,7 +44,7 @@ def events(monkeypatch):
 	monkeypatch.setattr(
 		binding,
 		'begin_submission_intent',
-		lambda *args: {'attempt_id': 'test-attempt'}
+		lambda *args: {'attempt_id': 'a' * 32}
 	)
 	monkeypatch.setattr(
 		binding,

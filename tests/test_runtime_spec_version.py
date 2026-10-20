@@ -1,6 +1,6 @@
 """H2C2b1 compatibility and v2 runtime tests (no Slurm required)."""
 import json
-
+import hashlib
 import pytest
 
 from caesar_pipeline_runtime.version import specification_version
@@ -32,18 +32,56 @@ def test_v1_stage_runner_without_version(tmp_path):
 
 
 def test_v2_multiple_inputs(tmp_path):
+	
 	file_source = tmp_path / 'data.json'
 	file_source.write_bytes(b'{}')
+	
 	dir_source = tmp_path / 'calibrated.ms'
 	dir_source.mkdir()
 	(dir_source / 'table.dat').write_bytes(b'table')
+	
+	file_sha = hashlib.sha256(file_source.read_bytes()).hexdigest()
+	dir_sha = hashlib.sha256(
+		(dir_source / 'table.dat').read_bytes()
+	).hexdigest()
+
+	manifest_entries = [
+		{
+			'path': 'table.dat',
+			'kind': 'file',
+			'size_bytes': 5,
+			'sha256': dir_sha
+		}
+	]	
+	
 	ws = tmp_path / 'workspace'
 	ws.mkdir()
 	spec = ws / 'staging_spec.json'
-	spec.write_text(json.dumps({'version': 2, 'inputs': [
-		{'source': str(file_source), 'name': 'settings', 'kind': 'file', 'size_bytes': 2, 'mode': 'copy', 'writable': True},
-		{'source': str(dir_source), 'name': 'vis', 'kind': 'directory', 'size_bytes': 5, 'mode': 'copy', 'writable': True}
-	]}))
+	
+	spec.write_text(json.dumps({
+		'version': 2,
+		'inputs': [
+			{
+				'source': str(file_source),
+				'name': 'settings',
+				'kind': 'file',
+				'size_bytes': 2,
+				'mode': 'copy',
+				'writable': True,
+				'sha256': file_sha
+			},
+			{
+				'source': str(dir_source),
+				'name': 'vis',
+				'kind': 'directory',
+				'size_bytes': 5,
+				'mode': 'copy',
+				'writable': True,
+				'manifest_entries': manifest_entries
+			}
+		]
+	}))	
+	
 	manifest = prepare(str(spec), str(ws))
 	assert [x['name'] for x in manifest['inputs']] == ['settings', 'vis']
 	assert (ws / 'input' / 'vis' / 'table.dat').read_bytes() == b'table'

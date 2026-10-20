@@ -6,12 +6,35 @@ from caesar_rest.pipeline_multi_input_specs import (
 
 
 def _specs():
-	return build_multi_input_specs('/jobs/job_123', [
-		{'input_name': 'vis', 'source': '/retained/alice/p1/r1/0001', 'kind': 'directory', 'size_bytes': 123},
-		{'input_name': 'settings', 'source': '/retained/alice/p1/r1/0000', 'kind': 'file', 'size_bytes': 9}
-	], '/images/oxkat.sif', ['--run', '--model=default'],
-		{'ms': 'vis', 'config': 'settings'})
-
+	return build_multi_input_specs(
+		'/jobs/job_123',
+		[
+			{
+				'input_name': 'vis',
+				'source': '/retained/alice/p1/r1/0001',
+				'kind': 'directory',
+				'size_bytes': 123,
+				'manifest_entries': [
+					{
+						'path': 'table.dat',
+						'kind': 'file',
+						'size_bytes': 123,
+						'sha256': 'a' * 64
+					}
+				]
+			},
+			{
+				'input_name': 'settings',
+				'source': '/retained/alice/p1/r1/0000',
+				'kind': 'file',
+				'size_bytes': 9,
+				'sha256': 'b' * 64
+			}
+		],
+		'/images/oxkat.sif',
+		['--run', '--model=default'],
+		{'ms': 'vis', 'config': 'settings'}
+	)
 
 def test_v2_pair_carries_multiple_named_inputs():
 	staging, execution = _specs()

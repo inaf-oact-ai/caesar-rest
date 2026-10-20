@@ -11,7 +11,7 @@ from pathlib import Path
 
 from caesar_pipeline_runtime.staging import StagingError, stage_inputs
 from caesar_pipeline_runtime.version import specification_version
-
+from caesar_pipeline_runtime.integrity import validate_expected
 
 def prepare(spec_path, workspace):
 	"""Stage inputs only; return published READY manifest."""
@@ -38,20 +38,32 @@ def prepare(spec_path, workspace):
 	if version == 2:
 		if set(spec) != {'version', 'inputs'}:
 			raise StagingError('Invalid v2 staging specification schema')
-
+			
 		inputs = spec['inputs']
 
 		if not isinstance(inputs, list) or not 1 <= len(inputs) <= 32:
 			raise StagingError('v2 requires 1-32 named inputs')
 
 		for item in inputs:
-			if not isinstance(item, dict) or set(item) != {
-				'name', 'source', 'kind', 'size_bytes', 'mode', 'writable'
-			}:
+			if not isinstance(item, dict) or set(item) not in (
+				{
+					'name', 'source', 'kind', 'size_bytes',
+					'mode', 'writable', 'sha256'
+				},
+				{
+					'name', 'source', 'kind', 'size_bytes',
+					'mode', 'writable', 'manifest_entries'
+				}
+			):
 				raise StagingError('Invalid v2 input descriptor')
 
 			if item['mode'] != 'copy' or item['writable'] is not True:
 				raise StagingError('Unsupported v2 input strategy')
+				
+			try:
+				validate_expected(item, item['kind'])
+			except (ValueError, KeyError) as exc:
+				raise StagingError('Invalid v2 integrity contract') from exc	
 
 	return stage_inputs(spec.get('inputs'), str(workspace_path))
 	

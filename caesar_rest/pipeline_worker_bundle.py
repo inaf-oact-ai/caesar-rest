@@ -16,6 +16,7 @@ WORKER_NAME = 'caesar-pipeline-worker.pyz'
 RUNTIME_MODULES = (
 	'__init__.py',
 	'version.py',
+	'integrity.py',
 	'staging.py',
 	'stage_runner.py',
 	'resolver.py',
