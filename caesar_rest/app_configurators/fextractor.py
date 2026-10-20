@@ -20,7 +20,7 @@ from flask import current_app, g
 from caesar_rest import oidc
 from caesar_rest import mongo
 from caesar_rest import utils
-from caesar_rest.app_configurators.base_app_configurator import (
+from caesar_rest.app_configurators.base import (
 	AppConfigurator,
 	Option, 
 	ValueOption, 

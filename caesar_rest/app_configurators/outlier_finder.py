@@ -21,7 +21,7 @@ from flask import current_app, g
 from caesar_rest import oidc
 from caesar_rest import mongo
 from caesar_rest import utils
-from caesar_rest.app_configurators.base_app_configurator import (
+from caesar_rest.app_configurators.base import (
 	AppConfigurator,
 	Option, 
 	ValueOption, 
@@ -32,24 +32,24 @@ from caesar_rest.app_configurators.base_app_configurator import (
 from caesar_rest import logger
 
 ##########################################
-#   UMAP APP CONFIGURATOR
+#   OutlierFinder APP CONFIGURATOR
 ##########################################
 
-class UMAPAppConfigurator(AppConfigurator):
-	""" Class to configure UMAP application """
+class OutlierFinderAppConfigurator(AppConfigurator):
+	""" Class to configure OutlierFinder application """
 
-	def __init__(self, app_name="umap"):
-		""" Return aapp configurator class """
+	def __init__(self, app_name="outlier-finder"):
+		""" Return app configurator class """
 		AppConfigurator.__init__(self, app_name=app_name)
 
 		# - Define cmd name
-		self.cmd= 'run_umap.sh'
+		self.cmd= 'run_outlier_finder.sh'
 		self.cmd_args= []
 		self.batch_processing_support= True
 		
 		# - Describe app
 		self.description = (
-			"Run UMAP data dimensionality reduction tool to produce a low-dimensional embedding of a dataset (N observations, M features → K<M embedding features)."	
+			"Find outliers in a tabular dataset (N observations, M features) using IsolationForest algorithm."
 		)
 		
 		self.tool_categories= ["tabular"]
@@ -90,7 +90,8 @@ class UMAPAppConfigurator(AppConfigurator):
 		}
 		
 		self.limitations = [
-			"Low-dimensional embedding produced by UMAP significantly depends on nneighbors and mindist algorithm parameters. See parameter documentation."
+			"Returned outliers/inliers highly depends on the algorithm hyperparameters (max-features, max-samples, max_features, contamination) and the anomaly threshold.",
+			"It is suggested to calibrate them with labelled data."
 		]
 		
 		# - Define dictionary with allowed options
@@ -101,7 +102,7 @@ class UMAPAppConfigurator(AppConfigurator):
 				name='datalist-key',
 				value='',
 				value_type=str, 
-				description='Dictionary key name to be read in input json datalist (default=data)',
+				description='Dictionary key name to be read in input datalist (default=data)',
 				category='INPUT',
 				default_value='data'
 			),
@@ -114,96 +115,106 @@ class UMAPAppConfigurator(AppConfigurator):
 				default_value=''
 			),
 		
-			# == UMAP OPTIONS ==
-			'nfeats' : ValueOption(
-				name='nfeats',
+			# == IsolationForest OPTIONS ==
+			'nestimators' : ValueOption(
+				name='nestimators',
 				value='',
 				value_type=int, 
-				description='Dimension of low-dimensional embedding produced by UMAP (e.g. number of output features)',
+				description='Number of forest trees to fit. Values in the range 100-300 usually sufficient, compromise between stability/accuracy and computational cost/overfitting risk (small datasets)',
 				category='PROCESSING',
-				default_value=2,
-				min_value=2,
-				max_value=512
-			),
-			'mindist' : ValueOption(
-				name='mindist',
-				value='',
-				value_type=float, 
-				description='Min dist UMAP parameter. Controls compactness of clusters (how close points are allowed to get in low-D before considered fully similar). With small values (close to 0), points can pack tightly, tight/dense clusters are produced with sharper cluster separation. With high values (close to 1), points are forced to be more spread out, looser clusters are produced.',
-				category='PROCESSING',
-				default_value=0.1,
-				min_value=0.0,
-				max_value=1.0
-			),
-			'nneighbors' : ValueOption(
-				name='nneighbors',
-				value='',
-				value_type=int, 
-				description='N neighbors UMAP parameter. Controls how many nearby points each sample considers when defining the structure of the dataset. With small values (0-10), focus more on very local structure, producing many small clusters, sensitive to noise. With high values (>50), larger-scale structure is captured, clusters may merge, embedding looks smoother, and more global relationships appear.',
-				category='PROCESSING',
-				default_value=15,
+				default_value=100,
 				min_value=1,
 				max_value=10000
 			),
-
+			'max-features' : ValueOption(
+				name='max-features',
+				value='',
+				value_type=int, 
+				description='Number of max features to draw from data table to train each forest tree. -1 means all features drawn. Selecting less features can potentially improve performance on high-dimensional data with many irrelevant features',
+				category='PROCESSING',
+				default_value=-1,
+				min_value=-1,
+				max_value=10000
+			),
+			'max-samples' : ValueOption(
+				name='max-samples',
+				value='',
+				value_type=float, 
+				description='Number of samples to draw from data table to train each forest tree. -1 means sklearn auto option, e.g. 256 entries, otherwise it is the fraction of total available entries. Smaller samples could potentially better isolate anomalies.',
+				category='PROCESSING',
+				default_value=-1.0,
+				min_value=-1.0,
+				max_value=1.0
+			),
+			'contamination' : ValueOption(
+				name='contamination',
+				value='',
+				value_type=float, 
+				description='Fraction of outliers expected [0,0.5], used to set the outlier binary decision threshold. <=0 means sklearn auto option',
+				category='PROCESSING',
+				default_value=-1.0,
+				min_value=-1.0,
+				max_value=1.0
+			),
+			'anomaly-thr' : ValueOption(
+				name='anomaly-thr',
+				value='',
+				value_type=float, 
+				description='Threshold in anomaly score above which an observation is marked as outlier. Below this threshold, the observation is marked as inlier.',
+				category='PROCESSING',
+				default_value=0.7,
+				min_value=0.0,
+				max_value=1.0
+			),
+   	
 			# == PRE-PROCESSING OPTIONS ==
 			'normalize' : Option(
 				name='normalize', 
-				description='If True, normalize feature data in range [0,1] before applying UMAP. If features have very different units or numerical ranges, features with larger scales will completely dominate the distance calculations, so it is suggested to normalize in that case.', 
+				description='If True, normalize feature data in range [0,1] before applying outlier search. If features have very different units or numerical ranges, features with larger scales will completely dominate the distance calculations, so it is suggested to normalize in that case.', 
 				category='PREPROCESSING',
 				default_value=True
-			),
-			'ids-excluded-in-train' : ValueOption(
-				name='ids-excluded-in-train',
-				value='',
-				value_type=str, 
-				description='List of observation ids (separated by colons) not included for training supervised UMAP as they are considered unknown classes (default=-1:0)',
-				category='INPUT',
-				default_value='-1:0'
 			),
 			
 			# == SAVE OPTIONS ==
 			'no-save-ascii' : Option(
 				name='no-save-ascii', 
-				description='If True, disable saving outputs to ascii format', 
+				description='Do not save output in ascii format', 
 				category='OUTPUT',
 				default_value=False
 			),
 			'no-save-json' : Option(
 				name='no-save-json', 
-				description='If True, disable saving outputs to json format', 
+				description='Do not save output in json format', 
 				category='OUTPUT',
 				default_value=False
 			),
 			'no-save-model' : Option(
 				name='no-save-model', 
-				description='If True, disable saving UMAP leaned model', 
+				description='Do not save model', 
 				category='OUTPUT',
 				default_value=False
 			),
-			'outfile-sup' : ValueOption(
-				name='outfile-sup',
-				value='',
-				value_type=str, 
-				description='Name of UMAP encoded data output file for supervised run in ascii format (default=featdata_umap_sup.dat)',
+			'no-save-features' : Option(
+				name='no-save-features', 
+				description='Do not save features in output files', 
 				category='OUTPUT',
-				default_value='featdata_umap_sup.dat'
+				default_value=False
 			),
-			'outfile-unsup' : ValueOption(
-				name='outfile-unsup',
+			'outfile' : ValueOption(
+				name='outfile',
 				value='',
 				value_type=str, 
-				description='Name of UMAP encoded data output file in ascii format (default=featdata_umap.dat)',
+				description='Name of ascii output file',
 				category='OUTPUT',
-				default_value='featdata_umap.dat'
+				default_value='outlier_data.dat'
 			),
-			'outfile-unsup-json' : ValueOption(
-				name='outfile-unsup-json',
+			'outfile-json' : ValueOption(
+				name='outfile-json',
 				value='',
 				value_type=str, 
-				description='Name of UMAP encoded data output file in json format (default=featdata_umap.json)',
+				description='Name of json output file',
 				category='OUTPUT',
-				default_value='featdata_umap.json'
+				default_value='outlier_data.json'
 			),
 			
 			# == RUN OPTIONS ==
@@ -213,23 +224,16 @@ class UMAPAppConfigurator(AppConfigurator):
 				category='RUN',
 				default_value=False
 			),
-			'run-supervised' : Option(
-				name='run-supervised', 
-				description='Run UMAP also on labelled data alone (if available)',
-				category='RUN',
-				default_value=False
-			),
 			
-		
 		} ## close valid options
 		
 		# - Define dictionary with job outputs produced
 		json_out_desc= (
-			'JSON file containing the input data embeddings produced by UMAP in unsupervised run mode.'
+			'JSON file containing the input data with inlier/outlier classification produced by the algorithm.'
 		)
 		
 		json_out_format= (
-			'Output JSON embeddings file has this format: \n\n'
+			'Output JSON file with inlier/outlier classification has this format: \n\n'
 			'{\n'
 			'  "data": [\n'
 			'    {\n'
@@ -237,6 +241,8 @@ class UMAPAppConfigurator(AppConfigurator):
 			'      "id": "2", \n'
 			'      "label": "EXTENDED", \n'
 			'      "feats": [0.9604316353797913, 2.2406632900238037], \n'
+			'      "is_outlier": 1, \n'
+			'      "outlier_score": 0.78, \n'
 			'    } \n'
 			'} \n'
 			'\n'
@@ -244,27 +250,28 @@ class UMAPAppConfigurator(AppConfigurator):
 			'* sname | str: Observation identifier, usually set to filepath/uid without file extension \n'
 			'* id | int or list(int): Class identifier(s) \n'
 			'* label | str or list(str): Class label(s) \n'
-			'* feats | list(float): Feature parameters produced by UMAP (low-D embeddings) \n'
+			'* feats | list(float): Input feature parameters (if no-save-features option is False)\n'
+			'* is_outlier | int: Binary flag indicating if the observation is an inlier (=0) or outlier (=1) given the chosen outlier score threshold \n'
+			'* outlier_score | float: Outlier score (if outlier_score>thr the observation is marked as outlier) \n'
 			'Additional metadata fields present in the input dataset will be preserved in the json output format.'
 		)
 		
 		ascii_out_desc= (
-			'Ascii tabular file containing the input data embeddings produced by UMAP in unsupervised run mode.'
-		)
-		ascii_sup_out_desc= (
-			'Ascii tabular file containing the input data embeddings produced by UMAP in supervised run mode.'
+			'Ascii tabular file containing the input data with inlier/outlier classification produced by the algorithm.'
 		)
 		
 		ascii_out_format= (
-			'Output ascii tabular data file has this format:\n'
-			'- First row: header, starting with #, e.g. # sname z1 z2 id \n'
+			'Output ascii tabular data file with inlier/outlier classification has this format:\n'
+			'- First row: header, starting with #, e.g. # sname z1 z2 id is_outlier outlier_score \n'
 			'- Col 1: sname | str: Observation identifier, usually set to filepath/uid without file extension \n'
-			'- Col 2,3,...,M+1: feats | float: M feature parameters produced by UMAP (low-D embedding) for the observation \n'
-			'- Col M+2: id | int or label | str: Class identifier (if int) or class label (if str) for the observation'
+			'- Col 2,3,...,M+1: feats | float: M input feature parameters for the observation (if no-save-features option is False)\n'
+			'- Col M+2: id | int or label | str: Class identifier (if int) or class label (if str) for the observation \n'
+			'- Col M+3: is_outlier | int: Binary flag indicating if the observation is an inlier (=0) or outlier (=1) given the chosen outlier score threshold \n'
+			'- Col M+4: outlier_score | float: Outlier score (if outlier_score>thr the observation is marked as outlier) \n'
 		)
 				
 		self.job_outputs= {
-			"embeddings-json": {
+			"outliers-json": {
 				"path": None,
 				"glob": "*.json",
 				"type": "application/json",
@@ -274,10 +281,10 @@ class UMAPAppConfigurator(AppConfigurator):
 				"parser": "json",
 				"required": True,
 				"notes": (
-					"The embeddings json output filename produced by UMAP in unsupervised run mode is by default set to 'latent_data_umap_unsupervised.json', but it can be configured by the user with the option 'outfile-unsup-json'"
+					"The json output filename produced is by default set to 'outlier_data.json', but it can be configured by the user with the option 'outfile-json'"
 				)
 			},
-			"embeddings-ascii": {
+			"outliers-ascii": {
 				"path": None,
 				"glob": "*.dat",
 				"type": "text/plain",
@@ -287,20 +294,7 @@ class UMAPAppConfigurator(AppConfigurator):
 				"parser": "text",
 				"required": True,
 				"notes": (
-					"The embeddings ascii output filename produced by UMAP in unsupervised run mode is by default set to 'latent_data_umap_unsupervised.dat', but it can be configured by the user with the option 'outfile-unsup'"
-				)
-			},
-			"embeddings-ascii-supervised": {
-				"path": None,
-				"glob": "*.dat",
-				"type": "text/plain",
-				"role": "primary_result",
-				"description": ascii_sup_out_desc,
-				"format": ascii_out_format,
-				"parser": "text",
-				"required": False,
-				"notes": (
-					"The embeddings ascii output filename produced by UMAP in supervised run mode is by default set to 'latent_data_umap_supervised.dat', but it can be configured by the user with the option 'outfile-sup'"
+					"The ascii output filename produced is by default set to 'outlier_data.dat', but it can be configured by the user with the option 'outfile'"
 				)
 			},
 			"datascaler": {
@@ -318,10 +312,10 @@ class UMAPAppConfigurator(AppConfigurator):
 			},
 			"model": {
 				"path": None,
-				"glob": "umap_model.sav",
+				"glob": "outlier_model.sav",
 				"type": "application/octet-stream",
 				"role": "model",
-				"description": "A scikit-learn model file including trained UMAP model.",
+				"description": "A scikit-learn model file including trained IsolationForest model.",
 				"format": "",
 				"parser": "scikit-learn",
 				"required": False,

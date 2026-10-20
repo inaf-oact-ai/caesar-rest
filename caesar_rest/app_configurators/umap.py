@@ -21,7 +21,7 @@ from flask import current_app, g
 from caesar_rest import oidc
 from caesar_rest import mongo
 from caesar_rest import utils
-from caesar_rest.app_configurators.base_app_configurator import (
+from caesar_rest.app_configurators.base import (
 	AppConfigurator,
 	Option, 
 	ValueOption, 
@@ -32,24 +32,24 @@ from caesar_rest.app_configurators.base_app_configurator import (
 from caesar_rest import logger
 
 ##########################################
-#   HDBSCAN APP CONFIGURATOR
+#   UMAP APP CONFIGURATOR
 ##########################################
 
-class HDBSCANAppConfigurator(AppConfigurator):
-	""" Class to configure HDBSCAN application """
+class UMAPAppConfigurator(AppConfigurator):
+	""" Class to configure UMAP application """
 
-	def __init__(self, app_name="hdbscan"):
-		""" Return app configurator class """
+	def __init__(self, app_name="umap"):
+		""" Return aapp configurator class """
 		AppConfigurator.__init__(self, app_name=app_name)
 
 		# - Define cmd name
-		self.cmd= 'run_outlier_finder.sh'
+		self.cmd= 'run_umap.sh'
 		self.cmd_args= []
 		self.batch_processing_support= True
 		
 		# - Describe app
 		self.description = (
-			"Run HDBSCAN density-based clustering algorithm to find clusters in a tabular dataset (N observations, M features)"
+			"Run UMAP data dimensionality reduction tool to produce a low-dimensional embedding of a dataset (N observations, M features → K<M embedding features)."	
 		)
 		
 		self.tool_categories= ["tabular"]
@@ -90,8 +90,7 @@ class HDBSCANAppConfigurator(AppConfigurator):
 		}
 		
 		self.limitations = [
-			"Returned clusters depend on the algorithm hyperparameters (min-cluster-size, min-samples, cluster-selection-epsilon).",
-			"With highly dimensional data, clustering may be ineffective. Reducing the data dimensionality (e.g. PCA, UMAP, etc) could help."
+			"Low-dimensional embedding produced by UMAP significantly depends on nneighbors and mindist algorithm parameters. See parameter documentation."
 		]
 		
 		# - Define dictionary with allowed options
@@ -102,7 +101,7 @@ class HDBSCANAppConfigurator(AppConfigurator):
 				name='datalist-key',
 				value='',
 				value_type=str, 
-				description='Dictionary key name to be read in input datalist (default=data)',
+				description='Dictionary key name to be read in input json datalist (default=data)',
 				category='INPUT',
 				default_value='data'
 			),
@@ -115,121 +114,96 @@ class HDBSCANAppConfigurator(AppConfigurator):
 				default_value=''
 			),
 		
-			# == HDBSCAN OPTIONS ==
-			'min-cluster-size' : ValueOption(
-				name='min-cluster-size',
+			# == UMAP OPTIONS ==
+			'nfeats' : ValueOption(
+				name='nfeats',
 				value='',
 				value_type=int, 
-				description='Minimum cluster size for HDBSCAN clustering (default=5)',
+				description='Dimension of low-dimensional embedding produced by UMAP (e.g. number of output features)',
 				category='PROCESSING',
-				default_value=5,
+				default_value=2,
+				min_value=2,
+				max_value=512
+			),
+			'mindist' : ValueOption(
+				name='mindist',
+				value='',
+				value_type=float, 
+				description='Min dist UMAP parameter. Controls compactness of clusters (how close points are allowed to get in low-D before considered fully similar). With small values (close to 0), points can pack tightly, tight/dense clusters are produced with sharper cluster separation. With high values (close to 1), points are forced to be more spread out, looser clusters are produced.',
+				category='PROCESSING',
+				default_value=0.1,
+				min_value=0.0,
+				max_value=1.0
+			),
+			'nneighbors' : ValueOption(
+				name='nneighbors',
+				value='',
+				value_type=int, 
+				description='N neighbors UMAP parameter. Controls how many nearby points each sample considers when defining the structure of the dataset. With small values (0-10), focus more on very local structure, producing many small clusters, sensitive to noise. With high values (>50), larger-scale structure is captured, clusters may merge, embedding looks smoother, and more global relationships appear.',
+				category='PROCESSING',
+				default_value=15,
 				min_value=1,
 				max_value=10000
 			),
-			'min-samples' : ValueOption(
-				name='min-samples',
-				value='',
-				value_type=int, 
-				description='Minimum cluster sample parameter for HDBSCAN clustering. <0 means setting it to None, which means equal to min_cluster_size (default=-1)',
-				category='PROCESSING',
-				default_value=-1,
-				min_value=-1,
-				max_value=10000
-			),
-			'cluster-selection-epsilon' : ValueOption(
-				name='cluster-selection-epsilon',
-				value='',
-				value_type=float, 
-				description='A distance threshold. Clusters below this value will be merged (default=0)',
-				category='PROCESSING',
-				default_value=0.0,
-				min_value=0.0,
-				max_value=10000.
-			),
-   		
+
 			# == PRE-PROCESSING OPTIONS ==
 			'normalize' : Option(
 				name='normalize', 
-				description='If True, normalize feature data in range [0,1] before applying clustering algorithm. If features have very different units or numerical ranges, features with larger scales will completely dominate the distance calculations, so it is suggested to normalize in that case.', 
+				description='If True, normalize feature data in range [0,1] before applying UMAP. If features have very different units or numerical ranges, features with larger scales will completely dominate the distance calculations, so it is suggested to normalize in that case.', 
 				category='PREPROCESSING',
 				default_value=True
 			),
-			'reduce-dim' : Option(
-				name='reduce-dim', 
-				description='Reduce feature data dimensionality before applying the clustering', 
-				category='PREPROCESSING',
-				default_value=False
-			),
-			'reduce-dim-method' : ValueOption(
-				name='reduce-dim-method',
+			'ids-excluded-in-train' : ValueOption(
+				name='ids-excluded-in-train',
 				value='',
 				value_type=str, 
-				description='Dimensionality reduction method {pca} (default=pca)',
+				description='List of observation ids (separated by colons) not included for training supervised UMAP as they are considered unknown classes (default=-1:0)',
 				category='INPUT',
-				default_value='pca'
-			),
-			'pca-ncomps' : ValueOption(
-				name='pca-ncomps',
-				value='',
-				value_type=int, 
-				description='Number of PCA components to be used (-1=retain all cumulating a variance above threshold) (default=-1)',
-				category='PROCESSING',
-				default_value=-1,
-				min_value=-1,
-				max_value=10000
-			),
-			'pca-varthr' : ValueOption(
-				name='pca-varthr',
-				value='',
-				value_type=float, 
-				description='Cumulative variance threshold used to retain PCA components (default=0.9)',
-				category='PROCESSING',
-				default_value=0.9,
-				min_value=0.0,
-				max_value=1.0
+				default_value='-1:0'
 			),
 			
 			# == SAVE OPTIONS ==
 			'no-save-ascii' : Option(
 				name='no-save-ascii', 
-				description='Do not save output in ascii format', 
+				description='If True, disable saving outputs to ascii format', 
 				category='OUTPUT',
 				default_value=False
 			),
 			'no-save-json' : Option(
 				name='no-save-json', 
-				description='Do not save output in json format', 
+				description='If True, disable saving outputs to json format', 
 				category='OUTPUT',
 				default_value=False
 			),
 			'no-save-model' : Option(
 				name='no-save-model', 
-				description='Do not save model', 
+				description='If True, disable saving UMAP leaned model', 
 				category='OUTPUT',
 				default_value=False
 			),
-			'no-save-features' : Option(
-				name='no-save-features', 
-				description='Do not save features in output files', 
-				category='OUTPUT',
-				default_value=False
-			),
-			'outfile' : ValueOption(
-				name='outfile',
+			'outfile-sup' : ValueOption(
+				name='outfile-sup',
 				value='',
 				value_type=str, 
-				description='Name of output file in ascii format',
+				description='Name of UMAP encoded data output file for supervised run in ascii format (default=featdata_umap_sup.dat)',
 				category='OUTPUT',
-				default_value='clustered_data.dat'
+				default_value='featdata_umap_sup.dat'
 			),
-			
-			'outfile-json' : ValueOption(
-				name='outfile-json',
+			'outfile-unsup' : ValueOption(
+				name='outfile-unsup',
 				value='',
 				value_type=str, 
-				description='Name of output file in json format',
+				description='Name of UMAP encoded data output file in ascii format (default=featdata_umap.dat)',
 				category='OUTPUT',
-				default_value='clustered_data.json'
+				default_value='featdata_umap.dat'
+			),
+			'outfile-unsup-json' : ValueOption(
+				name='outfile-unsup-json',
+				value='',
+				value_type=str, 
+				description='Name of UMAP encoded data output file in json format (default=featdata_umap.json)',
+				category='OUTPUT',
+				default_value='featdata_umap.json'
 			),
 			
 			# == RUN OPTIONS ==
@@ -239,16 +213,23 @@ class HDBSCANAppConfigurator(AppConfigurator):
 				category='RUN',
 				default_value=False
 			),
+			'run-supervised' : Option(
+				name='run-supervised', 
+				description='Run UMAP also on labelled data alone (if available)',
+				category='RUN',
+				default_value=False
+			),
 			
+		
 		} ## close valid options
 		
 		# - Define dictionary with job outputs produced
 		json_out_desc= (
-			'JSON file containing the input data with clusters identified by the algorithm.'
+			'JSON file containing the input data embeddings produced by UMAP in unsupervised run mode.'
 		)
 		
 		json_out_format= (
-			'Output JSON file with clustering results has this format: \n\n'
+			'Output JSON embeddings file has this format: \n\n'
 			'{\n'
 			'  "data": [\n'
 			'    {\n'
@@ -256,8 +237,6 @@ class HDBSCANAppConfigurator(AppConfigurator):
 			'      "id": "2", \n'
 			'      "label": "EXTENDED", \n'
 			'      "feats": [0.9604316353797913, 2.2406632900238037], \n'
-			'      "is_outlier": 1, \n'
-			'      "outlier_score": 0.78, \n'
 			'    } \n'
 			'} \n'
 			'\n'
@@ -265,30 +244,27 @@ class HDBSCANAppConfigurator(AppConfigurator):
 			'* sname | str: Observation identifier, usually set to filepath/uid without file extension \n'
 			'* id | int or list(int): Class identifier(s) \n'
 			'* label | str or list(str): Class label(s) \n'
-			'* feats | list(float): Input feature parameters (if no-save-features option is False)\n'
-			'* clust_id | int: ID of the cluster this observation belongs to. Noisy samples are set to id=-1 \n'
-			'* clust_prob | float: Strength with which each observation is a member of its assigned cluster. Noise points have probability zero; points in clusters have values assigned proportional to the degree that they persist as part of the cluster \n'
-			'* clust_outlier_score | float: Outlier scores for clustered points; the larger the score the more outlier-like the point \n'
+			'* feats | list(float): Feature parameters produced by UMAP (low-D embeddings) \n'
 			'Additional metadata fields present in the input dataset will be preserved in the json output format.'
 		)
 		
 		ascii_out_desc= (
-			'Ascii tabular file containing the input data with clusters identified by the algorithm.'
+			'Ascii tabular file containing the input data embeddings produced by UMAP in unsupervised run mode.'
+		)
+		ascii_sup_out_desc= (
+			'Ascii tabular file containing the input data embeddings produced by UMAP in supervised run mode.'
 		)
 		
 		ascii_out_format= (
-			'Output ascii tabular data file with clustering results has this format:\n'
-			'- First row: header, starting with #, e.g. # sname z1 z2 id clust_id clust_prob clust_outlier_score \n'
+			'Output ascii tabular data file has this format:\n'
+			'- First row: header, starting with #, e.g. # sname z1 z2 id \n'
 			'- Col 1: sname | str: Observation identifier, usually set to filepath/uid without file extension \n'
-			'- Col 2,3,...,M+1: feats | float: M input feature parameters for the observation (if no-save-features option is False)\n'
-			'- Col M+2: id | int or label | str: Class identifier (if int) or class label (if str) for the observation \n'
-			'- Col M+3: clust_id | int: ID of the cluster this observation belongs to. Noisy samples are set to id=-1 \n'
-			'- Col M+4: clust_prob | float: Strength with which each observation is a member of its assigned cluster. Noise points have probability zero; points in clusters have values assigned proportional to the degree that they persist as part of the cluster \n'
-			'- Col M+5: clust_outlier_score | float: Outlier scores for clustered points; the larger the score the more outlier-like the point \n'
+			'- Col 2,3,...,M+1: feats | float: M feature parameters produced by UMAP (low-D embedding) for the observation \n'
+			'- Col M+2: id | int or label | str: Class identifier (if int) or class label (if str) for the observation'
 		)
-
+				
 		self.job_outputs= {
-			"clusters-json": {
+			"embeddings-json": {
 				"path": None,
 				"glob": "*.json",
 				"type": "application/json",
@@ -298,10 +274,10 @@ class HDBSCANAppConfigurator(AppConfigurator):
 				"parser": "json",
 				"required": True,
 				"notes": (
-					"The json output filename produced is by default set to 'clustered_data.json', but it can be configured by the user with the option 'outfile-json'"
+					"The embeddings json output filename produced by UMAP in unsupervised run mode is by default set to 'latent_data_umap_unsupervised.json', but it can be configured by the user with the option 'outfile-unsup-json'"
 				)
 			},
-			"clusters-ascii": {
+			"embeddings-ascii": {
 				"path": None,
 				"glob": "*.dat",
 				"type": "text/plain",
@@ -311,7 +287,20 @@ class HDBSCANAppConfigurator(AppConfigurator):
 				"parser": "text",
 				"required": True,
 				"notes": (
-					"The ascii output filename produced is by default set to 'clustered_data.dat', but it can be configured by the user with the option 'outfile'"
+					"The embeddings ascii output filename produced by UMAP in unsupervised run mode is by default set to 'latent_data_umap_unsupervised.dat', but it can be configured by the user with the option 'outfile-unsup'"
+				)
+			},
+			"embeddings-ascii-supervised": {
+				"path": None,
+				"glob": "*.dat",
+				"type": "text/plain",
+				"role": "primary_result",
+				"description": ascii_sup_out_desc,
+				"format": ascii_out_format,
+				"parser": "text",
+				"required": False,
+				"notes": (
+					"The embeddings ascii output filename produced by UMAP in supervised run mode is by default set to 'latent_data_umap_supervised.dat', but it can be configured by the user with the option 'outfile-sup'"
 				)
 			},
 			"datascaler": {
@@ -329,10 +318,10 @@ class HDBSCANAppConfigurator(AppConfigurator):
 			},
 			"model": {
 				"path": None,
-				"glob": "clustering_model.sav",
+				"glob": "umap_model.sav",
 				"type": "application/octet-stream",
 				"role": "model",
-				"description": "A scikit-learn model file including clustering model.",
+				"description": "A scikit-learn model file including trained UMAP model.",
 				"format": "",
 				"parser": "scikit-learn",
 				"required": False,

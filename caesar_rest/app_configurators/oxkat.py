@@ -9,7 +9,7 @@ server-configured dataset identifier whose path resolves to shared storage.
 
 import os
 
-from caesar_rest.app_configurators.base_app_configurator import (
+from caesar_rest.app_configurators.base import (
 	AppConfigurator,
 	EnumValueOption,
 )
