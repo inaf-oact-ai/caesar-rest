@@ -13,7 +13,15 @@ import zipfile
 from caesar_pipeline_runtime import __file__ as runtime_init
 
 WORKER_NAME = 'caesar-pipeline-worker.pyz'
-RUNTIME_MODULES = ('__init__.py', 'staging.py', 'stage_runner.py', 'resolver.py', 'paths.py', 'executor.py')
+RUNTIME_MODULES = (
+	'__init__.py',
+	'version.py',
+	'staging.py',
+	'stage_runner.py',
+	'resolver.py',
+	'paths.py',
+	'executor.py'
+)
 ENTRYPOINT = '''"""Offline Slurm pipeline worker."""\nimport sys\nfrom caesar_pipeline_runtime.stage_runner import main as prepare_main\nfrom caesar_pipeline_runtime.executor import main as execute_main\n\ndef main(argv=None):\n	args = sys.argv[1:] if argv is None else argv\n	if not args or args[0] not in ('prepare', 'execute'):\n		print('Usage: caesar-pipeline-worker.pyz {prepare|execute} --workspace PATH --spec PATH', file=sys.stderr)\n		return 2\n	return (prepare_main if args[0] == 'prepare' else execute_main)(args[1:])\n\nif __name__ == '__main__':\n	sys.exit(main())\n'''
 
 

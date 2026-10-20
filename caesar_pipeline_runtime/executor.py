@@ -15,6 +15,7 @@ import sys
 
 from caesar_pipeline_runtime.paths import map_staged_inputs, map_host_path
 from caesar_pipeline_runtime.resolver import resolve_staged_inputs
+from caesar_pipeline_runtime.version import specification_version
 
 
 class ContainerExecutionError(ValueError):
@@ -39,37 +40,72 @@ def execution_command(workspace, spec_path, runner_path, python_executable='/usr
 
 
 def _validated_spec(spec, workspace):
-	required_fields = {'version', 'image', 'container_workspace', 'arguments',
-	                   'input_options', 'execution_dir', 'output_dir'}
-	if (not isinstance(spec, dict) or not required_fields.issubset(spec)
-	        or set(spec) - (required_fields | {'environment'}) or spec['version'] != 1):
+	
+	version = specification_version(spec, ContainerExecutionError)
+
+	required_fields = {
+		'image',
+		'container_workspace',
+		'arguments',
+		'input_options',
+		'execution_dir',
+		'output_dir'
+	}
+
+	if (
+		not isinstance(spec, dict)
+		or not required_fields.issubset(spec)
+		or set(spec) - (required_fields | {'environment', 'version'})
+	):
 		raise ContainerExecutionError('Invalid trusted execution spec schema')
+
+	if version == 2 and 'version' not in spec:
+		raise ContainerExecutionError('v2 requires an explicit version')
 
 	image = _absolute(spec['image'], 'image')
 	container_ws = _absolute(spec['container_workspace'], 'container_workspace')
 	if container_ws == '/':
 		raise ContainerExecutionError('Container workspace cannot be root')
+	
 	if not isinstance(spec['arguments'], list) or not isinstance(spec['input_options'], dict):
 		raise ContainerExecutionError('Invalid options')
+	
 	if not spec['arguments'] or len(spec['arguments']) > 128:
 		raise ContainerExecutionError('Invalid argument count')
+	
 	for item in spec['arguments']:
 		if not isinstance(item, str) or not item.startswith('--') or any(c.isspace() or c in "'\"\\$`\x00" for c in item):
 			raise ContainerExecutionError('Invalid application argument')
+			
+	
 	for option, name in spec['input_options'].items():
 		if not isinstance(option, str) or not re.fullmatch(r'[a-zA-Z][a-zA-Z0-9_-]*', option):
 			raise ContainerExecutionError('Invalid input option name')
+
 		if not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*', name):
 			raise ContainerExecutionError('Invalid input binding')
+
+		if version == 2 and not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,63}', name):
+			raise ContainerExecutionError('Invalid v2 input name')
+
+	if version == 2 and (
+		not 1 <= len(spec['input_options']) <= 32
+		or len(set(spec['input_options'].values())) != len(spec['input_options'])
+	):
+		raise ContainerExecutionError('Invalid v2 input mapping')
+	
 	for field in ('execution_dir', 'output_dir'):
 		val = spec[field]
 		if not isinstance(val, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]*', val):
 			raise ContainerExecutionError('Invalid workspace subdirectory')
+	
 	if spec['execution_dir'] == spec['output_dir'] or spec['execution_dir'] == 'input' or spec['output_dir'] == 'input':
 		raise ContainerExecutionError('Execution/output directories must be distinct from staging')
+	
 	environment = spec.get('environment', {})
 	if not isinstance(environment, dict) or set(environment) - {'MODEL_DIR', 'APP_MODE'}:
 		raise ContainerExecutionError('Invalid application environment')
+	
 	for key, value in environment.items():
 		if not isinstance(value, str) or any(ch in value for ch in '\x00\r\n'):
 			raise ContainerExecutionError('Invalid application environment value')
@@ -83,23 +119,41 @@ def _validated_spec(spec, workspace):
 
 def execute(workspace, spec_path, runner=subprocess.run):
 	"""Consume validated READY inputs and invoke fixed Singularity runscript."""
+	
 	_absolute(workspace, 'workspace')
 	_absolute(spec_path, 'spec_path')
 	if os.path.dirname(spec_path) != workspace:
 		raise ContainerExecutionError('Execution spec must be in workspace')
+	
 	base = Path(workspace)
 	if not base.is_dir() or base.is_symlink() or str(base.resolve(strict=True)) != workspace:
 		raise ContainerExecutionError('Invalid private workspace')
+	
 	sp = Path(spec_path)
 	if sp.is_symlink() or not sp.is_file():
 		raise ContainerExecutionError('Missing trusted execution spec')
+	
 	with sp.open(encoding='utf8') as f:
 		spec = json.load(f)
+	
 	image, container_ws = _validated_spec(spec, workspace)
 	if not Path(image).is_file() or Path(image).is_symlink():
 		raise ContainerExecutionError('Trusted container image missing or symlinked')
-	paths = resolve_staged_inputs(workspace, required_names=list(spec['input_options'].values()) if spec['input_options'] else None)
+	
+	paths = resolve_staged_inputs(
+		workspace,
+		required_names=list(spec['input_options'].values())
+		if spec['input_options'] else None
+	)
+
+	if specification_version(spec, ContainerExecutionError) == 2:
+		if set(paths) != set(spec['input_options'].values()):
+			raise ContainerExecutionError(
+				'v2 staged inputs do not match execution bindings'
+			)
+
 	binds = [{'source': workspace, 'destination': container_ws}]
+	
 	mapped = map_staged_inputs(paths, workspace, binds)
 	args = list(spec['arguments'])
 	for opt, name in spec['input_options'].items():

@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+import zipfile
 
 from caesar_rest.pipeline_worker_bundle import build_archive, deploy_worker, WORKER_NAME
 
@@ -17,6 +18,14 @@ class WorkerBundleTests(unittest.TestCase):
 			worker = root / WORKER_NAME
 			digest = build_archive(worker)
 			self.assertEqual(len(digest), 64)
+			
+			# Ensure all runtime dependencies are packaged into the zipapp.
+			with zipfile.ZipFile(worker, 'r') as archive:
+				self.assertIn(
+					'caesar_pipeline_runtime/version.py',
+					archive.namelist()
+				)
+				
 			source = root / 'source.txt'
 			source.write_text('sample')
 			ws = root / 'job'

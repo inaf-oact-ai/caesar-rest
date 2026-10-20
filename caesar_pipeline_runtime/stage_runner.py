@@ -10,25 +10,51 @@ import sys
 from pathlib import Path
 
 from caesar_pipeline_runtime.staging import StagingError, stage_inputs
+from caesar_pipeline_runtime.version import specification_version
 
 
 def prepare(spec_path, workspace):
 	"""Stage inputs only; return published READY manifest."""
+	
 	workspace_path = Path(workspace)
 	spec_file = Path(spec_path)
+	
 	if not spec_file.is_absolute() or spec_file.is_symlink() or not spec_file.is_file():
 		raise StagingError('Specification must be an absolute regular non-symlink file')
+	
 	if not workspace_path.is_absolute() or workspace_path.is_symlink() or not workspace_path.is_dir():
 		raise StagingError('Workspace must be an absolute existing non-symlink directory')
+	
 	# Specification must be inside the exclusive workspace, preventing the CLI
 	# from resolving an unrelated configuration outside its job directory.
 	if spec_file.resolve().parent != workspace_path.resolve():
 		raise StagingError('Specification must be located in the job workspace')
+	
 	with spec_file.open('r', encoding='utf-8') as handle:
 		spec = json.load(handle)
-	if not isinstance(spec, dict) or spec.get('version') != 1:
-		raise StagingError('Unsupported staging specification version')
+		
+	version = specification_version(spec, StagingError)
+
+	if version == 2:
+		if set(spec) != {'version', 'inputs'}:
+			raise StagingError('Invalid v2 staging specification schema')
+
+		inputs = spec['inputs']
+
+		if not isinstance(inputs, list) or not 1 <= len(inputs) <= 32:
+			raise StagingError('v2 requires 1-32 named inputs')
+
+		for item in inputs:
+			if not isinstance(item, dict) or set(item) != {
+				'name', 'source', 'kind', 'size_bytes', 'mode', 'writable'
+			}:
+				raise StagingError('Invalid v2 input descriptor')
+
+			if item['mode'] != 'copy' or item['writable'] is not True:
+				raise StagingError('Unsupported v2 input strategy')
+
 	return stage_inputs(spec.get('inputs'), str(workspace_path))
+	
 
 
 def main(argv=None):
