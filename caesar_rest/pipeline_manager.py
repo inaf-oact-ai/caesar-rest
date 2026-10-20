@@ -128,7 +128,7 @@ def create_run(
 	
 	if set(payload) - {
 		'application', 'operation', 'parameters',
-		'input_runs', 'dataset_id'
+		'input_runs', 'input_artifacts', 'dataset_id'
 	}:
 		raise PipelineError('Unsupported run field')
 			
@@ -165,12 +165,6 @@ def create_run(
 		if parent is None or parent['status'] != 'COMPLETED':
 			raise PipelineError('Input run must exist and be completed: %s' % parent_id, 409)
 	
-	counter = counters.find_one_and_update(
-		{'pipeline_id': pipeline_id, 'node_id': node_id},
-		{'$inc': {'sequence': 1}},
-		upsert=True,
-		return_document=ReturnDocument.AFTER
-	)
 	
 	from caesar_rest import pipeline_artifact_binding
 
@@ -192,6 +186,13 @@ def create_run(
 			'Every bound source_run_id must also appear in input_runs',
 			400
 		)
+	
+	counter = counters.find_one_and_update(
+		{'pipeline_id': pipeline_id, 'node_id': node_id},
+		{'$inc': {'sequence': 1}},
+		upsert=True,
+		return_document=ReturnDocument.AFTER
+	)
 	
 	sequence = counter['sequence']
 	
