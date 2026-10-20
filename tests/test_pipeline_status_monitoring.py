@@ -139,3 +139,23 @@ def test_running_transition_does_not_register_artifacts(monkeypatch):
 
 	assert runs.updated[1]['$set']['status'] == 'RUNNING'
 	assert calls == []
+	
+def test_running_observation_only_updates_submitted_run(monkeypatch):
+	runs = FakeRuns(modified_count=0)
+	db = FakeDB(runs)
+	calls = []
+
+	monkeypatch.setattr(
+		status,
+		'safe_register_artifacts',
+		lambda *args: calls.append(args)
+	)
+
+	assert status.synchronize_monitored_job(
+		db, job(), 'RUNNING'
+	) is False
+
+	assert runs.updated[0]['status'] == {
+		'$in': ['SUBMITTED']
+	}
+	assert calls == []

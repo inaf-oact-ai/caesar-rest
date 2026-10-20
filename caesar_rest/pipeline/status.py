@@ -69,11 +69,14 @@ def synchronize_monitored_job(db, job_obj, state, exit_code=None):
 	if status is None:
 		return False
 
-	# - Never regress RUNNING to SUBMITTED, or overwrite
-	#   a terminal run. The conditional update is atomic.
-	allowed_states = ['SUBMITTED']
-	if status != 'RUNNING':
-		allowed_states.append('RUNNING')
+	# - A RUNNING observation only advances SUBMITTED runs.
+	# - Terminal observations may advance SUBMITTED or RUNNING runs.
+	# - Never overwrite monitoring metadata on repeated RUNNING events.
+	allowed_states = (
+		['SUBMITTED']
+		if status == 'RUNNING'
+		else ['SUBMITTED', 'RUNNING']
+	)
 
 	changes = {
 		'status': status,
