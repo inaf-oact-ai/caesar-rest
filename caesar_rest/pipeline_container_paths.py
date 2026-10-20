@@ -1,4 +1,4 @@
-"""Backward-compatible facade; implementation lives in caesar_pipeline_runtime."""
+"""Backward-compatible facade; implementation lives in pipeline_runtime."""
 from pipeline_runtime import paths as _impl
 
 for _name in dir(_impl):

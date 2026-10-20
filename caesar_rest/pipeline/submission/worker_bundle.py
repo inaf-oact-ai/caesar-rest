@@ -1,6 +1,6 @@
 """Build and place an isolated, standard-library-only pipeline worker archive.
 
-The canonical runtime source is caesar_pipeline_runtime; no source copies are
+The canonical runtime source is pipeline_runtime; no source copies are
 maintained. A trusted API process deploys this archive into its private job dir.
 """
 import hashlib
