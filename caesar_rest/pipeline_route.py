@@ -196,7 +196,8 @@ def download_run_artifact(pipeline_id, node_id, run_id, index):
 			mongo.db,
 			owner,
 			run,
-			index
+			index,
+			retention_root=current_app.config.get('PIPELINE_ARTIFACT_RETENTION_ROOT')
 		)
 
 		try:
@@ -224,9 +225,10 @@ def resolve_selected_artifact(pipeline_id, node_id, artifact_name):
 			owner,
 			pipeline_id,
 			node_id,
-			artifact_name
-    )
-	))
+			artifact_name,
+			retention_root=current_app.config.get('PIPELINE_ARTIFACT_RETENTION_ROOT')
+		)
+	))	
 	
 ############################################
 ###      PIPELINE ARTIFACT RETENTION

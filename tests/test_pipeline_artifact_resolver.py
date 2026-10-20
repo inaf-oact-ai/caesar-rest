@@ -39,7 +39,7 @@ def setup(monkeypatch):
     monkeypatch.setattr(manager, 'get_pipeline', get_pipeline)
     opened = []
 
-    def open_artifact(db, owner, run_doc, index):
+    def open_artifact(db, owner, run_doc, index, retention_root=None):
         assert owner == 'alice' and run_doc is run and index == 0
         f = io.BytesIO(b'{}')
         opened.append(f)

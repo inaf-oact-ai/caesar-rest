@@ -46,11 +46,21 @@ def _safe_parts(relative):
 	return parts
 
 
-def open_registered_artifact(db, owner, run, index):
+def open_registered_artifact(db, owner, run, index, retention_root=None):
 	"""Open only a registered regular file from the job's trusted workspace.
 
 	Returns (binary_file, filename, media_type). Caller owns and closes file.
 	"""
+	
+	# Retained artifacts take precedence over original job workspaces.
+	# Once retention is recorded, never silently fall back to the source.
+	if run.get('retained_artifacts') is not None:
+		from caesar_rest import pipeline_artifact_retention as retention
+
+		return retention.open_retained_artifact(
+			owner, run, index, retention_root or ''
+		)
+	
 	items = run.get('artifacts') or []
 	if not isinstance(index, int) or index < 0 or index >= len(items):
 		raise ArtifactAccessError('Artifact not found', 404)
