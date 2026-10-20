@@ -7,7 +7,7 @@ import re
 from caesar_rest.pipeline import manager
 from caesar_rest.pipeline.artifacts import access
 from caesar_rest.pipeline.artifacts import retention
-from caesar_rest import pipeline_directory_integrity as integrity
+from caesar_rest.pipeline.artifacts import directory_integrity as integrity
 
 _INPUT = re.compile(r'^[A-Za-z][A-Za-z0-9_-]{0,63}$')
 _SHA = re.compile(r'^[0-9a-f]{64}$')

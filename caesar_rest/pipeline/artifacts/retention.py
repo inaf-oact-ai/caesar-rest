@@ -66,7 +66,7 @@ def promote_run(
 	if any(a.get('kind') == 'directory' for a in run.get('artifacts') or []):
 		# Import only for mixed file/directory retention.
 		# Prevent cyclic initialization with artifact access.
-		from caesar_rest import pipeline_directory_promotion as mixed
+		from caesar_rest.pipeline.artifacts import directory_promotion as mixed
 
 		return mixed.promote_mixed_run(
 			db,
