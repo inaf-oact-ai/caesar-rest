@@ -66,7 +66,7 @@ class StageTests(unittest.TestCase):
 			s.write_text('x')
 			ws = base / 'job'
 			ws.mkdir()
-			with patch('caesar_rest.pipeline_data_staging.shutil.copy2', side_effect=OSError('disk full')):
+			with patch('pipeline_runtime.staging.shutil.copy2', side_effect=OSError('disk full')):
 				with self.assertRaises(StagingError):
 					stage_inputs([{'source': str(s)}], str(ws))
 			self.assertTrue((ws / 'input').is_dir())

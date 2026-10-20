@@ -11,20 +11,7 @@ from pipeline_runtime import staging, stage_runner, resolver, paths, executor
 
 
 class SharedRuntimeTests(unittest.TestCase):
-	def test_compatibility_facades_are_same_objects(self):
-		import caesar_rest.pipeline_data_staging as old_staging
-		import caesar_rest.pipeline_stage_runner as old_runner
-		import caesar_rest.pipeline_staged_input_resolver as old_resolver
-		import caesar_rest.pipeline_container_paths as old_paths
-		import caesar_rest.pipeline_container_execution as old_executor
-		self.assertIs(old_staging.stage_inputs, staging.stage_inputs)
-		self.assertIs(old_staging.StagingError, staging.StagingError)
-		self.assertIs(old_runner.prepare, stage_runner.prepare)
-		self.assertIs(old_resolver.resolve_staged_inputs, resolver.resolve_staged_inputs)
-		self.assertIs(old_paths.map_host_path, paths.map_host_path)
-		self.assertIs(old_executor.execute, executor.execute)
-		self.assertIs(old_executor.execution_command, executor.execution_command)
-
+	
 	def test_stage_and_resolve_using_shared_runtime(self):
 		with tempfile.TemporaryDirectory() as root:
 			root = Path(root)
@@ -47,10 +34,13 @@ class SharedRuntimeTests(unittest.TestCase):
 			self.assertNotIn('from caesar_rest', source)
 			self.assertNotIn('import caesar_rest', source)
 
-	def test_old_script_command_still_available(self):
-		import caesar_rest.pipeline_container_execution as old
-		cmd = old.execution_command('/jobs/a', '/jobs/a/execution_spec.json', '/bin/runner.py')
+	def test_execution_command_still_available(self):
+		cmd = executor.execution_command(
+			'/jobs/a',
+			'/jobs/a/execution_spec.json',
+			'/bin/runner.py'
+		)
 		self.assertIn('/bin/runner.py', cmd)
-
+		
 if __name__ == '__main__':
 	unittest.main()

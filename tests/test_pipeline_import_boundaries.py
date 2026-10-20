@@ -17,16 +17,7 @@ class PipelineImportBoundaryTests(unittest.TestCase):
 				with self.subTest(module=module.name):
 					importlib.import_module(module.name)
 
-	def test_artifact_module_identity(self):
-		from caesar_rest import pipeline_artifact_access as old_access
-		from caesar_rest.pipeline.artifacts import access
-
-		from caesar_rest import pipeline_artifact_retention as old_retention
-		from caesar_rest.pipeline.artifacts import retention
-
-		self.assertIs(old_access, access)
-		self.assertIs(old_retention, retention)
-
+	
 	def test_runtime_module_imports(self):
 		from pipeline_runtime import staging
 		from pipeline_runtime import executor
