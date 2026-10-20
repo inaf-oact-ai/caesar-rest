@@ -158,13 +158,26 @@ def synchronize_pipeline(owner, pipeline_id):
 		if status is None or (run['status'] == 'RUNNING' and status == 'RUNNING'):
 			unchanged += 1
 			continue
-		# A delayed PENDING state cannot regress a RUNNING run. The
-		# conditional update also prevents overwriting completed runs.
+		
+		# A RUNNING observation may only advance a SUBMITTED run.
+		# Terminal observations may advance either SUBMITTED or RUNNING.
+		# Never overwrite a concurrent RUNNING update with stale
+		# RUNNING metadata, or modify a terminal run.
+		allowed_states = (
+			['SUBMITTED']
+			if status == 'RUNNING'
+			else ['SUBMITTED', 'RUNNING']
+		)
+
 		filter_doc = {
-			'_id': run['_id'], 'owner': owner, 'pipeline_id': pipeline_id,
-			'run_id': run['run_id'], 'job_id': job_id,
-			'status': {'$in': ['SUBMITTED', 'RUNNING']}
+			'_id': run['_id'],
+			'owner': owner,
+			'pipeline_id': pipeline_id,
+			'run_id': run['run_id'],
+			'job_id': job_id,
+			'status': {'$in': allowed_states}
 		}
+		
 		changes = {
 			'status': status,
 			'job_state': str(job.get('state') or ''),
