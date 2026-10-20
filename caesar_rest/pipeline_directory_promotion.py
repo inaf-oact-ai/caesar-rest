@@ -14,6 +14,7 @@ import tempfile
 from caesar_rest import pipeline_manager as manager
 from caesar_rest import pipeline_artifact_access as access
 from caesar_rest import pipeline_directory_retention as directory_copy
+from caesar_rest import pipeline_directory_integrity as directory_integrity
 from caesar_rest.pipeline_workspace import workspace_for_job
 
 
@@ -143,11 +144,18 @@ def promote_mixed_run(db, owner, pipeline_id, node_id, run_id, root,
 				digest = _write_sidecar(base, manifest_name, result['manifest'])
 				if digest != result['manifest_sha256']:
 					raise manager.PipelineError('Directory manifest digest mismatch', 409)
-				records.append({
+				record = {
 					'index': index, 'kind': 'directory', 'size_bytes': result['size_bytes'],
 					'file_count': result['file_count'], 'directory_count': result['directory_count'],
 					'manifest_name': manifest_name, 'manifest_sha256': digest
-				})
+				}
+				try:
+					directory_integrity.verify_directory_artifact(
+						base, index, record, max_entries=max_directory_entries,
+						max_bytes=max_directory_bytes, max_depth=max_directory_depth)
+				except directory_integrity.DirectoryIntegrityError as exc:
+					raise manager.PipelineError('Retained directory verification failed: %s' % exc, 409)
+				records.append(record)
 			result = db.pipeline_runs.update_one({
 				'owner': owner, 'pipeline_id': pipeline_id, 'node_id': node_id,
 				'run_id': run_id, 'status': 'COMPLETED',

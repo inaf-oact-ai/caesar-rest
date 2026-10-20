@@ -3,10 +3,11 @@
 This is a storage primitive, not a run-level retention operation. It does not
 update MongoDB or change the existing file-artifact download behavior.
 """
+import ctypes
+import errno
 import hashlib
 import json
 import os
-import re
 import stat
 import tempfile
 
@@ -55,6 +56,24 @@ def _sync_dir(path):
 		os.fsync(fd)
 	finally:
 		os.close(fd)
+
+
+def _publish_directory_noreplace(staging_name, target_name, parent_fd):
+	"""Linux renameat2(RENAME_NOREPLACE); fail closed if unavailable."""
+	libc = ctypes.CDLL(None, use_errno=True)
+	renameat2 = getattr(libc, 'renameat2', None)
+	if renameat2 is None:
+		raise DirectoryRetentionError('Atomic no-replace directory publication unavailable')
+	renameat2.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+	renameat2.restype = ctypes.c_int
+	result = renameat2(parent_fd, os.fsencode(staging_name), parent_fd, os.fsencode(target_name), 1)
+	if result != 0:
+		err = ctypes.get_errno()
+		if err == errno.EEXIST:
+			raise DirectoryRetentionError('Destination already exists')
+		if err in (errno.ENOSYS, errno.EINVAL, errno.ENOTSUP):
+			raise DirectoryRetentionError('Atomic no-replace directory publication unavailable')
+		raise OSError(err, os.strerror(err))
 
 
 def copy_directory_artifact(source, destination, expected,
@@ -172,9 +191,7 @@ def copy_directory_artifact(source, destination, expected,
 		manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
 		# Separate sidecar in temporary tree is intentionally avoided: preserve
 		# exact scientific contents; caller stores manifest in metadata.
-		if os.path.lexists(destination):
-			raise DirectoryRetentionError('Destination already exists')
-		os.rename(tmp, destination)
+		_publish_directory_noreplace(os.path.basename(tmp), name, parent_fd)
 		tmp = None
 		os.fsync(parent_fd)
 		return {'kind': 'directory', 'size_bytes': total, 'file_count': files,
