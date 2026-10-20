@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from caesar_pipeline_runtime import staging, stage_runner, resolver, paths, executor
+from pipeline_runtime import staging, stage_runner, resolver, paths, executor
 
 
 class SharedRuntimeTests(unittest.TestCase):

@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 import pytest
-from caesar_pipeline_runtime.integrity import validate_expected, verify_copy
+from pipeline_runtime.integrity import validate_expected, verify_copy
 
 
 def sha(data):

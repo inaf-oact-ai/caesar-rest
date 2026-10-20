@@ -27,15 +27,12 @@ class PipelineImportBoundaryTests(unittest.TestCase):
 		self.assertIs(old_access, access)
 		self.assertIs(old_retention, retention)
 
-	def test_runtime_module_identity(self):
-		from caesar_pipeline_runtime import staging as old_staging
+	def test_runtime_module_imports(self):
 		from pipeline_runtime import staging
-
-		from caesar_pipeline_runtime import executor as old_executor
 		from pipeline_runtime import executor
 
-		self.assertIs(old_staging, staging)
-		self.assertIs(old_executor, executor)
+		self.assertTrue(callable(staging.stage_inputs))
+		self.assertTrue(callable(executor.main))
 
 	def test_core_dependency_identity(self):
 		from caesar_rest.pipeline import manager

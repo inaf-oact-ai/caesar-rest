@@ -3,10 +3,10 @@ import json
 import hashlib
 import pytest
 
-from caesar_pipeline_runtime.version import specification_version
-from caesar_pipeline_runtime.staging import stage_inputs, StagingError
-from caesar_pipeline_runtime.stage_runner import prepare
-from caesar_pipeline_runtime.executor import _validated_spec, ContainerExecutionError
+from pipeline_runtime.version import specification_version
+from pipeline_runtime.staging import stage_inputs, StagingError
+from pipeline_runtime.stage_runner import prepare
+from pipeline_runtime.executor import _validated_spec, ContainerExecutionError
 
 
 def test_missing_version_is_v1():

@@ -32,7 +32,7 @@ class ContainerExecutionTests(unittest.TestCase):
 		def run(argv, check):
 			calls.append(argv)
 			return SimpleNamespace(returncode=0)
-		with patch('caesar_pipeline_runtime.executor.resolve_staged_inputs', return_value={'sample.ms': str(self.ws / 'input' / 'sample.ms')}):
+		with patch('pipeline_runtime.executor.resolve_staged_inputs', return_value={'sample.ms': str(self.ws / 'input' / 'sample.ms')}):
 			self.assertEqual(execute(str(self.ws), str(self.spec), runner=run), 0)
 		argv = calls[0]
 		self.assertEqual(argv[:2], ['singularity', 'run'])
@@ -45,14 +45,14 @@ class ContainerExecutionTests(unittest.TestCase):
 	def test_reject_existing_input_option(self):
 		self.payload['arguments'].append('--input-ms=/original.ms')
 		self.write()
-		with patch('caesar_pipeline_runtime.executor.resolve_staged_inputs', return_value={'sample.ms': str(self.ws / 'input' / 'sample.ms')}):
+		with patch('pipeline_runtime.executor.resolve_staged_inputs', return_value={'sample.ms': str(self.ws / 'input' / 'sample.ms')}):
 			with self.assertRaises(ContainerExecutionError):
 				execute(str(self.ws), str(self.spec))
 
 	def test_reject_reuse(self):
 		self.write()
 		(self.ws / 'execution').mkdir()
-		with patch('caesar_pipeline_runtime.executor.resolve_staged_inputs', return_value={'sample.ms': str(self.ws / 'input' / 'sample.ms')}):
+		with patch('pipeline_runtime.executor.resolve_staged_inputs', return_value={'sample.ms': str(self.ws / 'input' / 'sample.ms')}):
 			with self.assertRaises(ContainerExecutionError):
 				execute(str(self.ws), str(self.spec))
 
