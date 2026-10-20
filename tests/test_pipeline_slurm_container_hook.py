@@ -108,19 +108,19 @@ class ContainerSlurmHookTests(unittest.TestCase):
 		self.assertIn('singularity run', script)
 		self.assertNotIn('pipeline_container_execution.py', script)
 
-	def test_old_prepare_only_unaffected(self):
+	def test_prepare_only_uses_canonical_runtime_runner(self):
 		p = self.preparation()
 		p['mode'] = 'prepare_only'
-		p['runner_path'] = '/opt/src/caesar_rest/pipeline_stage_runner.py'
+		p['runner_path'] = '/opt/src/pipeline_runtime/stage_runner.py'
 
 		body = self.create(p)
 		self.assertIsNotNone(body)
 
 		script = json.loads(body)['script']
-		self.assertIn('pipeline_stage_runner.py', script)
+		self.assertIn('/opt/src/pipeline_runtime/stage_runner.py', script)
+		self.assertIn('staging_spec.json', script)
 		self.assertNotIn('caesar-pipeline-worker.pyz', script)
 		self.assertNotIn('pipeline_container_execution.py', script)
-
 
 if __name__ == '__main__':
 	unittest.main()

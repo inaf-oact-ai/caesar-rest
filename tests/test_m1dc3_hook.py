@@ -28,7 +28,7 @@ class SlurmPreparationHookTests(unittest.TestCase):
 			'mode': 'prepare_only',
 			'workspace': '/storage/jobs/owner/job_test',
 			'spec_path': '/storage/jobs/owner/job_test/staging_spec.json',
-			'runner_path': '/opt/src/caesar_rest/pipeline_stage_runner.py',
+			'runner_path': '/opt/src/pipeline_runtime/stage_runner.py',
 			'python_executable': '/usr/bin/python3',
 		}
 		p.update(updates)
@@ -43,7 +43,7 @@ class SlurmPreparationHookTests(unittest.TestCase):
 		obj = json.loads(self.make_job(self.prep()))
 		script = obj['script']
 		self.assertIn('set -e', script)
-		self.assertIn('pipeline_stage_runner.py', script)
+		self.assertIn('/opt/src/pipeline_runtime/stage_runner.py', script)
 		self.assertNotIn('singularity run', script)
 		self.assertEqual(subprocess.run(['bash', '-n'], input=script, text=True, capture_output=True).returncode, 0)
 

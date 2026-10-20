@@ -28,8 +28,8 @@ class SyntheticSlurmHookTests(unittest.TestCase):
 			'mode': mode,
 			'workspace': '/storage/jobs/owner/job_test',
 			'spec_path': '/storage/jobs/owner/job_test/staging_spec.json',
-			'runner_path': '/opt/src/caesar_rest/pipeline_stage_runner.py',
-			'execution_runner_path': '/opt/src/caesar_rest/pipeline_synthetic_execution.py',
+			'runner_path': '/opt/src/pipeline_runtime/stage_runner.py',
+			'execution_runner_path': '/opt/src/caesar_rest/pipeline/execution/synthetic.py',
 			'python_executable': '/usr/bin/python3',
 		}
 
@@ -38,9 +38,12 @@ class SyntheticSlurmHookTests(unittest.TestCase):
 		self.assertIsNotNone(result)
 		script = json.loads(result)['script']
 		self.assertIn('set -e', script)
-		self.assertIn('pipeline_stage_runner.py', script)
-		self.assertIn('pipeline_synthetic_execution.py', script)
-		self.assertLess(script.index('pipeline_stage_runner.py'), script.index('pipeline_synthetic_execution.py'))
+		self.assertIn('/opt/src/pipeline_runtime/stage_runner.py', script)
+		self.assertIn('/opt/src/caesar_rest/pipeline/execution/synthetic.py', script)
+		self.assertLess(
+			script.index('/opt/src/pipeline_runtime/stage_runner.py'),
+			script.index('/opt/src/caesar_rest/pipeline/execution/synthetic.py')
+		)
 		self.assertNotIn('singularity run', script)
 		self.assertEqual(subprocess.run(['bash', '-n'], input=script, text=True, capture_output=True).returncode, 0)
 
@@ -56,7 +59,7 @@ class SyntheticSlurmHookTests(unittest.TestCase):
 		result = self.create(self.preparation('prepare_only'))
 		self.assertIsNotNone(result)
 		script = json.loads(result)['script']
-		self.assertNotIn('pipeline_synthetic_execution.py', script)
+		self.assertNotIn('/opt/src/caesar_rest/pipeline/execution/synthetic.py', script)
 
 
 if __name__ == '__main__':
