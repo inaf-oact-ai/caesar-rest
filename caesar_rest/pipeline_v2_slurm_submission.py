@@ -107,16 +107,42 @@ def submit_claimed_v2(prepared, slurm_manager, job_name, cpus_per_task=1,
 			'V2 scheduler payload preparation failed', 503
 		) from exc
 
-	# Atomic one-shot authorization. If another invocation already recorded
-	# an intent, this raises 409 before any scheduler interaction.
-	# Never mark the original claim failed on a duplicate request.
+	# Atomically consume the one-shot submission intent.
+	# Duplicate attempts are rejected here, before contacting Slurm.
 	intent = binding.begin_submission_intent(claim, assets)
 
-	prepared_payload = json.loads(payload)
-	prepared_payload['job']['comment'] = attempt_comment(
-		intent['attempt_id']
-	)
-	payload = json.dumps(prepared_payload)
+	# The scheduler has not been contacted yet.
+	# Any failure here is a definite local preparation failure.
+	try:
+		prepared_payload = json.loads(payload)
+
+		prepared_payload['job']['comment'] = attempt_comment(
+			intent['attempt_id']
+		)
+
+		payload = json.dumps(prepared_payload)
+
+	except Exception as exc:
+		# The intent remains consumed permanently.
+		# Never revert this run to PLANNED or automatically retry.
+		try:
+			binding.fail_submission(
+				claim,
+				'V2 submission payload finalization failed',
+				uncertain=False,
+				job_id=assets.get('job_id')
+			)
+		except Exception as persistence_exc:
+			raise manager.PipelineError(
+				'V2 payload finalization and failure recording failed; '
+				'administrative reconciliation required',
+				503
+			) from persistence_exc
+
+		raise manager.PipelineError(
+			'V2 submission payload finalization failed',
+			503
+		) from exc
 
 	# No automatic retry is permitted after this point.
 	try:

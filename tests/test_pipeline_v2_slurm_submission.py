@@ -105,3 +105,43 @@ def test_invalid_payload_does_not_call_scheduler(events):
 		submission.submit_claimed_v2(_prepared(), s, 'bad job name')
 	assert s.calls == []
 	assert events == []
+	
+	
+def test_failure_after_intent_before_slurm(monkeypatch, events):
+	prepared = _prepared()
+	scheduler = Scheduler({'job_id': 123, 'errors': []})
+
+	def invalid_comment(attempt_id):
+		raise ValueError('Simulated payload finalization failure')
+
+	monkeypatch.setattr(
+		submission,
+		'attempt_comment',
+		invalid_comment
+	)
+
+	with pytest.raises(
+		manager.PipelineError,
+		match='payload finalization failed'
+	):
+		submission.submit_claimed_v2(
+			prepared,
+			scheduler,
+			'pipeline1'
+		)
+
+	# No scheduler submission must occur.
+	assert scheduler.calls == []
+
+	# The claim is consumed and failure is recorded.
+	assert events == [
+		(
+			'fail',
+			{
+				'uncertain': False,
+				'job_id': 'j1'
+			}
+		)
+	]
+	
+	
