@@ -65,54 +65,109 @@ def _scheduler_result(reply):
 	return None, False
 
 
+
 def submit_claimed_v2(prepared, slurm_manager, job_name, cpus_per_task=1,
 		tasks=1, python_executable='/usr/bin/python3'):
-	"""Submit a previously claimed/prepared run, finalizing its claim.
+	"""Submit one claimed V2 run using a durable, one-shot intent.
 
-	Do not automatically retry after any uncertain outcome. This method must
-	be invoked once by trusted coordinator code; it performs a scheduler call.
+	The intent must be recorded before contacting the scheduler.
+	A duplicate invocation never contacts Slurm.
 	"""
 	if not isinstance(prepared, dict):
 		raise manager.PipelineError('Invalid claimed preparation', 409)
+
 	claim = prepared.get('claim')
 	assets = prepared.get('assets')
+
 	if not isinstance(claim, binding.SubmissionClaim):
 		raise manager.PipelineError('Missing submission claim', 409)
+
 	if not isinstance(assets, dict) or assets.get('run_id') != claim.run_id:
 		raise manager.PipelineError('Claim and assets do not match', 409)
+
+	# Complete all local validation before consuming the one-shot intent.
+	# Preflight failure leaves the run SUBMITTING for explicit investigation.
 	try:
 		if slurm_manager.check_submit_vars() < 0:
 			raise manager.PipelineError('Slurm is not configured', 503)
-		payload = build_v2_slurm_payload(
-			assets, job_name, slurm_manager.cluster_batch_workdir,
-			cpus_per_task=cpus_per_task, tasks=tasks,
-			python_executable=python_executable)
-	except Exception:
-		binding.fail_submission(claim, 'V2 scheduler payload preparation failed',
-			uncertain=False, job_id=assets.get('job_id'))
-		raise
 
-	# From this point forward, exceptions and missing replies are uncertain.
+		payload = build_v2_slurm_payload(
+			assets,
+			job_name,
+			slurm_manager.cluster_batch_workdir,
+			cpus_per_task=cpus_per_task,
+			tasks=tasks,
+			python_executable=python_executable
+		)
+	except manager.PipelineError:
+		raise
+	except Exception as exc:
+		raise manager.PipelineError(
+			'V2 scheduler payload preparation failed', 503
+		) from exc
+
+	# Atomic one-shot authorization. If another invocation already recorded
+	# an intent, this raises 409 before any scheduler interaction.
+	# Never mark the original claim failed on a duplicate request.
+	binding.begin_submission_intent(claim, assets)
+
+	# No automatic retry is permitted after this point.
 	try:
 		reply = slurm_manager.submit_job(payload)
 	except Exception as exc:
-		binding.fail_submission(claim, 'Slurm submission outcome unknown',
-			uncertain=True, job_id=assets.get('job_id'))
-		raise manager.PipelineError('Slurm submission outcome uncertain', 503) from exc
-	pid, rejected = _scheduler_result(reply)
-	if pid is None:
-		binding.fail_submission(claim,
-			'Slurm explicitly rejected submission' if rejected else 'Slurm submission outcome unknown',
-			uncertain=not rejected, job_id=assets.get('job_id'))
+		binding.fail_submission(
+			claim,
+			'Slurm submission outcome unknown',
+			uncertain=True,
+			job_id=assets.get('job_id')
+		)
 		raise manager.PipelineError(
-			'Slurm rejected submission' if rejected else 'Slurm submission outcome uncertain',
-			409 if rejected else 503)
+			'Slurm submission outcome uncertain', 503
+		) from exc
+
+	pid, rejected = _scheduler_result(reply)
+
+	if pid is None:
+		binding.fail_submission(
+			claim,
+			'Slurm explicitly rejected submission'
+			if rejected else 'Slurm submission outcome unknown',
+			uncertain=not rejected,
+			job_id=assets.get('job_id')
+		)
+
+		raise manager.PipelineError(
+			'Slurm rejected submission'
+			if rejected else 'Slurm submission outcome uncertain',
+			409 if rejected else 503
+		)
+
 	try:
-		binding.finish_submission(claim, assets['job_id'], 'slurm', pid)
+		binding.finish_submission(
+			claim,
+			assets['job_id'],
+			'slurm',
+			pid
+		)
 	except Exception as exc:
-		# Job may already be running; never automatically retry.
-		binding.fail_submission(claim, 'Scheduler accepted job; database finalization uncertain',
-			uncertain=True, job_id=assets['job_id'])
-		raise manager.PipelineError('Job accepted but persistence uncertain', 503) from exc
-	return {'run_id': claim.run_id, 'job_id': assets['job_id'],
-		'scheduler': 'slurm', 'scheduler_pid': pid, 'status': 'SUBMITTED'}
+		# The scheduler may already be running this job.
+		# Preserve the intent and require reconciliation.
+		binding.fail_submission(
+			claim,
+			'Scheduler accepted job; database finalization uncertain',
+			uncertain=True,
+			job_id=assets['job_id']
+		)
+
+		raise manager.PipelineError(
+			'Job accepted but persistence uncertain', 503
+		) from exc
+
+	return {
+		'run_id': claim.run_id,
+		'job_id': assets['job_id'],
+		'scheduler': 'slurm',
+		'scheduler_pid': pid,
+		'status': 'SUBMITTED'
+	}
+

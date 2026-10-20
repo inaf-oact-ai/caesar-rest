@@ -41,8 +41,21 @@ class Scheduler:
 @pytest.fixture
 def events(monkeypatch):
 	items = []
-	monkeypatch.setattr(binding, 'finish_submission', lambda *a: items.append(('finish', a[1:])))
-	monkeypatch.setattr(binding, 'fail_submission', lambda *a, **k: items.append(('fail', k)))
+	monkeypatch.setattr(
+		binding,
+		'begin_submission_intent',
+		lambda *args: {'attempt_id': 'test-attempt'}
+	)
+	monkeypatch.setattr(
+		binding,
+		'finish_submission',
+		lambda *a: items.append(('finish', a[1:]))
+	)
+	monkeypatch.setattr(
+		binding,
+		'fail_submission',
+		lambda *a, **k: items.append(('fail', k))
+	)
 	return items
 
 
@@ -91,4 +104,4 @@ def test_invalid_payload_does_not_call_scheduler(events):
 	with pytest.raises(manager.PipelineError):
 		submission.submit_claimed_v2(_prepared(), s, 'bad job name')
 	assert s.calls == []
-	assert events == [('fail', {'uncertain': False, 'job_id': 'j1'})]
+	assert events == []

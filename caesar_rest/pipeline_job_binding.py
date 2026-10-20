@@ -5,6 +5,7 @@ run and records the result of the ordinary job submission operation.
 """
 
 import uuid
+import re
 
 from caesar_rest import pipeline_manager as manager
 
@@ -106,3 +107,63 @@ def fail_submission(claim, message, uncertain=False, job_id=None):
 		{'$set': {'status': status, 'submission_error': str(message),
 		          'job_id': job_id}, '$unset': {'submission_token': ''}}
 	)
+	
+
+def begin_submission_intent(claim, assets):
+	"""Atomically authorize exactly one V2 scheduler submission attempt.
+
+	The intent is durable and is never automatically removed. An interrupted
+	attempt requires reconciliation, not resubmission with the same claim.
+	"""
+	if not isinstance(claim, SubmissionClaim):
+		raise manager.PipelineError('Invalid submission claim', 409)
+
+	if not isinstance(assets, dict):
+		raise manager.PipelineError('Invalid submission assets', 409)
+
+	job_id = assets.get('job_id')
+	digest = assets.get('worker_sha256')
+
+	if (
+		assets.get('version') != 2
+		or assets.get('run_id') != claim.run_id
+		or not isinstance(job_id, str)
+		or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', job_id)
+		or not isinstance(digest, str)
+		or not re.fullmatch(r'[0-9a-f]{64}', digest)
+	):
+		raise manager.PipelineError('Invalid V2 submission identity', 409)
+
+	intent = {
+		'attempt_id': uuid.uuid4().hex,
+		'job_id': job_id,
+		'worker_sha256': digest,
+		'created_at': manager.utcnow()
+	}
+
+	_, runs, _ = manager.collections()
+
+	result = runs.update_one(
+		{
+			'owner': claim.owner,
+			'pipeline_id': claim.pipeline_id,
+			'run_id': claim.run_id,
+			'status': 'SUBMITTING',
+			'submission_token': claim.token,
+			'submission_intent': {'$exists': False}
+		},
+		{
+			'$set': {
+				'submission_intent': intent
+			}
+		}
+	)
+
+	if result.modified_count != 1:
+		raise manager.PipelineError(
+			'Submission intent already recorded or claim is no longer active',
+			409
+		)
+
+	return intent
+
