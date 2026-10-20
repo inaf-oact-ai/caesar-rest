@@ -102,11 +102,34 @@ def list_runs(pipeline_id):
 @pipeline_bp.route('/pipelines/<pipeline_id>/nodes/<node_id>/runs', methods=['GET', 'POST'])
 @custom_require_login
 def node_runs(pipeline_id, node_id):
+	
 	if request.method == 'GET':
 		return invoke(lambda owner: jsonify(manager.list_runs(owner, pipeline_id, node_id)))
+		
 	def action(owner):
-		doc = manager.create_run(owner, pipeline_id, node_id, request.get_json(silent=True))
+		doc = manager.create_run(
+			owner,
+			pipeline_id,
+			node_id,
+			request.get_json(silent=True),
+			retention_root=current_app.config.get(
+				'PIPELINE_ARTIFACT_RETENTION_ROOT'
+			) or '',
+			max_directory_bytes=current_app.config.get(
+				'PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_BYTES',
+				1024 * 1024 * 1024 * 1024
+			),
+			max_directory_entries=current_app.config.get(
+				'PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_ENTRIES',
+				100000
+			),
+			max_directory_depth=current_app.config.get(
+				'PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_DEPTH',
+				16
+			)
+		)
 		return jsonify(doc), 201
+		
 	return invoke(action)
 
 

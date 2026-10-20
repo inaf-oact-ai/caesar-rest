@@ -109,8 +109,18 @@ def list_pipelines(owner):
 	return [public_doc(doc) for doc in pipelines.find({'owner': owner}).sort('created_at', -1)]
 
 
-def create_run(owner, pipeline_id, node_id, payload):
+def create_run(
+	owner, 
+	pipeline_id, 
+	node_id, 
+	payload, 
+	retention_root='',
+	max_directory_bytes=1024 * 1024 * 1024 * 1024,
+	max_directory_entries=100000, 
+	max_directory_depth=16
+):
 	"""Reserve a distinct experiment. Does NOT submit anything to Slurm."""
+	
 	validate_identifier(node_id, 'node_id')
 	get_pipeline(owner, pipeline_id)
 	if not isinstance(payload, dict):
@@ -126,6 +136,7 @@ def create_run(owner, pipeline_id, node_id, payload):
 	operation = validate_identifier(payload.get('operation'), 'operation')
 	parameters = payload.get('parameters', {})
 	input_runs = payload.get('input_runs', [])
+	input_artifacts = payload.get('input_artifacts', [])
 	
 	dataset_id = payload.get('dataset_id')
 
@@ -142,22 +153,48 @@ def create_run(owner, pipeline_id, node_id, payload):
 	
 	if not isinstance(parameters, dict) or not isinstance(input_runs, list):
 		raise PipelineError('parameters must be an object and input_runs a list')
+	
 	if len(input_runs) != len(set(str(x) for x in input_runs)):
 		raise PipelineError('Duplicate parent run reference')
 	_, runs, counters = collections()
+	
 	for parent_id in input_runs:
 		if not isinstance(parent_id, str):
 			raise PipelineError('input_runs must contain run IDs')
 		parent = runs.find_one({'run_id': parent_id, 'pipeline_id': pipeline_id, 'owner': owner})
 		if parent is None or parent['status'] != 'COMPLETED':
 			raise PipelineError('Input run must exist and be completed: %s' % parent_id, 409)
+	
 	counter = counters.find_one_and_update(
 		{'pipeline_id': pipeline_id, 'node_id': node_id},
 		{'$inc': {'sequence': 1}},
 		upsert=True,
 		return_document=ReturnDocument.AFTER
 	)
+	
+	from caesar_rest import pipeline_artifact_binding
+
+	bindings = pipeline_artifact_binding.bind_inputs(
+		mongo.db,
+		owner,
+		pipeline_id,
+		input_artifacts,
+		retention_root,
+		max_directory_bytes=max_directory_bytes,
+		max_directory_entries=max_directory_entries,
+		max_directory_depth=max_directory_depth
+	)
+
+	bound_run_ids = {item['source_run_id'] for item in bindings}
+
+	if not bound_run_ids.issubset(set(input_runs)):
+		raise PipelineError(
+			'Every bound source_run_id must also appear in input_runs',
+			400
+		)
+	
 	sequence = counter['sequence']
+	
 	doc = {
 		'run_id': uuid.uuid4().hex,
 		'pipeline_id': pipeline_id,
@@ -169,6 +206,7 @@ def create_run(owner, pipeline_id, node_id, payload):
 		'operation': operation,
 		'parameters': parameters,
 		'input_runs': list(input_runs),
+		'input_artifacts': bindings,
 		'dataset_id': dataset_id,
 		'status': 'PLANNED',
 		'job_id': None,
@@ -251,6 +289,7 @@ def get_pipeline_tree(owner, pipeline_id):
 			'parameters': run.get('parameters') or {},
 			'dataset_id': run.get('dataset_id'),
 			'input_runs': run.get('input_runs') or [],
+			'input_artifacts': run.get('input_artifacts') or [],
 			'status': run['status'],
 			'job_id': run.get('job_id'),
 			'created_at': run.get('created_at'),
