@@ -21,25 +21,29 @@ from flask import current_app, g
 from caesar_rest import oidc
 from caesar_rest import mongo
 from caesar_rest import utils
-from caesar_rest.base_app_configurator import AppConfigurator
-from caesar_rest.base_app_configurator import Option, ValueOption, EnumValueOption
+from caesar_rest.app_configurators.base_app_configurator import (
+	AppConfigurator,
+	Option, 
+	ValueOption, 
+	EnumValueOption,
+)
 
 # Get logger
 from caesar_rest import logger
 
 ##########################################
-#   SIMCLR FEAT EXTRACTOR APP CONFIGURATOR
+#   CNN CLASSIFIER APP CONFIGURATOR
 ##########################################
 
-class SimCLRFeatExtractorAppConfigurator(AppConfigurator):
+class CNNClassifierAppConfigurator(AppConfigurator):
 	""" Class to configure CNN image classifier application """
 
-	def __init__(self, app_name="featextractor-simclr"):
+	def __init__(self, app_name="classifier-cnn"):
 		""" Return aapp configurator class """
 		AppConfigurator.__init__(self, app_name=app_name)
 
 		# - Define cmd name
-		self.cmd= 'run_simclr.sh'
+		self.cmd= 'run_classifier.sh'
 		self.cmd_args= []
 		self.batch_processing_support= True
 		
@@ -74,8 +78,8 @@ class SimCLRFeatExtractorAppConfigurator(AppConfigurator):
 				value_type=str, 
 				description='Classifier model to be used',
 				category='MODEL',
-				default_value='hulk-smgps',
-				allowed_values=['hulk-smgps','hulk-emupilot','banner-smgps','banner-emupilot']
+				default_value='smorphclass',
+				allowed_values=['smorphclass','sclass-radio_3.4um-4.6um-12um-22um']
 			),
 
 			# == PRE-PROCESSING OPTIONS ==
@@ -89,7 +93,6 @@ class SimCLRFeatExtractorAppConfigurator(AppConfigurator):
 				min_value=16,
 				max_value=1024
 			),
-			
 			'nchannels' : ValueOption(
 				name='nchannels',
 				value='',
@@ -115,7 +118,6 @@ class SimCLRFeatExtractorAppConfigurator(AppConfigurator):
 				min_value=1,
 				max_value=1000
 			),
-			
 			'normalize' : Option(
 				name='normalize_minmax', 
 				description='Normalize each channel in range', 
@@ -221,9 +223,9 @@ class SimCLRFeatExtractorAppConfigurator(AppConfigurator):
 				description='Do not redirect logs to output file in script',
 				category='RUN'
 			),
+			
 		
-		} ## close options
-		
+		} ## close valid options
 		
 		# - Define dictionary with job outputs produced
 		self.job_outputs= {
@@ -245,5 +247,4 @@ class SimCLRFeatExtractorAppConfigurator(AppConfigurator):
 
 		input_opt= "".join("--inputfile=%s" % self.data_inputs)
 		self.cmd_args.append(input_opt)
-		
 		

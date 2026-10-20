@@ -21,20 +21,24 @@ from flask import current_app, g
 from caesar_rest import oidc
 from caesar_rest import mongo
 from caesar_rest import utils
-from caesar_rest.base_app_configurator import AppConfigurator
-from caesar_rest.base_app_configurator import Option, ValueOption, EnumValueOption
+from caesar_rest.app_configurators.base_app_configurator import (
+	AppConfigurator,
+	Option, 
+	ValueOption, 
+	EnumValueOption,
+)
 
 # Get logger
 from caesar_rest import logger
 
 ##########################################
-#   OutlierFinder APP CONFIGURATOR
+#   HDBSCAN APP CONFIGURATOR
 ##########################################
 
-class OutlierFinderAppConfigurator(AppConfigurator):
-	""" Class to configure OutlierFinder application """
+class HDBSCANAppConfigurator(AppConfigurator):
+	""" Class to configure HDBSCAN application """
 
-	def __init__(self, app_name="outlier-finder"):
+	def __init__(self, app_name="hdbscan"):
 		""" Return app configurator class """
 		AppConfigurator.__init__(self, app_name=app_name)
 
@@ -45,7 +49,7 @@ class OutlierFinderAppConfigurator(AppConfigurator):
 		
 		# - Describe app
 		self.description = (
-			"Find outliers in a tabular dataset (N observations, M features) using IsolationForest algorithm."
+			"Run HDBSCAN density-based clustering algorithm to find clusters in a tabular dataset (N observations, M features)"
 		)
 		
 		self.tool_categories= ["tabular"]
@@ -86,8 +90,8 @@ class OutlierFinderAppConfigurator(AppConfigurator):
 		}
 		
 		self.limitations = [
-			"Returned outliers/inliers highly depends on the algorithm hyperparameters (max-features, max-samples, max_features, contamination) and the anomaly threshold.",
-			"It is suggested to calibrate them with labelled data."
+			"Returned clusters depend on the algorithm hyperparameters (min-cluster-size, min-samples, cluster-selection-epsilon).",
+			"With highly dimensional data, clustering may be ineffective. Reducing the data dimensionality (e.g. PCA, UMAP, etc) could help."
 		]
 		
 		# - Define dictionary with allowed options
@@ -111,64 +115,78 @@ class OutlierFinderAppConfigurator(AppConfigurator):
 				default_value=''
 			),
 		
-			# == IsolationForest OPTIONS ==
-			'nestimators' : ValueOption(
-				name='nestimators',
+			# == HDBSCAN OPTIONS ==
+			'min-cluster-size' : ValueOption(
+				name='min-cluster-size',
 				value='',
 				value_type=int, 
-				description='Number of forest trees to fit. Values in the range 100-300 usually sufficient, compromise between stability/accuracy and computational cost/overfitting risk (small datasets)',
+				description='Minimum cluster size for HDBSCAN clustering (default=5)',
 				category='PROCESSING',
-				default_value=100,
+				default_value=5,
 				min_value=1,
 				max_value=10000
 			),
-			'max-features' : ValueOption(
-				name='max-features',
+			'min-samples' : ValueOption(
+				name='min-samples',
 				value='',
 				value_type=int, 
-				description='Number of max features to draw from data table to train each forest tree. -1 means all features drawn. Selecting less features can potentially improve performance on high-dimensional data with many irrelevant features',
+				description='Minimum cluster sample parameter for HDBSCAN clustering. <0 means setting it to None, which means equal to min_cluster_size (default=-1)',
 				category='PROCESSING',
 				default_value=-1,
 				min_value=-1,
 				max_value=10000
 			),
-			'max-samples' : ValueOption(
-				name='max-samples',
+			'cluster-selection-epsilon' : ValueOption(
+				name='cluster-selection-epsilon',
 				value='',
 				value_type=float, 
-				description='Number of samples to draw from data table to train each forest tree. -1 means sklearn auto option, e.g. 256 entries, otherwise it is the fraction of total available entries. Smaller samples could potentially better isolate anomalies.',
+				description='A distance threshold. Clusters below this value will be merged (default=0)',
 				category='PROCESSING',
-				default_value=-1.0,
-				min_value=-1.0,
-				max_value=1.0
-			),
-			'contamination' : ValueOption(
-				name='contamination',
-				value='',
-				value_type=float, 
-				description='Fraction of outliers expected [0,0.5], used to set the outlier binary decision threshold. <=0 means sklearn auto option',
-				category='PROCESSING',
-				default_value=-1.0,
-				min_value=-1.0,
-				max_value=1.0
-			),
-			'anomaly-thr' : ValueOption(
-				name='anomaly-thr',
-				value='',
-				value_type=float, 
-				description='Threshold in anomaly score above which an observation is marked as outlier. Below this threshold, the observation is marked as inlier.',
-				category='PROCESSING',
-				default_value=0.7,
+				default_value=0.0,
 				min_value=0.0,
-				max_value=1.0
+				max_value=10000.
 			),
-   	
+   		
 			# == PRE-PROCESSING OPTIONS ==
 			'normalize' : Option(
 				name='normalize', 
-				description='If True, normalize feature data in range [0,1] before applying outlier search. If features have very different units or numerical ranges, features with larger scales will completely dominate the distance calculations, so it is suggested to normalize in that case.', 
+				description='If True, normalize feature data in range [0,1] before applying clustering algorithm. If features have very different units or numerical ranges, features with larger scales will completely dominate the distance calculations, so it is suggested to normalize in that case.', 
 				category='PREPROCESSING',
 				default_value=True
+			),
+			'reduce-dim' : Option(
+				name='reduce-dim', 
+				description='Reduce feature data dimensionality before applying the clustering', 
+				category='PREPROCESSING',
+				default_value=False
+			),
+			'reduce-dim-method' : ValueOption(
+				name='reduce-dim-method',
+				value='',
+				value_type=str, 
+				description='Dimensionality reduction method {pca} (default=pca)',
+				category='INPUT',
+				default_value='pca'
+			),
+			'pca-ncomps' : ValueOption(
+				name='pca-ncomps',
+				value='',
+				value_type=int, 
+				description='Number of PCA components to be used (-1=retain all cumulating a variance above threshold) (default=-1)',
+				category='PROCESSING',
+				default_value=-1,
+				min_value=-1,
+				max_value=10000
+			),
+			'pca-varthr' : ValueOption(
+				name='pca-varthr',
+				value='',
+				value_type=float, 
+				description='Cumulative variance threshold used to retain PCA components (default=0.9)',
+				category='PROCESSING',
+				default_value=0.9,
+				min_value=0.0,
+				max_value=1.0
 			),
 			
 			# == SAVE OPTIONS ==
@@ -200,17 +218,18 @@ class OutlierFinderAppConfigurator(AppConfigurator):
 				name='outfile',
 				value='',
 				value_type=str, 
-				description='Name of ascii output file',
+				description='Name of output file in ascii format',
 				category='OUTPUT',
-				default_value='outlier_data.dat'
+				default_value='clustered_data.dat'
 			),
+			
 			'outfile-json' : ValueOption(
 				name='outfile-json',
 				value='',
 				value_type=str, 
-				description='Name of json output file',
+				description='Name of output file in json format',
 				category='OUTPUT',
-				default_value='outlier_data.json'
+				default_value='clustered_data.json'
 			),
 			
 			# == RUN OPTIONS ==
@@ -225,11 +244,11 @@ class OutlierFinderAppConfigurator(AppConfigurator):
 		
 		# - Define dictionary with job outputs produced
 		json_out_desc= (
-			'JSON file containing the input data with inlier/outlier classification produced by the algorithm.'
+			'JSON file containing the input data with clusters identified by the algorithm.'
 		)
 		
 		json_out_format= (
-			'Output JSON file with inlier/outlier classification has this format: \n\n'
+			'Output JSON file with clustering results has this format: \n\n'
 			'{\n'
 			'  "data": [\n'
 			'    {\n'
@@ -247,27 +266,29 @@ class OutlierFinderAppConfigurator(AppConfigurator):
 			'* id | int or list(int): Class identifier(s) \n'
 			'* label | str or list(str): Class label(s) \n'
 			'* feats | list(float): Input feature parameters (if no-save-features option is False)\n'
-			'* is_outlier | int: Binary flag indicating if the observation is an inlier (=0) or outlier (=1) given the chosen outlier score threshold \n'
-			'* outlier_score | float: Outlier score (if outlier_score>thr the observation is marked as outlier) \n'
+			'* clust_id | int: ID of the cluster this observation belongs to. Noisy samples are set to id=-1 \n'
+			'* clust_prob | float: Strength with which each observation is a member of its assigned cluster. Noise points have probability zero; points in clusters have values assigned proportional to the degree that they persist as part of the cluster \n'
+			'* clust_outlier_score | float: Outlier scores for clustered points; the larger the score the more outlier-like the point \n'
 			'Additional metadata fields present in the input dataset will be preserved in the json output format.'
 		)
 		
 		ascii_out_desc= (
-			'Ascii tabular file containing the input data with inlier/outlier classification produced by the algorithm.'
+			'Ascii tabular file containing the input data with clusters identified by the algorithm.'
 		)
 		
 		ascii_out_format= (
-			'Output ascii tabular data file with inlier/outlier classification has this format:\n'
-			'- First row: header, starting with #, e.g. # sname z1 z2 id is_outlier outlier_score \n'
+			'Output ascii tabular data file with clustering results has this format:\n'
+			'- First row: header, starting with #, e.g. # sname z1 z2 id clust_id clust_prob clust_outlier_score \n'
 			'- Col 1: sname | str: Observation identifier, usually set to filepath/uid without file extension \n'
 			'- Col 2,3,...,M+1: feats | float: M input feature parameters for the observation (if no-save-features option is False)\n'
 			'- Col M+2: id | int or label | str: Class identifier (if int) or class label (if str) for the observation \n'
-			'- Col M+3: is_outlier | int: Binary flag indicating if the observation is an inlier (=0) or outlier (=1) given the chosen outlier score threshold \n'
-			'- Col M+4: outlier_score | float: Outlier score (if outlier_score>thr the observation is marked as outlier) \n'
+			'- Col M+3: clust_id | int: ID of the cluster this observation belongs to. Noisy samples are set to id=-1 \n'
+			'- Col M+4: clust_prob | float: Strength with which each observation is a member of its assigned cluster. Noise points have probability zero; points in clusters have values assigned proportional to the degree that they persist as part of the cluster \n'
+			'- Col M+5: clust_outlier_score | float: Outlier scores for clustered points; the larger the score the more outlier-like the point \n'
 		)
-				
+
 		self.job_outputs= {
-			"outliers-json": {
+			"clusters-json": {
 				"path": None,
 				"glob": "*.json",
 				"type": "application/json",
@@ -277,10 +298,10 @@ class OutlierFinderAppConfigurator(AppConfigurator):
 				"parser": "json",
 				"required": True,
 				"notes": (
-					"The json output filename produced is by default set to 'outlier_data.json', but it can be configured by the user with the option 'outfile-json'"
+					"The json output filename produced is by default set to 'clustered_data.json', but it can be configured by the user with the option 'outfile-json'"
 				)
 			},
-			"outliers-ascii": {
+			"clusters-ascii": {
 				"path": None,
 				"glob": "*.dat",
 				"type": "text/plain",
@@ -290,7 +311,7 @@ class OutlierFinderAppConfigurator(AppConfigurator):
 				"parser": "text",
 				"required": True,
 				"notes": (
-					"The ascii output filename produced is by default set to 'outlier_data.dat', but it can be configured by the user with the option 'outfile'"
+					"The ascii output filename produced is by default set to 'clustered_data.dat', but it can be configured by the user with the option 'outfile'"
 				)
 			},
 			"datascaler": {
@@ -308,10 +329,10 @@ class OutlierFinderAppConfigurator(AppConfigurator):
 			},
 			"model": {
 				"path": None,
-				"glob": "outlier_model.sav",
+				"glob": "clustering_model.sav",
 				"type": "application/octet-stream",
 				"role": "model",
-				"description": "A scikit-learn model file including trained IsolationForest model.",
+				"description": "A scikit-learn model file including clustering model.",
 				"format": "",
 				"parser": "scikit-learn",
 				"required": False,

@@ -21,8 +21,12 @@ from flask import current_app, g
 from caesar_rest import oidc
 from caesar_rest import mongo
 from caesar_rest import utils
-from caesar_rest.base_app_configurator import AppConfigurator
-from caesar_rest.base_app_configurator import Option, ValueOption, EnumValueOption
+from caesar_rest.app_configurators.base_app_configurator import (
+	AppConfigurator,
+	Option, 
+	ValueOption, 
+	EnumValueOption,
+)
 
 # Get logger
 from caesar_rest import logger

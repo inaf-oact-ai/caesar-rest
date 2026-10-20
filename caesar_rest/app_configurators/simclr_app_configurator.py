@@ -21,25 +21,29 @@ from flask import current_app, g
 from caesar_rest import oidc
 from caesar_rest import mongo
 from caesar_rest import utils
-from caesar_rest.base_app_configurator import AppConfigurator
-from caesar_rest.base_app_configurator import Option, ValueOption, EnumValueOption
+from caesar_rest.app_configurators.base_app_configurator import (
+	AppConfigurator,
+	Option, 
+	ValueOption, 
+	EnumValueOption,
+)
 
 # Get logger
 from caesar_rest import logger
 
 ##########################################
-#   CNN CLASSIFIER APP CONFIGURATOR
+#   SIMCLR FEAT EXTRACTOR APP CONFIGURATOR
 ##########################################
 
-class CNNClassifierAppConfigurator(AppConfigurator):
+class SimCLRFeatExtractorAppConfigurator(AppConfigurator):
 	""" Class to configure CNN image classifier application """
 
-	def __init__(self, app_name="classifier-cnn"):
+	def __init__(self, app_name="featextractor-simclr"):
 		""" Return aapp configurator class """
 		AppConfigurator.__init__(self, app_name=app_name)
 
 		# - Define cmd name
-		self.cmd= 'run_classifier.sh'
+		self.cmd= 'run_simclr.sh'
 		self.cmd_args= []
 		self.batch_processing_support= True
 		
@@ -74,8 +78,8 @@ class CNNClassifierAppConfigurator(AppConfigurator):
 				value_type=str, 
 				description='Classifier model to be used',
 				category='MODEL',
-				default_value='smorphclass',
-				allowed_values=['smorphclass','sclass-radio_3.4um-4.6um-12um-22um']
+				default_value='hulk-smgps',
+				allowed_values=['hulk-smgps','hulk-emupilot','banner-smgps','banner-emupilot']
 			),
 
 			# == PRE-PROCESSING OPTIONS ==
@@ -89,6 +93,7 @@ class CNNClassifierAppConfigurator(AppConfigurator):
 				min_value=16,
 				max_value=1024
 			),
+			
 			'nchannels' : ValueOption(
 				name='nchannels',
 				value='',
@@ -114,6 +119,7 @@ class CNNClassifierAppConfigurator(AppConfigurator):
 				min_value=1,
 				max_value=1000
 			),
+			
 			'normalize' : Option(
 				name='normalize_minmax', 
 				description='Normalize each channel in range', 
@@ -219,9 +225,9 @@ class CNNClassifierAppConfigurator(AppConfigurator):
 				description='Do not redirect logs to output file in script',
 				category='RUN'
 			),
-			
 		
-		} ## close valid options
+		} ## close options
+		
 		
 		# - Define dictionary with job outputs produced
 		self.job_outputs= {
@@ -243,4 +249,5 @@ class CNNClassifierAppConfigurator(AppConfigurator):
 
 		input_opt= "".join("--inputfile=%s" % self.data_inputs)
 		self.cmd_args.append(input_opt)
+		
 		

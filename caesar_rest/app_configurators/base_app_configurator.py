@@ -23,7 +23,6 @@ from caesar_rest import mongo
 from caesar_rest import utils
 
 # Get logger
-#logger = logging.getLogger(__name__)
 from caesar_rest import logger
 
 ##############################
@@ -31,19 +30,6 @@ from caesar_rest import logger
 ##############################
 class Option(object):
 
-	#def __init__(self, name, mandatory=False, description='', category='', subcategory='', advanced=False):
-	#	self.name= name
-	#	self.mandatory= mandatory
-	#	self.value_required= False
-	#	self.value= None
-	#	self.value_type= type(None)
-	#	self.description= description
-	#	self.advanced= advanced	
-	#	self.category= category
-	#	self.subcategory= subcategory	
-	#	self.enum= False
-	#	self.allowed_values= []
-		
 	def __init__(self, name, mandatory=False, description='', category='', subcategory='', advanced=False, default_value=None):
 		self.name= name
 		self.mandatory= mandatory
