@@ -3,9 +3,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from caesar_rest import pipeline_job_binding as binding
-from caesar_rest import pipeline_manager as manager
-from caesar_rest import pipeline_v2_slurm_submission as submission
+from caesar_rest.pipeline.submission import job_binding as binding
+from caesar_rest.pipeline import manager
+from caesar_rest.pipeline.submission import slurm_submission as submission
 
 
 class Runs:

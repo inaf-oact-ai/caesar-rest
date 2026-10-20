@@ -4,8 +4,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from caesar_rest.pipeline_data_staging import stage_input, stage_inputs, StagingError
-from caesar_rest.pipeline_ms_staging import stage_ms
+from pipeline_runtime.staging import stage_input, stage_inputs, StagingError
+from caesar_rest.pipeline.staging.ms import stage_ms
 
 
 class StageTests(unittest.TestCase):

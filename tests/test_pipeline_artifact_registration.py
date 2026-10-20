@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from caesar_rest import pipeline_artifact_registration as reg
+from caesar_rest.pipeline.artifacts import registration as reg
 
 
 class Collection:

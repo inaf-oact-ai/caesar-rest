@@ -1,6 +1,6 @@
 import copy
 import pytest
-from caesar_rest.pipeline_multi_input_specs import (
+from caesar_rest.pipeline.staging.multi_input_specs import (
 	MultiInputSpecError, build_multi_input_specs, validate_multi_input_pair
 )
 

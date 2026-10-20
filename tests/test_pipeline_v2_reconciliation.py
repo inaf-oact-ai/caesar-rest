@@ -3,8 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from caesar_rest import pipeline_manager as manager
-from caesar_rest import pipeline_v2_reconciliation as reconciliation
+from caesar_rest.pipeline import manager
+from caesar_rest.pipeline.submission import reconciliation
 
 
 class Runs:

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from caesar_rest import pipeline_artifact_access as access
+from caesar_rest.pipeline.artifacts import access
 
 
 class Collection:

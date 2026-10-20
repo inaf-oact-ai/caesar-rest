@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from caesar_rest import pipeline_manager as manager
-from caesar_rest import pipeline_v2_submission_adapter as adapter
+from caesar_rest.pipeline import manager
+from caesar_rest.pipeline.submission import v2_adapter as adapter
 
 
 @pytest.fixture

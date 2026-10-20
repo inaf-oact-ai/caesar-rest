@@ -3,9 +3,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from caesar_rest import pipeline_artifact_access as access
-from caesar_rest import pipeline_directory_promotion as promotion
-from caesar_rest import pipeline_manager as manager
+from caesar_rest.pipeline.artifacts import access
+from caesar_rest.pipeline.artifacts import directory_promotion as promotion
+from caesar_rest.pipeline import manager
 
 
 class Runs:

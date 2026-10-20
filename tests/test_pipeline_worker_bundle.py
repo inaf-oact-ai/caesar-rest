@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 import zipfile
 
-from caesar_rest.pipeline_worker_bundle import build_archive, deploy_worker, WORKER_NAME
+from caesar_rest.pipeline.submission.worker_bundle import build_archive, deploy_worker, WORKER_NAME
 
 
 class WorkerBundleTests(unittest.TestCase):

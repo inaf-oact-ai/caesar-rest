@@ -2,9 +2,9 @@ import hashlib
 
 import pytest
 
-from caesar_rest import pipeline_artifact_access as access
-from caesar_rest import pipeline_artifact_retention as retention
-from caesar_rest import pipeline_manager as manager
+from caesar_rest.pipeline.artifacts import access
+from caesar_rest.pipeline.artifacts import retention
+from caesar_rest.pipeline import manager
 
 
 def make_retained_run(tmp_path, content=b'{"ok":true}'):

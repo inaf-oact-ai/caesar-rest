@@ -1,5 +1,5 @@
 import pytest
-from caesar_rest.pipeline_artifact_discovery import ArtifactDiscoveryError, discover_artifacts
+from caesar_rest.pipeline.artifacts.discovery import ArtifactDiscoveryError, discover_artifacts
 
 
 CONTRACT = {

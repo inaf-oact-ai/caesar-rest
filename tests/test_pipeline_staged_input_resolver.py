@@ -3,8 +3,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from caesar_rest.pipeline_data_staging import StagingError, stage_inputs
-from caesar_rest.pipeline_staged_input_resolver import resolve_staged_inputs
+from pipeline_runtime.staging import StagingError, stage_inputs
+from pipeline_runtime.resolver import resolve_staged_inputs
 
 
 class ResolverTests(unittest.TestCase):

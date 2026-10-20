@@ -1,4 +1,4 @@
-from caesar_rest.pipeline_v2_identity_reconciliation import verified_job_evidence, attempt_comment
+from caesar_rest.pipeline.submission.identity_reconciliation import verified_job_evidence, attempt_comment
 
 
 def test_scheduler_identity_needs_exact_unique_comment():

@@ -1,5 +1,5 @@
 import unittest
-from caesar_rest.pipeline_container_paths import ContainerPathError, map_host_path, map_staged_inputs
+from pipeline_runtime.paths import ContainerPathError, map_host_path, map_staged_inputs
 
 
 class ContainerPathMappingTests(unittest.TestCase):

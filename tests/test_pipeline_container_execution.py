@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 from types import SimpleNamespace
 
-from caesar_rest.pipeline_container_execution import execute, execution_command, ContainerExecutionError
+from pipeline_runtime.executor import execute, execution_command, ContainerExecutionError
 
 
 class ContainerExecutionTests(unittest.TestCase):

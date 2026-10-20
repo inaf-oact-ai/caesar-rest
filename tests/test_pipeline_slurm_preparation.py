@@ -3,9 +3,9 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from caesar_rest.pipeline_stage_runner import prepare, main
-from caesar_rest.pipeline_data_staging import StagingError
-from caesar_rest.pipeline_slurm_preparation import preparation_script
+from pipeline_runtime.stage_runner import prepare, main
+from pipeline_runtime.staging import StagingError
+from caesar_rest.pipeline.submission.slurm_preparation import preparation_script
 
 
 class PreparationTests(unittest.TestCase):
@@ -68,7 +68,7 @@ if __name__ == '__main__':
 class SlurmPayloadTests(unittest.TestCase):
 	def test_existing_slurm_contract(self):
 		from unittest.mock import Mock
-		from caesar_rest.pipeline_slurm_preparation import build_preparation_job
+		from caesar_rest.pipeline.submission.slurm_preparation import build_preparation_job
 		mgr = Mock()
 		mgr.check_submit_vars.return_value = 0
 		mgr.cluster_batch_workdir = '/cluster/batchlogs'

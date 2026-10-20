@@ -2,8 +2,8 @@
 from types import SimpleNamespace
 import pytest
 
-from caesar_rest import pipeline_v2_claimed_preparation as claimed
-from caesar_rest import pipeline_manager as manager
+from caesar_rest.pipeline.submission import claimed_preparation as claimed
+from caesar_rest.pipeline import manager
 
 
 def _run():

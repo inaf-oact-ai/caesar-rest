@@ -1,5 +1,5 @@
 import unittest
-from caesar_rest.pipeline_worker_slurm import worker_commands
+from caesar_rest.pipeline.submission.worker_slurm import worker_commands
 
 
 class WorkerCommandsTests(unittest.TestCase):

@@ -3,8 +3,8 @@ import json
 
 import pytest
 
-from caesar_rest.pipeline_directory_retention import DirectoryRetentionError, copy_directory_artifact
-from caesar_rest.pipeline_directory_integrity import DirectoryIntegrityError, verify_directory_artifact
+from caesar_rest.pipeline.artifacts.directory_retention import DirectoryRetentionError, copy_directory_artifact
+from caesar_rest.pipeline.artifacts.directory_integrity import DirectoryIntegrityError, verify_directory_artifact
 
 
 def build(tmp_path):

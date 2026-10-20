@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from caesar_rest import pipeline_bound_staging as staging
-from caesar_rest import pipeline_manager as manager
+from caesar_rest.pipeline.staging import bound as staging
+from caesar_rest.pipeline import manager
 
 
 class Runs:

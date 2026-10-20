@@ -1,7 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
-from caesar_rest.pipeline_submission_specs import create_specs, write_specs, PipelineSubmissionError
+from caesar_rest.pipeline.staging.submission_specs import create_specs, write_specs, PipelineSubmissionError
 
 class SubmissionSpecsTests(unittest.TestCase):
 	def specs(self, **overrides):

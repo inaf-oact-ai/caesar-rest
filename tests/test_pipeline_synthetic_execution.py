@@ -3,8 +3,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from caesar_rest.pipeline_data_staging import StagingError, stage_inputs
-from caesar_rest.pipeline_synthetic_execution import consume, main, synthetic_execution_command
+from pipeline_runtime.staging import StagingError, stage_inputs
+from caesar_rest.pipeline.execution.synthetic import consume, main, synthetic_execution_command
 
 
 class SyntheticExecutionTests(unittest.TestCase):

@@ -2,8 +2,8 @@
 
 import pytest
 
-from caesar_rest import pipeline_directory_resolver as resolver
-from caesar_rest import pipeline_manager as manager
+from caesar_rest.pipeline.artifacts import directory_resolver as resolver
+from caesar_rest.pipeline import manager
 
 
 def _setup(monkeypatch):
@@ -91,7 +91,7 @@ def test_wrong_owner_is_rejected(monkeypatch):
 
 
 def test_failed_integrity_is_rejected(monkeypatch):
-	from caesar_rest.pipeline_directory_integrity import DirectoryIntegrityError
+	from caesar_rest.pipeline.artifacts.directory_integrity import DirectoryIntegrityError
 	_setup(monkeypatch)
 	def fail(*args, **kwargs):
 		raise DirectoryIntegrityError('corrupted')

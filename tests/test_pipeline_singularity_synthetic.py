@@ -4,8 +4,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock
 
-from caesar_rest.pipeline_data_staging import stage_inputs, StagingError
-from caesar_rest.pipeline_singularity_synthetic import (
+from pipeline_runtime.staging import stage_inputs, StagingError
+from caesar_rest.pipeline.execution.singularity_synthetic import (
 	execute, singularity_synthetic_command
 )
 

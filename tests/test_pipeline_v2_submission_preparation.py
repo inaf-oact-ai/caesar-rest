@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from caesar_rest import pipeline_manager as manager
-from caesar_rest import pipeline_v2_submission_preparation as prep
+from caesar_rest.pipeline import manager
+from caesar_rest.pipeline.submission import v2_preparation as prep
 
 
 class FakeRuns:

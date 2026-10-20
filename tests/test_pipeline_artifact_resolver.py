@@ -3,8 +3,8 @@
 import io
 import pytest
 
-from caesar_rest import pipeline_manager as manager
-from caesar_rest import pipeline_artifact_resolver as resolver
+from caesar_rest.pipeline import manager
+from caesar_rest.pipeline.artifacts import resolver
 
 
 class Collection:
