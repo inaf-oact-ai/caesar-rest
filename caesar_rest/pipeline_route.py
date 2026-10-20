@@ -1,5 +1,6 @@
 """Generic pipeline metadata endpoints; no agent decisions or job submission."""
 
+from flask import current_app
 from flask import Blueprint, jsonify, request, send_file
 from werkzeug.exceptions import HTTPException
 from caesar_rest import logger
@@ -11,6 +12,7 @@ from caesar_rest import pipeline_manager as manager
 from caesar_rest import pipeline_status_sync
 from caesar_rest import pipeline_artifact_access as artifact_access
 from caesar_rest import pipeline_artifact_resolver as artifact_resolver
+from caesar_rest import pipeline_artifact_retention as retention
 
 pipeline_bp = Blueprint('pipelines', __name__, url_prefix='/caesar/api/v1.0')
 
@@ -225,3 +227,36 @@ def resolve_selected_artifact(pipeline_id, node_id, artifact_name):
 			artifact_name
     )
 	))
+	
+############################################
+###      PIPELINE ARTIFACT RETENTION
+############################################
+@pipeline_bp.route(
+	'/pipelines/<pipeline_id>/nodes/<node_id>/runs/<run_id>/retain',
+	methods=['POST']
+)
+@custom_require_login
+def retain_run_artifacts(pipeline_id, node_id, run_id):
+	"""Copy registered artifacts into managed pipeline storage."""
+
+	def action(owner):
+		root = current_app.config.get(
+			'PIPELINE_ARTIFACT_RETENTION_ROOT'
+		) or ''
+
+		limit = current_app.config.get(
+			'PIPELINE_ARTIFACT_RETENTION_MAX_FILE_BYTES',
+			1024 * 1024 * 1024
+		)
+
+		return jsonify(retention.promote_run(
+			mongo.db,
+			owner,
+			pipeline_id,
+			node_id,
+			run_id,
+			root,
+			limit
+		))
+
+	return invoke(action)

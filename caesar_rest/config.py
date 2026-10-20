@@ -160,6 +160,10 @@ class Config(object):
 	#   installed in this Python environment.
 	# - Empty value selects /usr/bin/python3.
 	PIPELINE_PYTHON_EXECUTABLE = ''
+	
+	# - Pipeline artifact retention configs
+	PIPELINE_ARTIFACT_RETENTION_ROOT = ''
+	PIPELINE_ARTIFACT_RETENTION_MAX_FILE_BYTES = 1024 * 1024 * 1024
 
 	# - DATASET app options
 	# - Dynamic dataset registry options
