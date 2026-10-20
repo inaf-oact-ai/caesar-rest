@@ -102,12 +102,26 @@ def synchronize_monitored_job(db, job_obj, state, exit_code=None):
 		{'$set': changes}
 	)
 
-	# - Register scientific artifacts when the job completes.
-	# - A repeated terminal synchronization can also retry registration.
+	# - Register artifacts after a successful completion transition.
+	# - On repeated terminal notifications, retry registration only
+	#   when the same pipeline run and job are already COMPLETED.
 	if status == 'COMPLETED':
-		safe_register_artifacts(
-			db, owner, pipeline_id, run_id, job_id
-		)
+		should_register = result.modified_count == 1
+
+		if not should_register:
+			existing = db.pipeline_runs.find_one({
+				'owner': owner,
+				'pipeline_id': pipeline_id,
+				'run_id': run_id,
+				'job_id': job_id,
+				'status': 'COMPLETED'
+			})
+			should_register = existing is not None
+
+		if should_register:
+			safe_register_artifacts(
+				db, owner, pipeline_id, run_id, job_id
+			)
 
 	return result.modified_count == 1
 
