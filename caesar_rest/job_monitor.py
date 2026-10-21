@@ -563,7 +563,7 @@ def recover_missing_slurm_job(job_obj):
 		'exit_code': -1
 	}
 
-def monitor_slurm_job(job_obj, job_collection):
+def monitor_slurm_job_old(job_obj, job_collection):
 	""" Monitor and update job status in DB """
 	
 	# - Extract field
@@ -646,6 +646,68 @@ def monitor_slurm_job(job_obj, job_collection):
 
 	return 0
 
+
+def monitor_slurm_job(job_obj, job_collection):
+	"""Monitor one Slurm job using the shared guarded update path."""
+
+	# - Validate input.
+	if not job_obj:
+		logger.warn(
+			"Given job obj is None or empty!",
+			action="jobmonitor"
+		)
+		return -1
+
+	if job_collection is None:
+		logger.warn(
+			"Given mongo job collection is None!",
+			action="jobmonitor"
+		)
+		return -1
+
+	if jobmgr_slurm is None:
+		logger.warn(
+			"Slurm client is None!",
+			action="jobmonitor"
+		)
+		return -1
+
+	job_id = job_obj['job_id']
+	job_pid = str(job_obj['pid'])
+
+	if not job_pid:
+		logger.warn(
+			"Given job pid is empty, cannot retrieve job status "
+			"from Slurm cluster!",
+			action="jobmonitor"
+		)
+		return -1
+
+	# - Retrieve job state from the existing controller endpoint.
+	try:
+		res = jobmgr_slurm.get_job_status(job_pid)
+	except Exception as exc:
+		logger.warn(
+			"Failed to retrieve job %s (pid=%s) status (err=%s)" %
+			(job_id, job_pid, str(exc)),
+			action="jobmonitor"
+		)
+		return -1
+
+	# - Preserve legacy behavior for missing or unusable replies.
+	# - Do not interpret an unavailable controller as job completion.
+	if not res:
+		logger.warn(
+			"Empty Slurm status reply for job %s (pid=%s); "
+			"leaving current job state unchanged" %
+			(job_id, job_pid),
+			action="jobmonitor"
+		)
+		return -1
+
+	# - Delegate status persistence, archive creation and pipeline
+	#   synchronization to the shared guarded implementation.
+	return update_slurm_job(job_obj, res, job_collection)
 
 
 def update_slurm_job(job_obj, res, job_collection):
