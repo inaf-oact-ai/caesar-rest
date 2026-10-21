@@ -37,6 +37,44 @@ def _check_source(source):
 	return p.resolve(strict=True)
 
 
+def _check_reference_source(source):
+	"""Validate a canonical read-only source without copying it.
+
+	Reject symlinks, including symlinked path components.
+	The caller must separately authorize the dataset location.
+	"""
+
+	p = Path(source)
+
+	if not p.is_absolute() or not p.is_dir():
+		raise StagingError(
+			'Reference source must be an existing absolute directory'
+		)
+
+	if str(p.resolve(strict=True)) != str(p):
+		raise StagingError(
+			'Reference source must be canonical'
+		)
+
+	# Reject symlinks anywhere within the source directory.
+	# Do not follow links during inspection.
+	for root, dirs, files in os.walk(str(p), followlinks=False):
+		for name in dirs + files:
+			child = Path(root) / name
+			mode = child.lstat().st_mode
+
+			if not (
+				stat.S_ISDIR(mode)
+				or stat.S_ISREG(mode)
+			):
+				raise StagingError(
+					'Reference source contains symlink or special file: %s' %
+					child
+				)
+
+	return p
+
+
 def _validate_name(name):
 	if not isinstance(name, str) or name in ('', '.', '..', 'staging.json'):
 		raise StagingError('Invalid destination name')
@@ -105,14 +143,27 @@ def stage_inputs(inputs, workspace):
 		if not isinstance(spec, dict):
 			raise StagingError('Each input must be an object')
 			
-		if spec.get('mode', 'copy') != 'copy':
-			raise StagingError('Only copy staging is supported')
-		
+		mode = spec.get('mode', 'copy')
+		if mode not in ('copy', 'reference_ro'):
+			raise StagingError(
+				'Unsupported staging mode: %s' % mode
+			)
+
+		if mode == 'reference_ro':
+			if spec.get('writable') is not False:
+				raise StagingError(
+					'Read-only references require writable=False'
+				)
+				
 		writable = spec.get('writable', True)
 		if not isinstance(writable, bool):
 			raise StagingError('writable must be boolean')
 		
-		src = _check_source(spec.get('source'))
+		if mode == 'reference_ro':
+			src = _check_reference_source(spec.get('source'))
+		else:
+			src = _check_source(spec.get('source'))
+				
 		if _inside(base, src) or _inside(src, base):
 			raise StagingError('Source and workspace must not overlap')
 			
@@ -135,7 +186,7 @@ def stage_inputs(inputs, workspace):
 			if _measured_size(src) != size:
 				raise StagingError('v2 source size mismatch')
 
-		prepared.append((src, name, writable))
+		prepared.append((src, name, writable, mode))
 
 
 	input_dir = base / 'input'
@@ -146,8 +197,36 @@ def stage_inputs(inputs, workspace):
 
 	entries = []
 	try:
-		for src, name, writable in prepared:
+			
+		for src, name, writable, mode in prepared:
 			dest = input_dir / name
+
+			if mode == 'reference_ro':
+				# A placeholder is created inside the private
+				# workspace, but no dataset bytes are copied.
+				#
+				# EXECUTE will eventually mount the authorized
+				# source over this placeholder as read-only.
+				# No symbolic link to the source is created.
+				dest.mkdir(mode=0o700)
+
+				source_stat = src.stat()
+
+				entries.append({
+					'name': name,
+					'source': str(src),
+					'private_path': str(dest),
+					'input_type': 'directory',
+					'strategy': 'read_only_reference',
+					'input_isolation': 'shared_read_only',
+					'writable': False,
+					'source_dev': source_stat.st_dev,
+					'source_ino': source_stat.st_ino
+				})
+
+				continue
+
+			
 			if src.is_dir():
 				shutil.copytree(str(src), str(dest), symlinks=True)
 			else:

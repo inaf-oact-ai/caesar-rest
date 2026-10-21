@@ -140,11 +140,19 @@ def execute(workspace, spec_path, runner=subprocess.run):
 	if not Path(image).is_file() or Path(image).is_symlink():
 		raise ContainerExecutionError('Trusted container image missing or symlinked')
 	
-	paths = resolve_staged_inputs(
+	paths, references = resolve_staged_inputs(
 		workspace,
 		required_names=list(spec['input_options'].values())
-		if spec['input_options'] else None
-	)
+		if spec['input_options'] else None,
+		include_references=True
+	)	
+	
+	# Read-only references are supported only by the v1 contract.
+	if specification_version(spec, ContainerExecutionError) == 2:
+		if references:
+			raise ContainerExecutionError(
+				'Reference inputs are not supported in v2'
+			)	
 
 	if specification_version(spec, ContainerExecutionError) == 2:
 		if set(paths) != set(spec['input_options'].values()):
@@ -153,8 +161,35 @@ def execute(workspace, spec_path, runner=subprocess.run):
 			)
 
 	binds = [{'source': workspace, 'destination': container_ws}]
-	
 	mapped = map_staged_inputs(paths, workspace, binds)
+	
+
+	# - Build explicit read-only mounts for referenced inputs.
+	# - Destinations remain inside the writable private workspace,
+	#   but the mounted source itself is read-only.
+	reference_binds = []
+
+	for name, reference in references.items():
+
+		if name not in spec['input_options'].values():
+			raise ContainerExecutionError(
+				'Unbound reference input: %s' % name
+			)
+
+		mount_point = reference['mount_point']
+		source = reference['source']
+
+		container_mount = map_host_path(
+			mount_point,
+			workspace,
+			binds
+		)
+
+		reference_binds.append(
+			'%s:%s:ro' % (source, container_mount)
+		)
+	
+	
 	args = list(spec['arguments'])
 	for opt, name in spec['input_options'].items():
 		if any(arg.startswith('--' + opt + '=') for arg in args):
@@ -182,6 +217,15 @@ def execute(workspace, spec_path, runner=subprocess.run):
 	]
 	for key, value in spec.get('environment', {}).items():
 		cmd[-1:-1] = ['--env', key + '=' + value]
+
+	# - Add reference mounts before the container image.
+	# - A referenced dataset must not be mounted read/write.
+	for reference_bind in reference_binds:
+		cmd[-1:-1] = [
+			'--bind',
+			reference_bind
+		]
+
 
 	return runner(cmd, check=False).returncode
 
