@@ -123,6 +123,172 @@ def safe_fail_pipeline_submission(claim, message, uncertain=False, job_id=None):
 class SlurmPreSubmissionError(RuntimeError):
 	"""Slurm submission was not attempted; safe to classify as definite failure."""
 
+
+# -------------------------------------------
+# Application container configuration
+# -------------------------------------------
+
+JOB_APPLICATIONS = {
+	'caesar': {
+		'kubernetes': ('CAESAR_JOB_IMAGE', 'caesar-job'),
+		'slurm': 'SLURM_CAESAR_JOB_IMAGE',
+	},
+	'mrcnn': {
+		'kubernetes': ('MASKRCNN_JOB_IMAGE', 'mrcnn-job'),
+		'slurm': 'SLURM_MASKRCNN_JOB_IMAGE',
+	},
+	'aegean': {
+		'kubernetes': ('AEGEAN_JOB_IMAGE', 'aegean-job'),
+		'slurm': 'SLURM_AEGEAN_JOB_IMAGE',
+	},
+	'cutex': {
+		'kubernetes': ('CUTEX_JOB_IMAGE', 'cutex-job'),
+		'slurm': 'SLURM_CUTEX_JOB_IMAGE',
+	},
+	'classifier-cnn': {
+		'kubernetes': ('CNN_CLASSIFIER_JOB_IMAGE', 'cnn_classifier-job'),
+		'slurm': 'SLURM_CNN_CLASSIFIER_JOB_IMAGE',
+	},
+	'classifier-vit': {
+		'kubernetes': ('VIT_CLASSIFIER_JOB_IMAGE', 'vit_classifier-job'),
+		'slurm': 'SLURM_VIT_CLASSIFIER_JOB_IMAGE',
+		'app_mode': 'image',
+	},
+	'classifier-vit-catalog': {
+		'kubernetes': ('VIT_CLASSIFIER_JOB_IMAGE', 'vit_classifier_catalog-job'),
+		'slurm': 'SLURM_VIT_CLASSIFIER_JOB_IMAGE',
+		'app_mode': 'catalog',
+	},
+	'umap': {
+		'kubernetes': ('UMAP_JOB_IMAGE', 'umap-job'),
+		'slurm': 'SLURM_UMAP_JOB_IMAGE',
+	},
+	'outlier-finder': {
+		'kubernetes': ('OUTLIER_FINDER_JOB_IMAGE', 'outlier-finder-job'),
+		'slurm': 'SLURM_OUTLIER_FINDER_JOB_IMAGE',
+	},
+	'hdbscan': {
+		'kubernetes': ('HDBSCAN_JOB_IMAGE', 'hdbscan-job'),
+		'slurm': 'SLURM_HDBSCAN_JOB_IMAGE',
+	},
+	'similarity-search': {
+		'kubernetes': ('SIMSEARCH_JOB_IMAGE', 'simsearch-job'),
+		'slurm': 'SLURM_SIMSEARCH_JOB_IMAGE',
+	},
+	'caesar-yolo': {
+		'kubernetes': ('CAESAR_YOLO_JOB_IMAGE', 'caesar-yolo-job'),
+		'slurm': 'SLURM_CAESAR_YOLO_JOB_IMAGE',
+	},
+	'sfforecaster': {
+		'kubernetes': ('SFFORECASTER_JOB_IMAGE', 'sfforecaster-job'),
+		'slurm': 'SLURM_SFFORECASTER_JOB_IMAGE',
+	},
+	'fextractor': {
+		'kubernetes_label': 'fextractor-job',
+		'variants': {
+			'tf': (
+				'FEXTRACTOR_TF_JOB_IMAGE',
+				'SLURM_FEXTRACTOR_TF_JOB_IMAGE',
+			),
+			'torch': (
+				'FEXTRACTOR_TORCH_JOB_IMAGE',
+				'SLURM_FEXTRACTOR_TORCH_JOB_IMAGE',
+			),
+			'chronos': (
+				'FEXTRACTOR_CHRONOS_JOB_IMAGE',
+				'SLURM_FEXTRACTOR_CHRONOS_JOB_IMAGE',
+			),
+			'moirai': (
+				'FEXTRACTOR_MOIRAI_JOB_IMAGE',
+				'SLURM_FEXTRACTOR_MOIRAI_JOB_IMAGE',
+			),
+			'fats': (
+				'FEXTRACTOR_FATS_JOB_IMAGE',
+				'SLURM_FEXTRACTOR_FATS_JOB_IMAGE',
+			),
+			'licu': (
+				'FEXTRACTOR_LICU_JOB_IMAGE',
+				'SLURM_FEXTRACTOR_LICU_JOB_IMAGE',
+			),
+			'falcon': (
+				'FEXTRACTOR_FALCON_JOB_IMAGE',
+				'SLURM_FEXTRACTOR_FALCON_JOB_IMAGE',
+			),
+		},
+	},
+	'oxkat': {
+		'kubernetes': ('OXKAT_JOB_IMAGE', 'oxkat-job'),
+		'slurm': 'SLURM_OXKAT_JOB_IMAGE',
+	},
+}
+
+
+class JobApplicationConfigError(ValueError):
+	"""Unsupported job application or container variant."""
+
+
+def resolve_job_application(app_name, scheduler, run_opts=None):
+	"""Resolve trusted container settings for a supported application.
+
+	Returns:
+		dict containing image and app_mode, plus job_label
+		for Kubernetes.
+
+	Raises:
+		JobApplicationConfigError for unsupported selections.
+		KeyError for missing server configuration.
+	"""
+
+	if scheduler not in ('kubernetes', 'slurm'):
+		raise JobApplicationConfigError(
+			"Unsupported scheduler '%s'" % scheduler
+		)
+
+	spec = JOB_APPLICATIONS.get(app_name)
+
+	if spec is None:
+		raise JobApplicationConfigError(
+			"Unknown/unsupported app '%s'" % app_name
+		)
+
+	run_opts = run_opts or {}
+	app_mode = spec.get('app_mode', '')
+
+	if app_name == 'fextractor':
+		variant = run_opts.get('container_variant', '')
+		variant_keys = spec['variants'].get(variant)
+
+		if variant_keys is None:
+			raise JobApplicationConfigError(
+				"Unknown fextractor container variant '%s'" %
+				variant
+			)
+
+		if scheduler == 'kubernetes':
+			config_key = variant_keys[0]
+		else:
+			config_key = variant_keys[1]
+
+		job_label = spec['kubernetes_label']
+
+	elif scheduler == 'kubernetes':
+		config_key, job_label = spec['kubernetes']
+
+	else:
+		config_key = spec['slurm']
+		job_label = None
+
+	result = {
+		'image': current_app.config[config_key],
+		'app_mode': app_mode,
+	}
+
+	if scheduler == 'kubernetes':
+		result['job_label'] = job_label
+
+	return result
+
+
 #=================================
 #===      DATASETS
 #=================================
@@ -580,123 +746,26 @@ def submit_job_kubernetes(app_name, cmd_args, job_top_dir, username, run_opts):
 			logger.error(errmsg, action="submitjob", user=username)
 			return None
 
-	# - Set job options
-	app_mode= ""
-	if app_name=="caesar":
-		image= current_app.config['CAESAR_JOB_IMAGE']
-		job_label= 'caesar-job'
-
-	elif app_name=="mrcnn":
-		image= current_app.config['MASKRCNN_JOB_IMAGE']
-		job_label= 'mrcnn-job'
-
-	elif app_name=="aegean":
-		image= current_app.config['AEGEAN_JOB_IMAGE']
-		job_label= 'aegean-job'
-
-	elif app_name=="cutex":
-		image= current_app.config['CUTEX_JOB_IMAGE']
-		job_label= 'cutex-job'
-		
-	elif app_name=="classifier-cnn":
-		image= current_app.config['CNN_CLASSIFIER_JOB_IMAGE']
-		job_label= 'cnn_classifier-job'
-		
-	elif app_name=="classifier-vit":
-		image= current_app.config['VIT_CLASSIFIER_JOB_IMAGE']
-		job_label= 'vit_classifier-job'
-		app_mode= 'image'
-		
-	elif app_name=="classifier-vit-catalog":
-		image= current_app.config["VIT_CLASSIFIER_JOB_IMAGE"]
-		job_label= "vit_classifier_catalog-job"
-		app_mode= 'catalog'
-		
-	elif app_name=="umap":
-		image= current_app.config['UMAP_JOB_IMAGE']
-		job_label= 'umap-job'
-		
-	elif app_name=="outlier-finder":
-		image= current_app.config['OUTLIER_FINDER_JOB_IMAGE']
-		job_label= 'outlier-finder-job'
-		
-	elif app_name=="hdbscan":
-		image= current_app.config['HDBSCAN_JOB_IMAGE']
-		job_label= 'hdbscan-job'
-		
-	elif app_name=="similarity-search":
-		image= current_app.config['SIMSEARCH_JOB_IMAGE']
-		job_label= 'simsearch-job'
-
-	elif app_name=="caesar-yolo":
-		image= current_app.config['CAESAR_YOLO_JOB_IMAGE']
-		job_label= 'caesar-yolo-job'
-
-	elif app_name=="sfforecaster":
-		image= current_app.config['SFFORECASTER_JOB_IMAGE']
-		job_label= 'sfforecaster-job'
-		
-	elif app_name=="fextractor":
-		container_variant= run_opts.get(
-			"container_variant",
-			"",
+	# - Resolve application image, label and execution mode
+	try:
+		app_spec = resolve_job_application(
+			app_name,
+			'kubernetes',
+			run_opts
 		)
 
-		if container_variant=="tf":
-			image= current_app.config[
-				'FEXTRACTOR_TF_JOB_IMAGE'
-			]
-
-		elif container_variant=="torch":
-			image= current_app.config[
-				'FEXTRACTOR_TORCH_JOB_IMAGE'
-			]
-			
-		elif container_variant=="chronos":
-			image= current_app.config[
-				'FEXTRACTOR_CHRONOS_JOB_IMAGE'
-			]
-			
-		elif container_variant=="moirai":
-			image= current_app.config[
-				'FEXTRACTOR_MOIRAI_JOB_IMAGE'
-			]
-			
-		elif container_variant=="fats":
-			image= current_app.config[
-				'FEXTRACTOR_FATS_JOB_IMAGE'
-			]
-			
-		elif container_variant=="licu":
-			image= current_app.config[
-				'FEXTRACTOR_LICU_JOB_IMAGE'
-			]
-			
-		elif container_variant=="falcon":
-			image= current_app.config[
-				'FEXTRACTOR_FALCON_JOB_IMAGE'
-			]
-
-		else:
-			logger.warn(
-				"Unknown fextractor container variant '%s'!" %
-				container_variant,
-				action="submitjob",
-				user=username,
-			)
-			return None
-
-		job_label= 'fextractor-job'	
-		
-	elif app_name=="oxkat":
-		image= current_app.config['OXKAT_JOB_IMAGE']
-		job_label= 'oxkat-job'	
-		
-	else:
-		logger.warn("Unknown/unsupported app %s!" % app_name, action="submitjob", user=username)
+	except JobApplicationConfigError as exc:
+		logger.warn(
+			str(exc),
+			action="submitjob",
+			user=username
+		)
 		return None
 
-
+	image = app_spec['image']
+	job_label = app_spec['job_label']
+	app_mode = app_spec['app_mode']
+	
 	# - Create job object
 	if mount_rclone_vol:
 		job= jobmgr_kube.create_job_rclone(
@@ -774,106 +843,25 @@ def submit_job_slurm(
 			logger.error(errmsg, action="submitjob", user=username)
 			return None
 
-	# - Set job options
-	image= ''
-	app_mode= ''
-	if app_name=="caesar":
-		image= current_app.config['SLURM_CAESAR_JOB_IMAGE']
 
-	elif app_name=="mrcnn":
-		image= current_app.config['SLURM_MASKRCNN_JOB_IMAGE']
-
-	elif app_name=="aegean":
-		image= current_app.config['SLURM_AEGEAN_JOB_IMAGE']
-	
-	elif app_name=="cutex":
-		image= current_app.config['SLURM_CUTEX_JOB_IMAGE']
-	
-	elif app_name=="classifier-cnn":
-		image= current_app.config['SLURM_CNN_CLASSIFIER_JOB_IMAGE']
-		
-	elif app_name=="classifier-vit":
-		image= current_app.config['SLURM_VIT_CLASSIFIER_JOB_IMAGE']
-		app_mode = "image"
-	
-	elif app_name=="classifier-vit-catalog":
-		image= current_app.config["SLURM_VIT_CLASSIFIER_JOB_IMAGE"]
-		app_mode = "catalog"
-		
-	elif app_name=="umap":
-		image= current_app.config['SLURM_UMAP_JOB_IMAGE']
-		
-	elif app_name=="outlier-finder":
-		image= current_app.config['SLURM_OUTLIER_FINDER_JOB_IMAGE']
-		
-	elif app_name=="hdbscan":
-		image= current_app.config['SLURM_HDBSCAN_JOB_IMAGE']
-		
-	elif app_name=="similarity-search":
-		image= current_app.config['SLURM_SIMSEARCH_JOB_IMAGE']
-		
-	elif app_name=="caesar-yolo":
-		image= current_app.config['SLURM_CAESAR_YOLO_JOB_IMAGE']
-		
-	elif app_name=="sfforecaster":
-		image= current_app.config['SLURM_SFFORECASTER_JOB_IMAGE']
-			
-	elif app_name=="fextractor":
-		container_variant= run_opts.get(
-			"container_variant",
-			"",
+	# - Resolve application image and execution mode
+	try:
+		app_spec = resolve_job_application(
+			app_name,
+			'slurm',
+			run_opts
 		)
 
-		if container_variant=="tf":
-			image= current_app.config[
-				'SLURM_FEXTRACTOR_TF_JOB_IMAGE'
-			]
-
-		elif container_variant=="torch":
-			image= current_app.config[
-				'SLURM_FEXTRACTOR_TORCH_JOB_IMAGE'
-			]
-			
-		elif container_variant=="chronos":
-			image= current_app.config[
-				'SLURM_FEXTRACTOR_CHRONOS_JOB_IMAGE'
-			]
-			
-		elif container_variant=="moirai":
-			image= current_app.config[
-				'SLURM_FEXTRACTOR_MOIRAI_JOB_IMAGE'
-			]
-			
-		elif container_variant=="fats":
-			image= current_app.config[
-				'SLURM_FEXTRACTOR_FATS_JOB_IMAGE'
-			]
-			
-		elif container_variant=="licu":
-			image= current_app.config[
-				'SLURM_FEXTRACTOR_LICU_JOB_IMAGE'
-			]
-			
-		elif container_variant=="falcon":
-			image= current_app.config[
-				'SLURM_FEXTRACTOR_FALCON_JOB_IMAGE'
-			]
-
-		else:
-			logger.warn(
-				"Unknown fextractor container variant '%s'!" %
-				container_variant,
-				action="submitjob",
-				user=username,
-			)
-			return None		
-			
-	elif app_name=="oxkat":
-		image= current_app.config['SLURM_OXKAT_JOB_IMAGE']
-				
-	else:
-		logger.warn("Unknown/unsupported app %s!" % app_name, action="submitjob", user=username)
+	except JobApplicationConfigError as exc:
+		logger.warn(
+			str(exc),
+			action="submitjob",
+			user=username
+		)
 		return None
+
+	image = app_spec['image']
+	app_mode = app_spec['app_mode']
 
 	# - Prepare generic staged-container execution.
 	# - All image and application arguments originate from trusted
