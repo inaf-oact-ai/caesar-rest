@@ -691,18 +691,76 @@ def update_slurm_job(job_obj, res, job_collection):
 			logger.warn("Won't create output data tar file %s as job output directory %s not found ..." % (tar_file, job_dir), action="jobmonitor")
 
 	# - Update job & pipeline-associated job status
+	#try:
+	#	logger.info("Updating job %s state to %s (status=%s) ..." % (job_id, state, status), action="jobmonitor")
+	#	update_result= job_collection.update_one({'job_id':job_id},{'$set':{'state':state, 'status':status, 'exit_code':exit_code, 'elapsed_time':elapsed_time}}, upsert=False)
+	#except Exception as e:
+	#	errmsg= 'Exception caught when updating job ' + str(job_id) + ' in DB (err=' + str(e) + ')!'
+	#	logger.warn(errmsg, action="jobmonitor")
+	#	return -1	
+
+	#if update_result.matched_count == 1:
+	#	safe_sync_monitored_pipeline_job(
+	#		job_obj, job_collection, state, exit_code=exit_code
+	#	)
+
+
+	# - Apply monitoring observations only to active jobs.
+	# - RUNNING -> RUNNING updates remain permitted so elapsed time
+	#   and status information can continue to be refreshed.
+	# - Terminal states must not be overwritten by stale observations.
+	update_filter = {
+		'job_id': job_id,
+		'pid': job_obj['pid'],
+		'state': {
+			'$in': ['PENDING', 'STARTED', 'RUNNING']
+		}
+	}
+
+	# - CLEARED is meaningful only for a previously running job.
+	if state == 'CLEARED':
+		update_filter['state'] = 'RUNNING'
+
+	# - Update job & pipeline-associated job status.
 	try:
-		logger.info("Updating job %s state to %s (status=%s) ..." % (job_id, state, status), action="jobmonitor")
-		update_result= job_collection.update_one({'job_id':job_id},{'$set':{'state':state, 'status':status, 'exit_code':exit_code, 'elapsed_time':elapsed_time}}, upsert=False)
+		logger.info(
+			"Updating job %s state to %s (status=%s) ..." %
+			(job_id, state, status),
+			action="jobmonitor"
+		)
+
+		update_result = job_collection.update_one(
+			update_filter,
+			{
+				'$set': {
+					'state': state,
+					'status': status,
+					'exit_code': exit_code,
+					'elapsed_time': elapsed_time
+				}
+			},
+			upsert=False
+		)
+
 	except Exception as e:
-		errmsg= 'Exception caught when updating job ' + str(job_id) + ' in DB (err=' + str(e) + ')!'
+		errmsg = (
+			'Exception caught when updating job %s in DB (err=%s)!' %
+			(job_id, str(e))
+		)
 		logger.warn(errmsg, action="jobmonitor")
-		return -1	
+		return -1
 
 	if update_result.matched_count == 1:
 		safe_sync_monitored_pipeline_job(
 			job_obj, job_collection, state, exit_code=exit_code
 		)
+	else:
+		logger.info(
+			'Skipping stale Slurm monitoring update for job %s '
+			'(observed state=%s)' % (job_id, state),
+			action='jobmonitor'
+		)		
+		
 
 	return 0
 
