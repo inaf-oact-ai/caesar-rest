@@ -744,6 +744,215 @@ class SlurmJobManager(object):
 	#============================
 	#==     GET JOB STATUS
 	#============================
+	def normalize_accounting_job(self, job_obj, job_id):
+		"""Convert one SlurmDB job record to the legacy monitoring format.
+
+		Return None for missing, mismatched, malformed or nonterminal data.
+		Never infer successful execution from an ambiguous record.
+		"""
+
+		if not isinstance(job_obj, dict):
+			return None
+
+		# - Validate the returned Slurm job identity.
+		try:
+			requested_id = str(int(job_id))
+			returned_id = str(int(job_obj.get('job_id')))
+		except (TypeError, ValueError, OverflowError):
+			return None
+
+		if requested_id != returned_id:
+			return None
+
+		# - SlurmDB v0.0.36 represents state as an object.
+		state_obj = job_obj.get('state')
+		if not isinstance(state_obj, dict):
+			return None
+
+		raw_state = state_obj.get('current')
+		if not isinstance(raw_state, str):
+			return None
+
+		raw_state = raw_state.upper()
+
+		# - Exit status is structured, not the sacct "0:0" string.
+		exit_obj = job_obj.get('exit_code')
+		if not isinstance(exit_obj, dict):
+			return None
+
+		exit_status = exit_obj.get('status')
+		exit_code = exit_obj.get('return_code')
+
+		if isinstance(exit_code, bool) or not isinstance(exit_code, int):
+			return None
+
+		if exit_code < 0:
+			return None
+
+		if not isinstance(exit_status, str):
+			return None
+
+		exit_status = exit_status.strip().upper()
+
+		# - Missing exit status is not evidence of success or failure.
+		if not exit_status:
+			return None
+
+		# - A completed job is successful only with consistent
+		#   zero-exit-code evidence.
+		if raw_state == 'COMPLETED':
+			if exit_code == 0 and exit_status == 'SUCCESS':
+				state = 'SUCCESS'
+			elif exit_code != 0 or exit_status != 'SUCCESS':
+				state = 'FAILURE'
+
+		elif raw_state in (
+			'FAILED',
+			'NODE_FAIL',
+			'PREEMPTED',
+			'BOOT_FAIL',
+			'DEADLINE',
+			'OUT_OF_MEMORY'
+		):
+			state = 'FAILURE'
+
+		elif raw_state == 'TIMEOUT':
+			state = 'TIMED-OUT'
+
+		elif raw_state == 'CANCELLED':
+			state = 'CANCELED'
+
+		else:
+			# - Do not replace a controller observation with
+			#   accounting data that is pending or inconclusive.
+			return None
+
+		time_obj = job_obj.get('time') or {}
+		if not isinstance(time_obj, dict):
+			time_obj = {}
+
+		elapsed = time_obj.get('elapsed', 0)
+		if isinstance(elapsed, bool) or not isinstance(
+			elapsed, (int, float)
+		):
+			elapsed = 0
+
+		return {
+			'pid': requested_id,
+			'state': state,
+			'status': 'Slurm accounting state: %s' % raw_state,
+			'exit_code': exit_code,
+			'elapsed_time': elapsed
+		}
+
+
+	def get_accounting_job_status(self, job_id):
+		"""Retrieve an authoritative terminal job result from SlurmDB.
+
+		Return None if accounting is unavailable, reports an error,
+		or cannot establish the requested job's final outcome.
+		"""
+
+		# - Accept only a positive numeric Slurm job ID.
+		try:
+			if isinstance(job_id, bool):
+				return None
+
+			job_id_str = str(int(job_id))
+			if int(job_id_str) <= 0:
+				return None
+
+			if str(job_id).strip() != job_id_str:
+				return None
+		except (TypeError, ValueError, OverflowError):
+			return None
+
+		# - Reuse the existing JWT lifecycle.
+		if not self.is_token_active():
+			if self.generate_token() < 0:
+				logger.warn(
+					'Cannot refresh Slurm REST token for accounting',
+					action='jobstatus'
+				)
+				return None
+
+		headers = {
+			'Content-Type': 'application/json',
+			'X-SLURM-USER-NAME': self.username,
+			'X-SLURM-USER-TOKEN': self.token
+		}
+
+		# - The configured controller URL ends with /slurm/v0.0.36.
+		# - SlurmDB uses the same server with /slurmdb/v0.0.36.
+		controller_suffix = '/slurm/v0.0.36'
+
+		if not self.cluster_url.endswith(controller_suffix):
+			logger.warn(
+				'Unsupported Slurm controller URL for accounting',
+				action='jobstatus'
+			)
+			return None
+
+		base_url = self.cluster_url[:-len(controller_suffix)]
+		url = (
+			base_url +
+			'/slurmdb/v0.0.36/job/' +
+			job_id_str
+		)
+
+		try:
+			response = requests.get(
+				url,
+				headers=headers,
+				timeout=self.request_timeout
+			)
+			response.raise_for_status()
+			reply = response.json()
+
+		except requests.RequestException as exc:
+			logger.warn(
+				'Failed to retrieve Slurm accounting for job %s '
+				'(err=%s)' % (job_id_str, str(exc)),
+				action='jobstatus'
+			)
+			return None
+
+		except (ValueError, TypeError) as exc:
+			logger.warn(
+				'Invalid Slurm accounting JSON for job %s '
+				'(err=%s)' % (job_id_str, str(exc)),
+				action='jobstatus'
+			)
+			return None
+
+		if not isinstance(reply, dict):
+			return None
+
+		# - Slurm REST can return HTTP 200 with errors in the body.
+		if reply.get('errors'):
+			logger.warn(
+				'Slurm accounting reported errors for job %s' %
+				job_id_str,
+				action='jobstatus'
+			)
+			return None
+
+		job_records = reply.get('jobs')
+
+		if not isinstance(job_records, list):
+			return None
+
+		# - The job-ID endpoint must return one matching record.
+		# - Never choose an arbitrary record from an ambiguous reply.
+		if len(job_records) != 1:
+			return None
+
+		return self.normalize_accounting_job(
+			job_records[0],
+			job_id_str
+		)	
+	
+	
 	def get_job_statuses(self, job_pids):
 		""" Retrieve job status for selected list of jobs """
 	
