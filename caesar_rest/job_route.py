@@ -58,6 +58,8 @@ from caesar_rest import jobmgr_kube
 from caesar_rest import jobmgr_slurm
 from caesar_rest.pipeline.submission import job_binding as pipeline_job_binding
 from caesar_rest.pipeline.staging import workspace as pipeline_workspace
+from caesar_rest.pipeline.submission import v2_rest_submission as pipeline_v2_submission
+
 
 # Get logger
 from caesar_rest import logger
@@ -355,6 +357,52 @@ def submit_job():
 		return make_response(jsonify(res),400)
 	logger.info("Received job data %s " % str(req_data), action="submitjob", user=username)
 
+
+	# - Explicit V2 submission path.
+	# - V1 remains the default, unchanged.
+	# - Do not enter legacy input processing or legacy claim handling
+	#   for a V2 request.
+	version = req_data.get('submission_version', 1)
+
+	if type(version) is not int or version not in (1, 2):
+		res['state'] = 'ABORTED'
+		res['status'] = 'Unsupported submission_version'
+		return make_response(jsonify(res), 400)
+
+	if version == 2:
+		try:
+			v2_result = pipeline_v2_submission.submit_v2(
+				username,
+				req_data,
+				resolve_job_application
+			)
+			return make_response(jsonify(v2_result), 200)
+
+		except pipeline_job_binding.manager.PipelineError as exc:
+			logger.error(
+				"V2 submission failed: %s" % exc,
+				action="submitjob",
+				user=username
+			)
+			res['state'] = 'ABORTED'
+			res['status'] = str(exc)
+			return make_response(jsonify(res), exc.status)
+
+		except Exception:
+			logger.exception(
+				"Unexpected V2 submission failure",
+				action="submitjob"
+			)
+			res['state'] = 'ABORTED'
+			res['status'] = 'V2 submission failed; inspect run state before retry'
+			return make_response(jsonify(res), 500)
+
+	if version == 1 and 'submission_version' in req_data:
+		req_data = dict(req_data)
+		req_data.pop('submission_version')	
+
+
+	# - Check app name & job options
 	app_name = req_data['app']
 	job_options = req_data['job_options']
 	if not app_name:

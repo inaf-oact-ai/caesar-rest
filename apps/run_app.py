@@ -389,6 +389,22 @@ def get_args():
 		help='Maximum nesting depth of a retained directory artifact'
 	)	
 	
+	parser.add_argument(
+		'--pipeline_artifact_retention_root_cluster',
+		dest='pipeline_artifact_retention_root_cluster',
+		default='',
+		type=str,
+		help='Slurm-visible root for retained pipeline artifacts (V2)'
+	)
+
+	parser.add_argument(
+		'--pipeline_v2_applications',
+		dest='pipeline_v2_applications',
+		default='{}',
+		type=str,
+		help='JSON object defining V2 application policies'
+	)	
+	
 	# - Dynamic dataset registry options
 	parser.add_argument(
 		'--dataset_registry_enabled',
@@ -626,7 +642,15 @@ pipeline_artifact_retention_max_file_bytes = args.pipeline_artifact_retention_ma
 pipeline_artifact_retention_max_directory_bytes = args.pipeline_artifact_retention_max_directory_bytes
 pipeline_artifact_retention_max_directory_entries = args.pipeline_artifact_retention_max_directory_entries
 pipeline_artifact_retention_max_directory_depth = args.pipeline_artifact_retention_max_directory_depth
+pipeline_artifact_retention_root_cluster = args.pipeline_artifact_retention_root_cluster.strip()
 
+try:
+	pipeline_v2_applications = json.loads(args.pipeline_v2_applications)
+except (ValueError, TypeError):
+	logger.error("Invalid pipeline V2 application policy JSON")
+	sys.exit(1)
+
+		
 # - Validate retention configuration
 if pipeline_artifact_retention_root:
 	if (
@@ -654,6 +678,34 @@ if (
 		"Pipeline artifact retention directory limits must be positive"
 	)
 	sys.exit(1)
+
+	
+if pipeline_artifact_retention_root_cluster:
+	if (
+		not os.path.isabs(pipeline_artifact_retention_root_cluster)
+		or os.path.normpath(pipeline_artifact_retention_root_cluster)
+		!= pipeline_artifact_retention_root_cluster
+		or pipeline_artifact_retention_root_cluster == '/'
+	):
+		logger.error("Invalid cluster artifact retention root")
+		sys.exit(1)
+	
+if not isinstance(pipeline_v2_applications, dict):
+	logger.error("V2 application policies must be a JSON object")
+	sys.exit(1)
+
+if pipeline_v2_applications:
+	if not pipeline_staged_execution_enabled:
+		logger.error("V2 requires staged execution to be enabled")
+		sys.exit(1)
+
+	if not pipeline_artifact_retention_root:
+		logger.error("V2 requires an application artifact retention root")
+		sys.exit(1)
+
+	if not pipeline_artifact_retention_root_cluster:
+		logger.error("V2 requires a cluster artifact retention root")
+		sys.exit(1)
 
 		
 # - Dynamic dataset registry options
@@ -790,6 +842,8 @@ config.PIPELINE_ARTIFACT_RETENTION_MAX_FILE_BYTES = pipeline_artifact_retention_
 config.PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_BYTES = pipeline_artifact_retention_max_directory_bytes
 config.PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_ENTRIES = pipeline_artifact_retention_max_directory_entries
 config.PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_DEPTH = pipeline_artifact_retention_max_directory_depth
+config.PIPELINE_ARTIFACT_RETENTION_ROOT_CLUSTER = pipeline_artifact_retention_root_cluster
+config.PIPELINE_V2_APPLICATIONS = pipeline_v2_applications
 
 # - Create data manager (DEPRECATED BY MONGO)
 ##logger.info("Creating data manager ...")

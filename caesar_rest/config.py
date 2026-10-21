@@ -168,6 +168,18 @@ class Config(object):
 	PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_ENTRIES = 100000
 	PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_DEPTH = 16
 
+	# - V2 is disabled for every application by default.
+	# - Each enabled application must explicitly define:
+	#   1) scientific parameters and accepted values
+	#   2) mapping from container CLI options to frozen input names
+	PIPELINE_V2_APPLICATIONS = {}
+
+	# - Cluster-visible root corresponding to the application-side
+	#   PIPELINE_ARTIFACT_RETENTION_ROOT.
+	# - Must be explicitly configured for V2 execution.
+	PIPELINE_ARTIFACT_RETENTION_ROOT_CLUSTER = ''
+
+
 	# - DATASET app options
 	# - Dynamic dataset registry options
 	#
