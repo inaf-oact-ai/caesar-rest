@@ -78,10 +78,14 @@ def setup(monkeypatch):
     })
     events = []
     monkeypatch.setattr(v2, 'mongo', SimpleNamespace(db=db))
+
     monkeypatch.setattr(v2, 'jobmgr_slurm', SimpleNamespace(
         app_jobdir='/jobs/app',
         cluster_jobdir='/jobs/cluster',
+        app_datadir='/data/app',
+        cluster_datadir='/data/cluster',
     ))
+    
     monkeypatch.setattr(v2, 'utils', SimpleNamespace(get_uuid=lambda: 'testjob'))
     monkeypatch.setattr(manager, 'get_pipeline', lambda owner, pipeline_id: {
         'owner': owner, 'pipeline_id': pipeline_id
@@ -127,6 +131,13 @@ def test_successful_submission_registers_job(setup):
         '/containers/oxkat.sif', ['--stage=1GC'],
         {'project-info': 'getinfo'}
     )
+    
+    kwargs = events[0][2]
+
+    assert kwargs['dataset_app_root'] == '/data/app'
+    assert kwargs['dataset_cluster_root'] == '/data/cluster'
+    assert kwargs['dataset_input_name'] == 'measurement_set'
+    
     doc = db.jobs.records[0]
     assert doc['pipeline_id'] == 'p1'
     assert doc['run_id'] == 'r2'
@@ -159,15 +170,74 @@ def test_unconfigured_application_fails_closed(setup):
     assert not events
 
 
-def test_mixed_dataset_artifact_rejected(setup):
+def test_mixed_dataset_artifact_submission(setup):
     app, db, events = setup
+
     db.pipeline_runs.run['dataset_id'] = 'dataset1'
+
+    policy = app.config['PIPELINE_V2_APPLICATIONS']['oxkat']
+    policy['dataset_input_name'] = 'measurement_set'
+    policy['input_options'] = {
+        'project-info': 'getinfo',
+        'input-ms': 'measurement_set'
+    }
+
     with app.app_context():
-        with pytest.raises(manager.PipelineError, match='artifact-only'):
-            v2.submit_v2('alice', payload(), resolve_application)
-    assert not events
+        result = v2.submit_v2(
+            'alice', payload(), resolve_application
+        )
 
+    assert result['job_id'] == 'testjob'
+    assert [event[0] for event in events] == ['prepare', 'submit']
 
+    prepare_args = events[0][1]
+    prepare_kwargs = events[0][2]
+
+    assert prepare_args[12] == {
+        'project-info': 'getinfo',
+        'input-ms': 'measurement_set'
+    }
+
+    assert prepare_kwargs['dataset_app_root'] == '/data/app'
+    assert prepare_kwargs['dataset_cluster_root'] == '/data/cluster'
+    assert prepare_kwargs['dataset_input_name'] == 'measurement_set'
+
+def test_dataset_only_getinfo_submission(setup):
+    app, db, events = setup
+
+    db.pipeline_runs.run['dataset_id'] = 'dataset1'
+    db.pipeline_runs.run['input_artifacts'] = []
+    db.pipeline_runs.run['parameters'] = {'stage': 'GET_INFO'}
+
+    app.config['PIPELINE_V2_APPLICATIONS']['oxkat'] = {
+        'parameters': {
+            'stage': ['GET_INFO']
+        },
+        'dataset_input_name': 'measurement_set',
+        'input_options': {
+            'input-ms': 'measurement_set'
+        }
+    }
+
+    with app.app_context():
+        result = v2.submit_v2(
+            'alice',
+            payload(job_options={'stage': 'GET_INFO'}),
+            resolve_application
+        )
+
+    assert result['job_id'] == 'testjob'
+    assert [event[0] for event in events] == ['prepare', 'submit']
+
+    prepare_args = events[0][1]
+
+    assert prepare_args[11] == ['--stage=GET_INFO']
+    assert prepare_args[12] == {
+        'input-ms': 'measurement_set'
+    }
+
+    assert len(db.jobs.records) == 1
+    
 def test_policy_rejects_unmapped_input(setup):
     app, db, events = setup
     app.config['PIPELINE_V2_APPLICATIONS']['oxkat']['input_options'] = {

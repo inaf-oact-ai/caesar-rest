@@ -72,10 +72,50 @@ def test_unbound_run_is_rejected_without_claim(monkeypatch):
 	assert [x[0] for x in calls] == ['read']
 
 
-def test_mixed_dataset_rejected_without_claim(monkeypatch):
+def test_mixed_dataset_claim_and_preparation(monkeypatch):
 	run = _run()
 	run['dataset_id'] = 'dataset1'
+
 	db, calls, _ = _setup(monkeypatch, run)
-	with pytest.raises(manager.PipelineError):
-		claimed.claim_and_prepare_v2(db, *_args())
-	assert [x[0] for x in calls] == ['read']
+
+	result = claimed.claim_and_prepare_v2(
+		db, *_args(),
+		dataset_app_root='/data/app',
+		dataset_cluster_root='/data/cluster',
+		dataset_input_name='measurement_set'
+	)
+
+	assert [x[0] for x in calls] == [
+		'read', 'claim', 'prepare'
+	]
+
+	assert calls[1][2]['dataset_id'] == 'dataset1'
+	assert calls[1][2]['require_dataset_binding'] is True
+
+	assert calls[2][2]['dataset_app_root'] == '/data/app'
+	assert calls[2][2]['dataset_cluster_root'] == '/data/cluster'
+	assert calls[2][2]['dataset_input_name'] == 'measurement_set'
+
+	assert result['assets']['version'] == 2
+	
+	
+def test_dataset_only_claim_and_preparation(monkeypatch):
+	run = _run()
+	run['dataset_id'] = 'dataset1'
+	run['input_artifacts'] = []
+
+	db, calls, _ = _setup(monkeypatch, run)
+
+	result = claimed.claim_and_prepare_v2(
+		db, *_args(),
+		dataset_app_root='/data/app',
+		dataset_cluster_root='/data/cluster'
+	)
+
+	assert [x[0] for x in calls] == [
+		'read', 'claim', 'prepare'
+	]
+
+	assert calls[1][2]['dataset_id'] == 'dataset1'
+	assert calls[1][2]['require_dataset_binding'] is True
+	assert result['assets']['version'] == 2

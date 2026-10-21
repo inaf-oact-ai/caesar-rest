@@ -53,26 +53,64 @@ def build_multi_input_specs(workspace_cluster, sources, image, arguments,
 	seen = set()
 	staging_inputs = []
 	for item in sources:
-			
-		if not isinstance(item, dict) or set(item) not in (
+		if not isinstance(item, dict):
+			raise MultiInputSpecError('Invalid trusted input descriptor')
+
+		# - Authorized read-only dataset reference.
+		# - No size/hash contract: the source is not copied.
+		if set(item) == {'input_name', 'source', 'mode'}:
+			if item['mode'] != 'reference_ro':
+				raise MultiInputSpecError('Invalid reference mode')
+
+			name = item['input_name']
+			if not isinstance(name, str) or not _NAME.fullmatch(name) or name in seen:
+				raise MultiInputSpecError('Duplicate or invalid input name')
+
+			source = _path(item['source'])
+			if (
+				source == workspace_cluster
+				or _within(source, workspace_cluster)
+				or _within(workspace_cluster, source)
+			):
+				raise MultiInputSpecError('Reference overlaps workspace')
+
+			seen.add(name)
+			staging_inputs.append({
+				'name': name,
+				'source': source,
+				'mode': 'reference_ro',
+				'writable': False
+			})
+			continue
+
+		# - Existing integrity-verified private-copy input.
+		if set(item) not in (
 			{'input_name', 'source', 'kind', 'size_bytes', 'sha256'},
 			{'input_name', 'source', 'kind', 'size_bytes', 'manifest_entries'}
 		):
 			raise MultiInputSpecError('Invalid trusted input descriptor')
-			
-		name, source, kind, size = (item[x] for x in ('input_name', 'source', 'kind', 'size_bytes'))
+
+		name, source, kind, size = (
+			item[x]
+			for x in ('input_name', 'source', 'kind', 'size_bytes')
+		)
+
 		if not isinstance(name, str) or not _NAME.fullmatch(name) or name in seen:
 			raise MultiInputSpecError('Duplicate or invalid input name')
-		
+
 		seen.add(name)
-		
 		source = _path(source)
-		if source == workspace_cluster or _within(source, workspace_cluster) or _within(workspace_cluster, source):
+
+		if (
+			source == workspace_cluster
+			or _within(source, workspace_cluster)
+			or _within(workspace_cluster, source)
+		):
 			raise MultiInputSpecError('Input source overlaps workspace')
-		
+
 		if kind not in ('file', 'directory') or type(size) is not int or size < 0:
 			raise MultiInputSpecError('Invalid input type or size')
-		
+
 		try:
 			validate_expected(item, kind)
 		except ValueError as exc:
@@ -92,7 +130,8 @@ def build_multi_input_specs(workspace_cluster, sources, image, arguments,
 		else:
 			descriptor['manifest_entries'] = item['manifest_entries']
 
-		staging_inputs.append(descriptor)			
+		staging_inputs.append(descriptor)	
+	
 			
 	options = {}
 	for option, name in input_options.items():
@@ -134,18 +173,26 @@ def validate_multi_input_pair(staging, execution):
 	fresh = build_multi_input_specs(
 		execution['container_workspace'],
 		[
-			{
-				'input_name': x.get('name'),
-				'source': x.get('source'),
-				'kind': x.get('kind'),
-				'size_bytes': x.get('size_bytes'),
-				**(
-					{'sha256': x['sha256']}
-					if 'sha256' in x
-					else {'manifest_entries': x.get('manifest_entries')}
-				)
-			}
-			for x in staging['inputs']
+			(
+				{
+					'input_name': item.get('name'),
+					'source': item.get('source'),
+					'mode': 'reference_ro'
+				}
+				if item.get('mode') == 'reference_ro'
+				else {
+					'input_name': item.get('name'),
+					'source': item.get('source'),
+					'kind': item.get('kind'),
+					'size_bytes': item.get('size_bytes'),
+					**(
+						{'sha256': item['sha256']}
+						if 'sha256' in item
+						else {'manifest_entries': item.get('manifest_entries')}
+					)
+				}
+			)
+			for item in staging['inputs']
 		],
 		execution['image'],
 		execution['arguments'],

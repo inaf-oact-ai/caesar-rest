@@ -43,9 +43,13 @@ def _trusted_reference_specs(base):
 			'Cannot read trusted staging specification: %s' % exc
 		)
 
-	if not isinstance(spec, dict) or spec.get('version') != 1:
+	if (
+		not isinstance(spec, dict)
+		or type(spec.get('version', 1)) is not int
+		or spec.get('version', 1) not in (1, 2)
+	):
 		raise StagingError(
-			'Read-only references require a v1 staging specification'
+			'Unsupported trusted reference specification'
 		)
 
 	items = spec.get('inputs')

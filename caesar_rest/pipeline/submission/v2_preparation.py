@@ -42,7 +42,10 @@ def prepare_v2_submission(db, owner, pipeline_id, node_id, run_id, job_id,
 		retention_root_cluster, image, arguments, input_options,
 		max_directory_bytes=1024 * 1024 * 1024 * 1024,
 		max_directory_entries=100000, max_directory_depth=16,
-		submission_token=None):
+		submission_token=None,
+		dataset_app_root=None,
+		dataset_cluster_root=None,
+		dataset_input_name='measurement_set'):
 	"""Create one fresh workspace with trusted V2 specs and isolated worker.
 
 	Returns *internal* workspace and asset paths for a subsequent trusted
@@ -84,8 +87,8 @@ def prepare_v2_submission(db, owner, pipeline_id, node_id, run_id, job_id,
 		)
 	
 	
-	if not run.get('input_artifacts'):
-		raise manager.PipelineError('Downstream run has no frozen inputs', 409)
+	if not run.get('input_artifacts') and run.get('dataset_id') is None:
+		raise manager.PipelineError('V2 run has no inputs', 409)
 
 	app_root = _canonical_root(job_root_app, 'application job root')
 	cluster_root = _canonical_root(job_root_cluster, 'cluster job root')
@@ -120,7 +123,10 @@ def prepare_v2_submission(db, owner, pipeline_id, node_id, run_id, job_id,
 			max_directory_bytes=max_directory_bytes,
 			max_directory_entries=max_directory_entries,
 			max_directory_depth=max_directory_depth,
-			submission_token=submission_token
+			submission_token=submission_token,
+			dataset_app_root=dataset_app_root,
+			dataset_cluster_root=dataset_cluster_root,
+			dataset_input_name=dataset_input_name
 		)		
 		
 		if staging.get('version') != 2 or execution.get('version') != 2:

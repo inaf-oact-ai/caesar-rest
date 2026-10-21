@@ -11,6 +11,11 @@ import hashlib
 import json
 
 from caesar_rest.pipeline import manager
+from caesar_rest import dataset_registry
+from caesar_rest.pipeline.staging.submission_specs import (
+	_translate,
+	PipelineSubmissionError
+)
 from caesar_rest.pipeline.artifacts import binding
 from caesar_rest.pipeline.artifacts import retention
 from caesar_rest.pipeline.staging import multi_input_specs as specs
@@ -35,12 +40,14 @@ def _safe_directory(path):
 	except (OSError, ValueError) as exc:
 		raise manager.PipelineError('Unsafe or unavailable retained directory', 409) from exc
 
-
 def build_bound_v2_specs(db, owner, downstream_run, retention_root_app,
 		retention_root_cluster, workspace_cluster, image, arguments, input_options,
 		max_directory_bytes=1024 * 1024 * 1024 * 1024,
 		max_directory_entries=100000, max_directory_depth=16,
-		submission_token=None):
+		submission_token=None,
+		dataset_app_root=None,
+		dataset_cluster_root=None,
+		dataset_input_name='measurement_set'):
 	"""Revalidate immutable bindings and return a trusted staging/execution pair.
 
 	``downstream_run`` must come from an owner-scoped DB lookup, never raw JSON.
@@ -68,10 +75,19 @@ def build_bound_v2_specs(db, owner, downstream_run, retention_root_app,
 			raise manager.PipelineError('Downstream submission claim mismatch', 409)	
 		
 	manager.get_pipeline(owner, pipeline_id)
-	stored = downstream_run.get('input_artifacts')
-	if not isinstance(stored, list) or not 1 <= len(stored) <= 32:
-		raise manager.PipelineError('Downstream run has no frozen inputs', 409)
 	
+	stored = downstream_run.get('input_artifacts')
+	if not isinstance(stored, list):
+		raise manager.PipelineError('Invalid frozen inputs', 409)
+
+	dataset_id = downstream_run.get('dataset_id')
+
+	if not stored and dataset_id is None:
+		raise manager.PipelineError('V2 run has no inputs', 409)
+
+	if len(stored) + int(dataset_id is not None) > 32:
+		raise manager.PipelineError('Too many V2 inputs', 409)	
+		
 	if not isinstance(downstream_run.get('input_runs'), list):
 		raise manager.PipelineError('Downstream parent runs are invalid', 409)
 	
@@ -89,20 +105,79 @@ def build_bound_v2_specs(db, owner, downstream_run, retention_root_app,
 		request.append({'input_name': name, 'source_run_id': item.get('source_run_id'),
 			'artifact_index': item.get('artifact_index')})
 			
-	app_root = _root(retention_root_app)
-	cluster_root = _root(retention_root_cluster)
-	
-	# Recompute complete bindings from the current authoritative MongoDB records.
-	# This checks ownership, source status, bytes and cryptographic integrity.
-	verified = binding.bind_inputs(db, owner, pipeline_id, request, app_root,
-		max_directory_bytes=max_directory_bytes,
-		max_directory_entries=max_directory_entries,
-		max_directory_depth=max_directory_depth)
-	
-	if verified != stored:
-		raise manager.PipelineError('Frozen artifact identity or checksum changed', 409)
-	
 	inputs = []
+
+	if stored:
+		app_root = _root(retention_root_app)
+		cluster_root = _root(retention_root_cluster)
+
+		# - Preserve existing frozen artifact verification.
+		verified = binding.bind_inputs(
+			db, owner, pipeline_id, request, app_root,
+			max_directory_bytes=max_directory_bytes,
+			max_directory_entries=max_directory_entries,
+			max_directory_depth=max_directory_depth
+		)
+
+		if verified != stored:
+			raise manager.PipelineError(
+				'Frozen artifact identity or checksum changed', 409
+			)
+	else:
+		verified = []
+
+	# - Add a registered dataset as a trusted read-only reference.
+	if dataset_id is not None:
+		if (
+			not isinstance(dataset_input_name, str)
+			or not _NAME.fullmatch(dataset_input_name)
+			or dataset_input_name in {
+				item['input_name'] for item in verified
+			}
+		):
+			raise manager.PipelineError(
+				'Invalid or conflicting dataset input name', 409
+			)
+
+		if not dataset_app_root or not dataset_cluster_root:
+			raise manager.PipelineError(
+				'Dataset storage roots are not configured', 503
+			)
+
+		try:
+			source_app = dataset_registry.resolve_input_dataset(dataset_id)
+
+			if not os.path.isdir(source_app):
+				raise manager.PipelineError(
+					'V2 reference dataset must be a directory', 409
+				)
+
+			_safe_directory(source_app)
+
+			source_cluster = _translate(
+				source_app,
+				dataset_app_root,
+				dataset_cluster_root
+			)
+
+		except dataset_registry.DatasetError as exc:
+			raise manager.PipelineError(
+				str(exc), exc.status
+			) from exc
+
+		except PipelineSubmissionError as exc:
+			raise manager.PipelineError(
+				'Invalid dataset storage mapping', 409
+			) from exc
+
+		inputs.append({
+			'input_name': dataset_input_name,
+			'source': source_cluster,
+			'mode': 'reference_ro'
+		})	
+	
+	
+	
 	for item in verified:
 		base = retention.retained_directory(app_root, owner, pipeline_id,
 			item['source_run_id'])

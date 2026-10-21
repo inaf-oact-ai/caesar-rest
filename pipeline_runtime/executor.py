@@ -147,13 +147,6 @@ def execute(workspace, spec_path, runner=subprocess.run):
 		include_references=True
 	)	
 	
-	# Read-only references are supported only by the v1 contract.
-	if specification_version(spec, ContainerExecutionError) == 2:
-		if references:
-			raise ContainerExecutionError(
-				'Reference inputs are not supported in v2'
-			)	
-
 	if specification_version(spec, ContainerExecutionError) == 2:
 		if set(paths) != set(spec['input_options'].values()):
 			raise ContainerExecutionError(

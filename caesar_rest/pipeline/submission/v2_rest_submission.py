@@ -65,15 +65,22 @@ def submit_v2(owner, request_data, resolve_application):
 		'owner': owner, 'pipeline_id': pipeline_id, 'node_id': node_id,
 		'run_id': run_id, 'status': 'PLANNED'
 	})
+	
 	if run is None:
 		raise manager.PipelineError('PLANNED pipeline run not found', 409)
+	
 	if run.get('application') != app or run.get('parameters') != options:
 		raise manager.PipelineError('V2 request does not match reserved run', 409)
-	if run.get('dataset_id') is not None or not run.get('input_artifacts'):
-		raise manager.PipelineError('V2 requires artifact-only frozen inputs', 409)
+		
+	if not isinstance(run.get('input_artifacts'), list):
+		raise manager.PipelineError('Invalid frozen input list', 409)
+
+	if not run['input_artifacts'] and run.get('dataset_id') is None:
+		raise manager.PipelineError('V2 run has no inputs', 409)
 
 	if current_app.config.get('JOB_SCHEDULER') != 'slurm':
 		raise manager.PipelineError('V2 requires Slurm', 409)
+	
 	if not current_app.config.get('PIPELINE_STAGED_EXECUTION_ENABLED', False):
 		raise manager.PipelineError('Staged execution disabled', 409)
 
@@ -84,7 +91,29 @@ def submit_v2(owner, request_data, resolve_application):
 	input_options = policy.get('input_options')
 	if not isinstance(input_options, dict) or not input_options:
 		raise manager.PipelineError('Missing V2 input policy', 503)
-	bound_names = {item.get('input_name') for item in run['input_artifacts']}
+	
+	
+	bound_names = {
+		item.get('input_name')
+		for item in run['input_artifacts']
+	}
+
+	dataset_input_name = policy.get(
+		'dataset_input_name', 'measurement_set'
+	)
+
+	if run.get('dataset_id') is not None:
+		if (
+			not isinstance(dataset_input_name, str)
+			or not _OPTION.fullmatch(dataset_input_name)
+			or dataset_input_name in bound_names
+		):
+			raise manager.PipelineError(
+				'Invalid or conflicting dataset input name', 409
+			)
+
+		bound_names.add(dataset_input_name)
+	
 	if (set(input_options.values()) != bound_names
 			or len(input_options) != len(bound_names)
 			or not all(isinstance(k, str) and _OPTION.fullmatch(k)
@@ -103,8 +132,12 @@ def submit_v2(owner, request_data, resolve_application):
 	owner_job_cluster = job_root_cluster.rstrip('/') + '/' + owner
 	retention_root_app = current_app.config.get('PIPELINE_ARTIFACT_RETENTION_ROOT')
 	retention_root_cluster = current_app.config.get('PIPELINE_ARTIFACT_RETENTION_ROOT_CLUSTER')
-	if not retention_root_app or not retention_root_cluster:
-		raise manager.PipelineError('V2 retention roots are not configured', 503)
+	
+	if run['input_artifacts']:
+		if not retention_root_app or not retention_root_cluster:
+			raise manager.PipelineError(
+				'V2 retention roots are not configured', 503
+			)
 
 	# Preparation is responsible for claim failure persistence when needed.
 	prepared = claim_and_prepare_v2(
@@ -117,8 +150,12 @@ def submit_v2(owner, request_data, resolve_application):
 		max_directory_entries=current_app.config.get(
 			'PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_ENTRIES', 100000),
 		max_directory_depth=current_app.config.get(
-			'PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_DEPTH', 16)
+			'PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_DEPTH', 16),
+		dataset_app_root=jobmgr_slurm.app_datadir,
+		dataset_cluster_root=jobmgr_slurm.cluster_datadir,
+		dataset_input_name=dataset_input_name
 	)
+	
 	# This function manages one-shot scheduler intent and run finalization.
 	submitted = submit_claimed_v2(
 		prepared, jobmgr_slurm, job_id,

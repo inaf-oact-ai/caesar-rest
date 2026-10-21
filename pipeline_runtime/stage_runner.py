@@ -53,17 +53,32 @@ def prepare(spec_path, workspace):
 				{
 					'name', 'source', 'kind', 'size_bytes',
 					'mode', 'writable', 'manifest_entries'
+				},
+				{
+					'name', 'source', 'mode', 'writable'
 				}
 			):
 				raise StagingError('Invalid v2 input descriptor')
 
-			if item['mode'] != 'copy' or item['writable'] is not True:
+			if item['mode'] == 'reference_ro':
+				if (
+					set(item) != {'name', 'source', 'mode', 'writable'}
+					or item['writable'] is not False
+				):
+					raise StagingError('Invalid v2 reference descriptor')
+
+			elif item['mode'] == 'copy':
+				if item['writable'] is not True:
+					raise StagingError('Invalid v2 copied-input permissions')
+
+				try:
+					validate_expected(item, item['kind'])
+				except (ValueError, KeyError) as exc:
+					raise StagingError('Invalid v2 integrity contract') from exc
+
+			else:
 				raise StagingError('Unsupported v2 input strategy')
-				
-			try:
-				validate_expected(item, item['kind'])
-			except (ValueError, KeyError) as exc:
-				raise StagingError('Invalid v2 integrity contract') from exc	
+
 
 	return stage_inputs(spec.get('inputs'), str(workspace_path))
 	
