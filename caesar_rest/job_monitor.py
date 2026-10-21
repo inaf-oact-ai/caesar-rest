@@ -442,25 +442,23 @@ def monitor_slurm_jobs(job_objs, job_collection):
 		logger.warn("None reply returned from Slurm client get_job_statuses(), cannot update job!", action="jobmonitor")
 		return -1
 
-	if not resdict:
-		logger.warn("Empty reply returned from Slurm client get_job_statuses(), will set previously RUNNING jobs to CLEARED state ...", action="jobmonitor")
-		for job_obj in job_objs:
-			job_id= job_obj['job_id']
-			job_pid= str(job_obj['pid'])
-			job_state= job_obj['state']
-			elapsed= job_obj['elapsed_time']
-
-			if job_state=='RUNNING':
-				resdict[job_pid]= {
-					'state': 'CLEARED',
-					'status': 'Job was presumably cleared and finished with unknown state',
-					'elapsed_time': elapsed,
-					'exit_code': -1
-				}
-				
-
-	print("resdict")
-	print(resdict)
+	#if not resdict:
+	#	logger.warn("Empty reply returned from Slurm client get_job_statuses(), will set previously RUNNING jobs to CLEARED state ...", action="jobmonitor")
+	#	for job_obj in job_objs:
+	#		job_id= job_obj['job_id']
+	#		job_pid= str(job_obj['pid'])
+	#		job_state= job_obj['state']
+	#		elapsed= job_obj['elapsed_time']
+	#		if job_state=='RUNNING':
+	#			resdict[job_pid]= {
+	#				'state': 'CLEARED',
+	#				'status': 'Job was presumably cleared and finished with unknown state',
+	#				'elapsed_time': elapsed,
+	#				'exit_code': -1
+	#			}
+	#			
+	#print("resdict")
+	#print(resdict)
 
 	# - Loop over jobs and update their status
 	for job_obj in job_objs:
@@ -470,20 +468,26 @@ def monitor_slurm_jobs(job_objs, job_collection):
 		elapsed= job_obj['elapsed_time']
 
 		# - Search status data with this pid
-		if job_pid not in resdict:
-			#logger.warn("Cannot find Slurm job pid %s in dictionary of job status data, skip to next job ..." % job_pid, action="jobmonitor")
-			#continue
-			logger.warn("Cannot find Slurm job pid %s in dictionary of job status data, probably it was cleared, will set to CLEARED if it was previously RUNNING ..." % job_pid, action="jobmonitor")
-			res= {}
-			if job_state=='RUNNING':
-				res= {
-					'state': 'CLEARED',
-					'status': 'Job was presumably cleared and finished with unknown state',
-					'elapsed_time': elapsed,
-					'exit_code': -1
-				}
-		else:	
-			res= resdict[job_pid]
+		#if job_pid not in resdict:
+		#	logger.warn("Cannot find Slurm job pid %s in dictionary of job status data, probably it was cleared, will set to CLEARED if it was previously RUNNING ..." % job_pid, action="jobmonitor")
+		#	res= {}
+		#	if job_state=='RUNNING':
+		#		res= {
+		#			'state': 'CLEARED',
+		#			'status': 'Job was presumably cleared and finished with unknown state',
+		#			'elapsed_time': elapsed,
+		#			'exit_code': -1
+		#		}
+		#else:	
+		#	res= resdict[job_pid]
+
+		# - Use the controller result when available.
+		# - For a missing record, attempt accounting recovery.
+		# - Preserve the historical CLEARED fallback.
+		if job_pid in resdict:
+			res = resdict[job_pid]
+		else:
+			res = recover_missing_slurm_job(job_obj)
 
 		if not res or res is None:
 			logger.warn("Empty or None job status dict for job pid %s, cannot update job, skip to next job ..." % job_pid, action="jobmonitor")
@@ -505,6 +509,59 @@ def make_slurm_job_archive(job_obj, tar_file, job_dir):
 		utils.make_staged_pipeline_tar(tar_file, job_dir)
 	else:
 		utils.make_tar(tar_file, job_dir)	
+
+
+def recover_missing_slurm_job(job_obj):
+	"""Recover a missing RUNNING job from accounting, if possible.
+
+	Fall back to the existing CLEARED state when its final outcome
+	cannot be established. Never raise an accounting exception.
+	"""
+
+	if job_obj.get('state') != 'RUNNING':
+		return None
+
+	job_pid = str(job_obj['pid'])
+
+	try:
+		accounting = jobmgr_slurm.get_accounting_job_status(job_pid)
+	except Exception as exc:
+		logger.warn(
+			'Slurm accounting lookup failed for pid %s (err=%s)' %
+			(job_pid, str(exc)),
+			action='jobmonitor'
+		)
+		accounting = None
+
+	if accounting is not None:
+		# Do not allow unexpected accounting data to affect
+		# the existing monitoring state machine.
+		if (
+			isinstance(accounting, dict)
+			and str(accounting.get('pid')) == job_pid
+			and accounting.get('state') in (
+				'SUCCESS', 'FAILURE', 'CANCELED', 'TIMED-OUT'
+			)
+		):
+			logger.info(
+				'Recovered Slurm job pid %s from accounting '
+				'(state=%s)' % (job_pid, accounting['state']),
+				action='jobmonitor'
+			)
+			return accounting
+
+	logger.warn(
+		'Slurm job pid %s missing from controller and '
+		'accounting; using CLEARED fallback' % job_pid,
+		action='jobmonitor'
+	)
+
+	return {
+		'state': 'CLEARED',
+		'status': 'Job was presumably cleared and finished with unknown state',
+		'elapsed_time': job_obj.get('elapsed_time', 0),
+		'exit_code': -1
+	}
 
 def monitor_slurm_job(job_obj, job_collection):
 	""" Monitor and update job status in DB """
