@@ -890,6 +890,15 @@ def submit_job_slurm(
 				cluster_job_root, relative_job_path
 			)
 
+			# - Obtain the input staging strategy selected by
+			#   the trusted application configurator.
+			# - Ordinary applications retain private-copy staging.
+			input_staging_mode = run_opts.get(
+				'input_staging_mode',
+				'copy'
+			)
+
+
 			staging_spec, execution_spec = create_specs(
 				workspace_app=job_dir,
 				workspace_cluster=cluster_workspace,
@@ -902,6 +911,7 @@ def submit_job_slurm(
 				cluster_job_root=cluster_job_root,
 				model_dir=jobmgr_slurm.app_modeldir,
 				app_mode=app_mode,
+				input_mode=input_staging_mode,
 			)
 
 			write_specs(job_dir, staging_spec, execution_spec)

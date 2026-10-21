@@ -139,10 +139,29 @@ class OxkatAppConfigurator(AppConfigurator):
 			logger.warning("oxkat input paths cannot contain whitespace")
 			return False
 
+
+		# - Reject unknown application options.
+		# - In particular, server-controlled execution policies must
+		#   never be accepted as scientific job options.
+		if isinstance(job_options, dict):
+			unknown_options = set(job_options) - set(self.valid_options)
+
+			if unknown_options:
+				self.validation_status = (
+					"Unsupported oxkat job option(s): %s" %
+					", ".join(sorted(unknown_options))
+				)
+				logger.warning(self.validation_status)
+				return False
+
+
+
 		if not AppConfigurator.validate(self, job_options, data_inputs):
 			return False
 
+
 		stage = self.job_options.get("stage") or "GET_INFO"
+
 		if stage not in IMPLEMENTED_STAGES:
 			self.validation_status = (
 				"Oxkat stage '%s' is not yet implemented." % stage
@@ -150,6 +169,15 @@ class OxkatAppConfigurator(AppConfigurator):
 			logger.warning(self.validation_status)
 			return False
 
-		# Slurm runs one controller process, not one entire runner per MPI rank.
-		# Leave resource settings to existing defaults for the first stage.
+		# - Select the input staging strategy.
+		# - GET_INFO only inspects the Measurement Set and must not
+		#   create an unnecessary private copy of a large dataset.
+		# - This is trusted application configuration, not a
+		#   client-supplied staging option.
+		self.run_options["input_staging_mode"] = "reference_ro"
+
+		# - Slurm runs one controller process, not one entire
+		#   runner per MPI rank. Leave resource settings to
+		#   existing defaults for the first stage.
 		return True
+

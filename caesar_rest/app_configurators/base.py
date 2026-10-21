@@ -26,7 +26,7 @@ from caesar_rest import utils
 from caesar_rest import logger
 
 ##############################
-#   APP CONFIGURATOR
+#   OPTION CONFIGURATOR
 ##############################
 class Option(object):
 
@@ -131,7 +131,9 @@ class EnumValueOption(Option):
 		self.enum= True
 		self.allowed_values= allowed_values
 
-
+##############################
+#   APP CONFIGURATOR
+##############################
 class AppConfigurator(object):
 	""" Class to define base app configurator """
   
@@ -152,7 +154,8 @@ class AppConfigurator(object):
 		self.run_options= {
 			"ncores": 1,
 			"nproc": 1,
-			"container_variant": ""
+			"container_variant": "",
+			"input_staging_mode": "copy"
 		}
 		self.job_outputs= {}
 		self.description= ""
