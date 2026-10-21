@@ -564,7 +564,11 @@ def recover_missing_slurm_job(job_obj):
 	}
 
 def monitor_slurm_job_old(job_obj, job_collection):
-	""" Monitor and update job status in DB """
+	"""LEGACY: retained for reference only.
+
+	Do not use in production. This implementation bypasses
+	accounting recovery and guarded MongoDB updates.
+	"""
 	
 	# - Extract field
 	if not job_obj or job_obj is None:
@@ -648,9 +652,12 @@ def monitor_slurm_job_old(job_obj, job_collection):
 
 
 def monitor_slurm_job(job_obj, job_collection):
-	"""Monitor one Slurm job using the shared guarded update path."""
+	"""Monitor a single Slurm job through the shared batch path.
 
-	# - Validate input.
+	This ensures identical controller polling, accounting recovery,
+	CLEARED fallback, and guarded MongoDB updates.
+	"""
+
 	if not job_obj:
 		logger.warn(
 			"Given job obj is None or empty!",
@@ -672,42 +679,18 @@ def monitor_slurm_job(job_obj, job_collection):
 		)
 		return -1
 
-	job_id = job_obj['job_id']
-	job_pid = str(job_obj['pid'])
+	job_pid = str(job_obj.get('pid', ''))
 
 	if not job_pid:
 		logger.warn(
-			"Given job pid is empty, cannot retrieve job status "
-			"from Slurm cluster!",
+			"Given job pid is empty, cannot monitor Slurm job!",
 			action="jobmonitor"
 		)
 		return -1
 
-	# - Retrieve job state from the existing controller endpoint.
-	try:
-		res = jobmgr_slurm.get_job_status(job_pid)
-	except Exception as exc:
-		logger.warn(
-			"Failed to retrieve job %s (pid=%s) status (err=%s)" %
-			(job_id, job_pid, str(exc)),
-			action="jobmonitor"
-		)
-		return -1
-
-	# - Preserve legacy behavior for missing or unusable replies.
-	# - Do not interpret an unavailable controller as job completion.
-	if not res:
-		logger.warn(
-			"Empty Slurm status reply for job %s (pid=%s); "
-			"leaving current job state unchanged" %
-			(job_id, job_pid),
-			action="jobmonitor"
-		)
-		return -1
-
-	# - Delegate status persistence, archive creation and pipeline
-	#   synchronization to the shared guarded implementation.
-	return update_slurm_job(job_obj, res, job_collection)
+	# - Use the same polling/recovery/persistence logic
+	#   as the batch monitor.
+	return monitor_slurm_jobs([job_obj], job_collection)
 
 
 def update_slurm_job(job_obj, res, job_collection):
