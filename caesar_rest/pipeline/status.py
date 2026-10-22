@@ -282,7 +282,16 @@ def synchronize_pipeline(owner, pipeline_id):
 		'status': 'COMPLETED',
 		'job_id': {'$type': 'string'}
 	}):
+		
 		safe_register_artifacts(
+			mongo.db,
+			owner,
+			pipeline_id,
+			completed_run['run_id'],
+			completed_run['job_id']
+		)
+
+		safe_retain_artifacts(
 			mongo.db,
 			owner,
 			pipeline_id,
