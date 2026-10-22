@@ -156,6 +156,57 @@ class OxkatAppConfigurator(AppConfigurator):
 				"parser": "",
 				"required": False,
 			},
+			"working_measurement_sets": {
+				"path": None,
+				"glob": "*.ms",
+				"kind": "directory",
+				"type": "application/x-casa-measurement-set",
+				"role": "primary_result",
+				"description": (
+					"Private derived Measurement Sets produced by "
+					"first-generation calibration."
+				),
+				"required": False,
+			},
+			"measurement_set_flagversions": {
+				"path": None,
+				"glob": "*.ms.flagversions",
+				"kind": "directory",
+				"type": "application/octet-stream",
+				"role": "auxiliary",
+				"description": (
+					"CASA flag-version histories associated with "
+					"derived Measurement Sets."
+				),
+				"required": False,
+			},
+			"gain_tables": {
+				"path": "GAINTABLES",
+				"glob": None,
+				"kind": "directory",
+				"type": "application/octet-stream",
+				"role": "primary_result",
+				"description": "First-generation calibration solution tables.",
+				"required": False,
+			},
+			"gain_plots": {
+				"path": "GAINPLOTS",
+				"glob": None,
+				"kind": "directory",
+				"type": "application/octet-stream",
+				"role": "diagnostic",
+				"description": "Plots of calibration solutions.",
+				"required": False,
+			},
+			"visibility_plots": {
+				"path": "VISPLOTS",
+				"glob": None,
+				"kind": "directory",
+				"type": "application/octet-stream",
+				"role": "diagnostic",
+				"description": "Diagnostic visibility plots.",
+				"required": False,
+			},
 			"log": {
 				"path": None,
 				"glob": "*.log",
