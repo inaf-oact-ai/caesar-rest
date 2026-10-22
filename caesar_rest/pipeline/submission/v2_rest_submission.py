@@ -88,7 +88,18 @@ def submit_v2(owner, request_data, resolve_application):
 	policy = policies.get(app) if isinstance(policies, dict) else None
 	if not isinstance(policy, dict):
 		raise manager.PipelineError('Application not enabled for V2', 409)
-	input_options = policy.get('input_options')
+		
+	input_options_by_stage = policy.get('input_options_by_stage')
+
+	if input_options_by_stage is not None:
+		if not isinstance(input_options_by_stage, dict):
+			raise manager.PipelineError('Invalid stage input policy', 503)
+
+		stage = run['parameters'].get('stage')
+		input_options = input_options_by_stage.get(stage)
+	else:
+		input_options = policy.get('input_options')
+	
 	if not isinstance(input_options, dict) or not input_options:
 		raise manager.PipelineError('Missing V2 input policy', 503)
 	
