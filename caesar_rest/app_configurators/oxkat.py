@@ -1,10 +1,19 @@
-"""CAESAR-REST configurator for the oxkat Measurement Set pipeline.
+"""CAESAR-REST configurator for the OXKAT Measurement Set pipeline.
 
-Initial executable stage: GET_INFO. Additional stages are represented by the
-stage selector but are rejected until run_oxkat.sh implements them.
+Supported stages:
+- GET_INFO: inspect a Measurement Set and generate observation metadata.
+- 1GC: prepare the first-generation calibration recipe using a Measurement
+  Set and the project_info.json artifact from a completed GET_INFO run.
 
-The data input is a *directory* ending in .ms, not an uploaded file. Prefer a
-server-configured dataset identifier whose path resolves to shared storage.
+The 1GC stage currently generates the calibration execution script but does
+not execute the scientific calibration steps.
+
+For V2 pipeline submissions, inputs are resolved from registered datasets
+and retained upstream artifacts. The Measurement Set is staged as a
+read-only reference. Actual calibration will require a private writable
+copy of the Measurement Set.
+
+Later calibration and imaging stages remain unsupported.
 """
 
 import os
@@ -27,8 +36,7 @@ OXKAT_STAGES = [
 
 # Keep synchronized with run_oxkat.sh. Do not allow unimplemented stages to
 # reach Slurm: they require distinct inputs, output contracts and permissions.
-IMPLEMENTED_STAGES = {"GET_INFO"}
-
+IMPLEMENTED_STAGES = {"GET_INFO", "1GC"}
 
 class OxkatAppConfigurator(AppConfigurator):
 	"""Validate oxkat requests and create the runner's application arguments."""
@@ -43,45 +51,69 @@ class OxkatAppConfigurator(AppConfigurator):
 		self.batch_processing_support = False
 
 		self.description = (
-			"Process radio-interferometric Measurement Sets with oxkat. "
-			"Select the processing stage using the 'stage' option. "
-			"The initial release executes GET_INFO to inspect an observation "
-			"and determine calibration targets and observation metadata. "
-			"Other calibration/imaging stages are reserved for future releases."
+			"Process MeerKAT radio-interferometric Measurement Sets using OXKAT. "
+			"The GET_INFO stage inspects an observation and generates metadata "
+			"describing the observing band, fields, calibrators and targets. "
+			"The 1GC stage consumes this metadata together with the original "
+			"Measurement Set to prepare the first-generation calibration recipe. "
+			"Currently, 1GC generates and validates its execution script without "
+			"performing calibration. Subsequent calibration and imaging stages "
+			"will be enabled incrementally."
 		)
+		
 		self.tool_categories = ["measurement-set"]
+		
 		self.input_requirements = {
 			"supported_formats": ["ms"],
 			"expected_data": (
-				"One MeerKAT Measurement Set directory (*.ms) on a filesystem "
-				"available to the scientific execution environment."
+				"GET_INFO requires one registered MeerKAT Measurement Set "
+				"directory (*.ms). "
+				"1GC additionally requires project_info.json produced by "
+				"a completed upstream GET_INFO pipeline run."
 			),
 			"notes": [
-				"Prefer data_inputs.format='dataset' for large Measurement Sets.",
-				"Register each Measurement Set path on the server; data is not uploaded.",
-				"The GET_INFO stage reads the original dataset without copying it.",
+				"Measurement Sets are registered server-side and are not uploaded.",
+				"V2 pipeline runs reference the Measurement Set using dataset_id.",
+				"GET_INFO uses a read-only reference without copying the dataset.",
+				"1GC requires the registered Measurement Set and the retained "
+				"project_info artifact from GET_INFO.",
+				"CAESAR-REST resolves V2 inputs using trusted dataset and "
+				"artifact bindings; filesystem paths are not supplied by clients.",
+				"During 1GC preparation, the original Measurement Set is "
+				"not modified."
 			],
 		}
+		
 		self.limitations = [
-			"Only GET_INFO is executable in this initial integration.",
-			"Exactly one input Measurement Set is supported per request.",
-			"The input must be a directory with a .ms suffix, accessible to Slurm.",
-			"Future calibration stages will require writable per-job datasets.",
+			"GET_INFO and 1GC preparation are the currently supported stages.",
+			"1GC preparation generates the calibration execution script but "
+			"does not execute calibration.",
+			"Exactly one registered Measurement Set is supported per V2 run.",
+			"1GC requires project_info.json from a completed GET_INFO run.",
+			"The Measurement Set must be accessible to the Slurm execution environment.",
+			"Actual 1GC calibration requires a private writable Measurement Set copy.",
+			"FLAG, 2GC, 3GC_PEEL and 3GC_FACET are not yet supported."
 		]
+		
+		# - Set valid options
 		self.valid_options = {
 			"stage": EnumValueOption(
 				name="stage",
 				value="",
 				value_type=str,
 				description=(
-					"Oxkat processing stage. Only GET_INFO is currently executable; "
-					"other values are reserved for future implementation."
+					"OXKAT processing stage. GET_INFO executes observation metadata "
+					"extraction; 1GC prepares the first-generation calibration recipe "
+					"without executing calibration. Other stages are reserved for "
+					"future implementation."
 				),
 				category="RUN",
 				default_value="GET_INFO",
 				allowed_values=OXKAT_STAGES,
 			),
 		}
+		
+		# - Describe job output
 		self.job_outputs = {
 			"manifest": {
 				"path": "oxkat_manifest.json",
@@ -99,11 +131,30 @@ class OxkatAppConfigurator(AppConfigurator):
 				"glob": None,
 				"type": "application/json",
 				"role": "primary_result",
-				"description": "Observation, frequency, field and calibrator metadata.",
+				"description": (
+					"Observation metadata generated by GET_INFO and "
+					"propagated to downstream 1GC preparation."
+				),
 				"format": "",
 				"parser": "json",
 				"required": True,
-				"notes": "Produced by the GET_INFO stage.",
+				"notes": (
+					"Contains observing band, Measurement Set identity, "
+					"field and calibrator metadata."
+				),
+			},
+			"preparation_script": {
+				"path": "submit_1GC_jobs.sh",
+				"glob": None,
+				"type": "text/x-shellscript",
+				"role": "diagnostic",
+				"description": (
+					"Generated first-generation calibration script. "
+					"Produced during 1GC preparation but not executed."
+				),
+				"format": "",
+				"parser": "",
+				"required": False,
 			},
 			"log": {
 				"path": None,
@@ -125,6 +176,19 @@ class OxkatAppConfigurator(AppConfigurator):
 
 	def validate(self, job_options, data_inputs):
 		"""Reject unsupported stages and unsafe/multiple input paths."""
+		
+		# - Legacy V1 submissions do not support upstream artifact bindings.
+		# - 1GC requires project_info.json from a completed GET_INFO run.
+		# - V2 submissions use the separate trusted pipeline staging path.
+		if isinstance(job_options, dict) and job_options.get("stage") == "1GC":
+			self.validation_status = (
+				"OXKAT 1GC is supported only through V2 pipeline submission. "
+				"Reserve a pipeline run with a registered Measurement Set "
+				"and the retained project_info artifact from GET_INFO."
+			)
+			logger.warning(self.validation_status)
+			return False
+		
 		if not isinstance(data_inputs, str):
 			logger.warning("oxkat requires exactly one Measurement Set path")
 			return False
