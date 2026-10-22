@@ -1,0 +1,11 @@
+{
+  "oxkat": {
+    "parameters": {
+      "stage": ["GET_INFO"]
+    },
+    "dataset_input_name": "measurement_set",
+    "input_options": {
+      "input-ms": "measurement_set"
+    }
+  }
+}
