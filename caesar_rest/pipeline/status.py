@@ -5,10 +5,13 @@ It reads the owner's ordinary MongoDB job collection and updates only
 associated pipeline runs. Invoke explicitly via the pipeline sync endpoint.
 """
 
+from flask import current_app
+
 from caesar_rest import mongo
 from caesar_rest import logger
 from caesar_rest.pipeline import manager
 from caesar_rest.pipeline.artifacts import registration as pipeline_artifact_registration
+from caesar_rest.pipeline.artifacts import retention as pipeline_artifact_retention
 
 # Match the persisted job states used by the existing job monitoring API.
 ACTIVE_STATES = {'STARTED', 'RUNNING'}
@@ -26,6 +29,69 @@ def safe_register_artifacts(db, owner, pipeline_id, run_id, job_id):
 	except Exception as exc:
 		logger.error(
 			'Pipeline artifact registration failed for run %s (err=%s)' %
+			(run_id, str(exc)),
+			action='pipeline_artifacts'
+		)
+		return False
+
+
+def safe_retain_artifacts(db, owner, pipeline_id, run_id, job_id):
+	"""Best-effort automatic retention of completed pipeline artifacts."""
+
+	try:
+		run = db.pipeline_runs.find_one({
+			'owner': owner,
+			'pipeline_id': pipeline_id,
+			'run_id': run_id,
+			'job_id': job_id,
+			'status': 'COMPLETED'
+		})
+
+		if run is None:
+			return False
+
+		# - Already retained: avoid unnecessary filesystem operations.
+		if run.get('retained_artifacts') is not None:
+			return True
+
+		# - Registration must succeed before retention can begin.
+		if not run.get('artifacts_registered_at') or not run.get('artifacts'):
+			return False
+
+		root = current_app.config.get(
+			'PIPELINE_ARTIFACT_RETENTION_ROOT'
+		) or ''
+
+		pipeline_artifact_retention.promote_run(
+			db,
+			owner,
+			pipeline_id,
+			run['node_id'],
+			run_id,
+			root,
+			current_app.config.get(
+				'PIPELINE_ARTIFACT_RETENTION_MAX_FILE_BYTES',
+				1024 * 1024 * 1024
+			),
+			current_app.config.get(
+				'PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_BYTES',
+				1024 * 1024 * 1024 * 1024
+			),
+			current_app.config.get(
+				'PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_ENTRIES',
+				100000
+			),
+			current_app.config.get(
+				'PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_DEPTH',
+				16
+			)
+		)
+
+		return True
+
+	except Exception as exc:
+		logger.error(
+			'Automatic artifact retention failed for run %s (err=%s)' %
 			(run_id, str(exc)),
 			action='pipeline_artifacts'
 		)
@@ -125,6 +191,12 @@ def synchronize_monitored_job(db, job_obj, state, exit_code=None):
 			safe_register_artifacts(
 				db, owner, pipeline_id, run_id, job_id
 			)
+
+			# - Automatically retain completed pipeline artifacts.
+			safe_retain_artifacts(
+				db, owner, pipeline_id, run_id, job_id
+			)			
+			
 
 	return result.modified_count == 1
 
