@@ -5,13 +5,24 @@ It reads the owner's ordinary MongoDB job collection and updates only
 associated pipeline runs. Invoke explicitly via the pipeline sync endpoint.
 """
 
-from flask import current_app
+from flask import current_app, has_app_context
 
 from caesar_rest import mongo
 from caesar_rest import logger
 from caesar_rest.pipeline import manager
 from caesar_rest.pipeline.artifacts import registration as pipeline_artifact_registration
 from caesar_rest.pipeline.artifacts import retention as pipeline_artifact_retention
+
+# - Retention settings for the standalone job-monitor process.
+# - REST requests continue to use their Flask application configuration.
+MONITOR_RETENTION_CONFIG = {}
+
+def configure_monitor_retention(config):
+	"""Configure automatic retention for the standalone job monitor."""
+	global MONITOR_RETENTION_CONFIG
+
+	MONITOR_RETENTION_CONFIG = dict(config)
+
 
 # Match the persisted job states used by the existing job monitoring API.
 ACTIVE_STATES = {'STARTED', 'RUNNING'}
@@ -58,9 +69,18 @@ def safe_retain_artifacts(db, owner, pipeline_id, run_id, job_id):
 		if not run.get('artifacts_registered_at') or not run.get('artifacts'):
 			return False
 
-		root = current_app.config.get(
-			'PIPELINE_ARTIFACT_RETENTION_ROOT'
-		) or ''
+		# - REST synchronization uses Flask configuration.
+		# - The standalone job monitor uses explicitly supplied settings.
+		config = (
+			current_app.config
+			if has_app_context()
+			else MONITOR_RETENTION_CONFIG
+		)
+
+		root = config.get('PIPELINE_ARTIFACT_RETENTION_ROOT') or ''
+
+		if not root:
+			raise ValueError('Pipeline artifact retention root is not configured')
 
 		pipeline_artifact_retention.promote_run(
 			db,
@@ -69,19 +89,19 @@ def safe_retain_artifacts(db, owner, pipeline_id, run_id, job_id):
 			run['node_id'],
 			run_id,
 			root,
-			current_app.config.get(
+			config.get(
 				'PIPELINE_ARTIFACT_RETENTION_MAX_FILE_BYTES',
 				1024 * 1024 * 1024
 			),
-			current_app.config.get(
+			config.get(
 				'PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_BYTES',
 				1024 * 1024 * 1024 * 1024
 			),
-			current_app.config.get(
+			config.get(
 				'PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_ENTRIES',
 				100000
 			),
-			current_app.config.get(
+			config.get(
 				'PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_DEPTH',
 				16
 			)

@@ -6,6 +6,22 @@ import pytest
 
 from caesar_rest.pipeline import status
 
+# - Preserve the actual function for direct retention tests.
+_original_safe_retain_artifacts = status.safe_retain_artifacts
+
+
+@pytest.fixture
+def retention_calls(monkeypatch):
+	"""Intercept automatic retention during synchronization tests."""
+	calls = []
+
+	monkeypatch.setattr(
+		status,
+		'safe_retain_artifacts',
+		lambda *args: calls.append(args) or True
+	)
+
+	return calls
 
 class FakeRuns:
 	def __init__(self, modified_count, existing_run=None):
@@ -44,7 +60,7 @@ def job():
 	}
 
 
-def test_completed_transition_registers_artifacts(monkeypatch):
+def test_completed_transition_registers_artifacts(monkeypatch, retention_calls):
 	runs = FakeRuns(modified_count=1)
 	db = FakeDB(runs)
 	calls = []
@@ -61,9 +77,11 @@ def test_completed_transition_registers_artifacts(monkeypatch):
 
 	assert len(calls) == 1
 	assert runs.updated[1]['$set']['status'] == 'COMPLETED'
+	assert len(retention_calls) == 1
+	assert retention_calls[0][1:] == ('alice', 'p1', 'r1', 'j1')
 
 
-def test_repeated_completion_retries_registration(monkeypatch):
+def test_repeated_completion_retries_registration(monkeypatch, retention_calls):
 	runs = FakeRuns(
 		modified_count=0,
 		existing_run={'status': 'COMPLETED'}
@@ -89,6 +107,8 @@ def test_repeated_completion_retries_registration(monkeypatch):
 		'job_id': 'j1',
 		'status': 'COMPLETED'
 	}
+	assert len(retention_calls) == 1
+	assert retention_calls[0][1:] == ('alice', 'p1', 'r1', 'j1')
 
 
 @pytest.mark.parametrize(
@@ -100,7 +120,7 @@ def test_repeated_completion_retries_registration(monkeypatch):
 	]
 )
 def test_rejected_update_does_not_register_artifacts(
-		monkeypatch, existing_run):
+		monkeypatch, existing_run, retention_calls):
 
 	runs = FakeRuns(
 		modified_count=0,
@@ -120,9 +140,10 @@ def test_rejected_update_does_not_register_artifacts(
 	) is False
 
 	assert calls == []
+	assert retention_calls == []
 
 
-def test_running_transition_does_not_register_artifacts(monkeypatch):
+def test_running_transition_does_not_register_artifacts(monkeypatch, retention_calls):
 	runs = FakeRuns(modified_count=1)
 	db = FakeDB(runs)
 	calls = []
@@ -139,8 +160,9 @@ def test_running_transition_does_not_register_artifacts(monkeypatch):
 
 	assert runs.updated[1]['$set']['status'] == 'RUNNING'
 	assert calls == []
+	assert retention_calls == []	
 	
-def test_running_observation_only_updates_submitted_run(monkeypatch):
+def test_running_observation_only_updates_submitted_run(monkeypatch, retention_calls):
 	runs = FakeRuns(modified_count=0)
 	db = FakeDB(runs)
 	calls = []
@@ -159,3 +181,99 @@ def test_running_observation_only_updates_submitted_run(monkeypatch):
 		'$in': ['SUBMITTED']
 	}
 	assert calls == []
+	assert retention_calls == []
+		
+def test_standalone_monitor_uses_explicit_retention_config(monkeypatch):
+	runs = FakeRuns(
+		modified_count=0,
+		existing_run={
+			'status': 'COMPLETED',
+			'node_id': 'getinfo',
+			'artifacts_registered_at': 'now',
+			'artifacts': [{'name': 'project_info'}]
+		}
+	)
+	db = FakeDB(runs)
+	calls = []
+
+	config = {
+		'PIPELINE_ARTIFACT_RETENTION_ROOT': '/tmp/pipeline-artifacts',
+		'PIPELINE_ARTIFACT_RETENTION_MAX_FILE_BYTES': 1024,
+		'PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_BYTES': 2048,
+		'PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_ENTRIES': 100,
+		'PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_DEPTH': 8
+	}
+
+	monkeypatch.setattr(
+		status,
+		'MONITOR_RETENTION_CONFIG',
+		config
+	)
+
+	monkeypatch.setattr(
+		status.pipeline_artifact_retention,
+		'promote_run',
+		lambda *args: calls.append(args)
+	)
+
+	assert _original_safe_retain_artifacts(
+		db, 'alice', 'p1', 'r1', 'j1'
+	) is True
+
+	assert len(calls) == 1
+	assert calls[0][1:6] == (
+		'alice',
+		'p1',
+		'getinfo',
+		'r1',
+		'/tmp/pipeline-artifacts'
+	)
+	assert calls[0][6:] == (1024, 2048, 100, 8)
+
+
+def test_retention_without_config_fails_safely(monkeypatch):
+	runs = FakeRuns(
+		modified_count=0,
+		existing_run={
+			'status': 'COMPLETED',
+			'node_id': 'getinfo',
+			'artifacts_registered_at': 'now',
+			'artifacts': [{'name': 'project_info'}]
+		}
+	)
+
+	monkeypatch.setattr(
+		status,
+		'MONITOR_RETENTION_CONFIG',
+		{}
+	)
+
+	assert _original_safe_retain_artifacts(
+		FakeDB(runs), 'alice', 'p1', 'r1', 'j1'
+	) is False
+
+
+def test_retention_failure_does_not_change_job_completion(
+		monkeypatch, retention_calls):
+
+	runs = FakeRuns(modified_count=1)
+	db = FakeDB(runs)
+
+	monkeypatch.setattr(
+		status,
+		'safe_register_artifacts',
+		lambda *args: True
+	)
+
+	monkeypatch.setattr(
+		status,
+		'safe_retain_artifacts',
+		lambda *args: False
+	)
+
+	assert status.synchronize_monitored_job(
+		db, job(), 'SUCCESS', 0
+	) is True
+
+	assert runs.updated[1]['$set']['status'] == 'COMPLETED'		
+		
