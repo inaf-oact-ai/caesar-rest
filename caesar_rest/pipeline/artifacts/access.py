@@ -16,17 +16,33 @@ class ArtifactAccessError(manager.PipelineError):
 	pass
 
 
+
 def get_run(db, owner, pipeline_id, node_id, run_id):
+	"""Retrieve an owner-scoped pipeline run using the supplied database."""
+
 	manager.validate_identifier(node_id, 'node_id')
-	manager.get_pipeline(owner, pipeline_id)
-	run = db.pipeline_runs.find_one({
-		'owner': owner, 'pipeline_id': pipeline_id,
-		'node_id': node_id, 'run_id': run_id
+
+	# - Verify the parent pipeline using the supplied database.
+	# - This works both inside Flask and in the standalone job monitor.
+	pipeline = db.pipelines.find_one({
+		'pipeline_id': pipeline_id,
+		'owner': owner
 	})
+
+	if pipeline is None:
+		raise ArtifactAccessError('Pipeline not found', 404)
+
+	run = db.pipeline_runs.find_one({
+		'owner': owner,
+		'pipeline_id': pipeline_id,
+		'node_id': node_id,
+		'run_id': run_id
+	})
+
 	if run is None:
 		raise ArtifactAccessError('Pipeline run not found', 404)
-	return run
 
+	return run
 
 def public_artifacts(run):
 	"""Return stable indices without leaking server paths."""

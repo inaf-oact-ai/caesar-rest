@@ -98,3 +98,50 @@ def test_detects_changed_file_size(tmp_path):
 	(results / 'report.json').write_bytes(b'changed')
 	with pytest.raises(access.ArtifactAccessError):
 		access.open_registered_artifact(db, 'tester', run, 0)
+		
+		
+def test_get_run_uses_supplied_database_without_flask(monkeypatch):
+	from types import SimpleNamespace
+	from caesar_rest.pipeline.artifacts import access
+
+	pipeline = {
+		'pipeline_id': 'pipeline1',
+		'owner': 'alice'
+	}
+
+	run = {
+		'pipeline_id': 'pipeline1',
+		'node_id': 'getinfo',
+		'run_id': 'run1',
+		'owner': 'alice',
+		'status': 'COMPLETED'
+	}
+
+	class FakeCollection:
+		def __init__(self, document):
+			self.document = document
+
+		def find_one(self, query):
+			if all(
+				self.document.get(key) == value
+				for key, value in query.items()
+			):
+				return self.document
+			return None
+
+	db = SimpleNamespace(
+		pipelines=FakeCollection(pipeline),
+		pipeline_runs=FakeCollection(run)
+	)
+
+	assert access.get_run(
+		db, 'alice', 'pipeline1', 'getinfo', 'run1'
+	) == run
+
+	# - A different owner cannot access the pipeline.
+	with pytest.raises(access.ArtifactAccessError) as exc:
+		access.get_run(
+			db, 'bob', 'pipeline1', 'getinfo', 'run1'
+		)
+
+	assert exc.value.status == 404		

@@ -18,7 +18,8 @@ class Collection:
 
 
 class DB:
-	def __init__(self, run):
+	def __init__(self, pipeline, run):
+		self.pipelines = Collection(pipeline)
 		self.pipeline_runs = Collection(run)
 
 
@@ -56,6 +57,7 @@ def setup(monkeypatch):
 		return pipeline
 
 	monkeypatch.setattr(manager, 'get_pipeline', get_pipeline)
+
 	opened = []
 
 	def open_artifact(db, owner, run_doc, index, retention_root=None):
@@ -65,7 +67,7 @@ def setup(monkeypatch):
 		return f, 'project_info.json', 'application/json'
 
 	monkeypatch.setattr(resolver.access, 'open_registered_artifact', open_artifact)
-	return DB(run), pipeline, run, opened
+	return DB(pipeline, run), pipeline, run, opened
 
 
 def test_selected_unique_artifact(monkeypatch):
