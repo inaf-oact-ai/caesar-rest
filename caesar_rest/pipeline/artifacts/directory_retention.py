@@ -127,9 +127,15 @@ def _publish_directory_noreplace(staging_name, target_name, parent_fd,
 		dst_dir_fd=parent_fd
 	)
 
-def copy_directory_artifact(source, destination, expected,
-		max_bytes=1024 * 1024 * 1024 * 1024,
-		max_entries=100000, max_depth=16):
+def copy_directory_artifact(
+	source, 
+	destination, 
+	expected,
+	max_bytes=1024 * 1024 * 1024 * 1024,
+	max_entries=100000, 
+	max_depth=16,
+	allow_locked_fallback=False,
+):
 	"""Copy one directory, publish atomically, and return its integrity manifest.
 
 	The destination must not exist. Its parent must exist and be trusted; both
