@@ -292,46 +292,78 @@ def resolve_selected_directory(pipeline_id, node_id, artifact_name):
 	'/pipelines/<pipeline_id>/nodes/<node_id>/runs/<run_id>/retain',
 	methods=['POST']
 )
-@custom_require_login
+
 def retain_run_artifacts(pipeline_id, node_id, run_id):
-	"""Copy registered artifacts into managed pipeline storage."""
+	"""Queue retention of a completed run without copying in this request."""
 
 	def action(owner):
-		root = current_app.config.get(
-			'PIPELINE_ARTIFACT_RETENTION_ROOT'
-		) or ''
-
-		limit = current_app.config.get(
-			'PIPELINE_ARTIFACT_RETENTION_MAX_FILE_BYTES',
-			1024 * 1024 * 1024
-		)
-		
-		directory_bytes = current_app.config.get(
-			'PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_BYTES',
-			1024 * 1024 * 1024 * 1024
+		run = artifact_access.get_run(
+			mongo.db, owner, pipeline_id, node_id, run_id
 		)
 
-		directory_entries = current_app.config.get(
-			'PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_ENTRIES',
-			100000
+		if run.get('status') != 'COMPLETED':
+			raise manager.PipelineError(
+				'Pipeline run is not completed', 409
+			)
+
+		if not run.get('artifacts_registered_at') or not run.get('artifacts'):
+			raise manager.PipelineError(
+				'Pipeline artifacts are not registered', 409
+			)
+
+		if run.get('retained_artifacts') is not None:
+			return jsonify({
+				'run_id': run_id,
+				'retention_status': 'READY',
+				'already_retained': True
+			}), 200
+
+		status = run.get('retention_status', 'PENDING')
+
+		if status == 'FAILED':
+			raise manager.PipelineError(
+				'Retention failed; inspect and recover partial artifacts '
+				'before retrying', 409
+			)
+
+		if status == 'COPYING':
+			return jsonify({
+				'run_id': run_id,
+				'retention_status': 'COPYING'
+			}), 202
+
+		result = mongo.db.pipeline_runs.update_one(
+			{
+				'_id': run['_id'],
+				'owner': owner,
+				'pipeline_id': pipeline_id,
+				'node_id': node_id,
+				'run_id': run_id,
+				'status': 'COMPLETED',
+				'retained_artifacts': {'$exists': False},
+				'$or': [
+					{'retention_status': {'$exists': False}},
+					{'retention_status': 'PENDING'}
+				]
+			},
+			{'$set': {'retention_status': 'PENDING'}}
 		)
 
-		directory_depth = current_app.config.get(
-			'PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_DEPTH',
-			16
-		)		
+		if result.modified_count != 1:
+			latest = mongo.db.pipeline_runs.find_one({
+				'_id': run['_id']
+			})
+			if latest and latest.get('retained_artifacts') is not None:
+				return jsonify({
+					'run_id': run_id,
+					'retention_status': 'READY'
+				}), 200
 
-		return jsonify(retention.promote_run(
-			mongo.db,
-			owner,
-			pipeline_id,
-			node_id,
-			run_id,
-			root,
-			limit,
-			directory_bytes,
-			directory_entries,
-			directory_depth
-		))
+		return jsonify({
+			'run_id': run_id,
+			'retention_status': 'PENDING',
+			'message': 'Retention will be processed by the independent worker'
+		}), 202
 
 	return invoke(action)
+

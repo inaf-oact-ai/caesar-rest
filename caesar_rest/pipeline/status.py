@@ -207,16 +207,13 @@ def synchronize_monitored_job(db, job_obj, state, exit_code=None):
 			})
 			should_register = existing is not None
 
+
 		if should_register:
+			# - Registration is metadata-only. Large artifact copies
+			#   are handled independently by the retention worker.
 			safe_register_artifacts(
 				db, owner, pipeline_id, run_id, job_id
-			)
-
-			# - Automatically retain completed pipeline artifacts.
-			safe_retain_artifacts(
-				db, owner, pipeline_id, run_id, job_id
-			)			
-			
+			)	
 
 	return result.modified_count == 1
 
@@ -304,14 +301,6 @@ def synchronize_pipeline(owner, pipeline_id):
 	}):
 		
 		safe_register_artifacts(
-			mongo.db,
-			owner,
-			pipeline_id,
-			completed_run['run_id'],
-			completed_run['job_id']
-		)
-
-		safe_retain_artifacts(
 			mongo.db,
 			owner,
 			pipeline_id,

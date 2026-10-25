@@ -43,9 +43,19 @@ def test_refuse_symlink_and_leave_no_destination(tmp_path):
 
 def test_refuse_changed_discovery(tmp_path):
 	source = build_source(tmp_path)
-	with pytest.raises(DirectoryRetentionError, match='changed since discovery'):
-		copy_directory_artifact(str(source), str(tmp_path / 'retained.ms'),
-			{'size_bytes': 9, 'file_count': 2, 'directory_count': 2})
+	target = tmp_path / 'retained.ms'
+
+	with pytest.raises(
+		DirectoryRetentionError,
+		match='Directory metadata mismatch:.*field=size_bytes'
+	):
+		copy_directory_artifact(
+			str(source),
+			str(target),
+			{'size_bytes': 9, 'file_count': 2, 'directory_count': 2}
+		)
+
+	assert not target.exists()
 
 
 def test_refuse_excessive_bytes(tmp_path):

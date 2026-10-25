@@ -77,8 +77,8 @@ def test_completed_transition_registers_artifacts(monkeypatch, retention_calls):
 
 	assert len(calls) == 1
 	assert runs.updated[1]['$set']['status'] == 'COMPLETED'
-	assert len(retention_calls) == 1
-	assert retention_calls[0][1:] == ('alice', 'p1', 'r1', 'j1')
+	# - Retention must not run inside the job monitoring callback.
+	assert retention_calls == []
 
 
 def test_repeated_completion_retries_registration(monkeypatch, retention_calls):
@@ -107,8 +107,8 @@ def test_repeated_completion_retries_registration(monkeypatch, retention_calls):
 		'job_id': 'j1',
 		'status': 'COMPLETED'
 	}
-	assert len(retention_calls) == 1
-	assert retention_calls[0][1:] == ('alice', 'p1', 'r1', 'j1')
+	# - Repeated completion may retry registration, but never copying.
+	assert retention_calls == []
 
 
 @pytest.mark.parametrize(
@@ -276,4 +276,26 @@ def test_retention_failure_does_not_change_job_completion(
 	) is True
 
 	assert runs.updated[1]['$set']['status'] == 'COMPLETED'		
+		
+
+def test_completed_transition_never_copies_artifacts(
+		monkeypatch, retention_calls):
+	"""Job monitoring must not invoke synchronous artifact retention."""
+
+	runs = FakeRuns(modified_count=1)
+	db = FakeDB(runs)
+	registration_calls = []
+
+	monkeypatch.setattr(
+		status,
+		'safe_register_artifacts',
+		lambda *args: registration_calls.append(args)
+	)
+
+	assert status.synchronize_monitored_job(
+		db, job(), 'SUCCESS', 0
+	) is True
+
+	assert len(registration_calls) == 1
+	assert retention_calls == []
 		
