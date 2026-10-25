@@ -42,20 +42,34 @@ def verify_directory_artifact(base, index, record, max_entries=100000, max_bytes
 	The returned metadata is safe for status reporting; the directory itself
 	must be reopened and reverified before downstream consumption.
 	"""
+	
 	if type(index) is not int or index < 0 or not isinstance(record, dict):
 		raise DirectoryIntegrityError('Invalid directory artifact identity')
+	
 	name = '%04d' % index
 	manifest_name = name + '.manifest.json'
 	if record.get('index') != index or record.get('kind') != 'directory' or record.get('manifest_name') != manifest_name:
 		raise DirectoryIntegrityError('Invalid directory artifact metadata')
+	
 	sha = record.get('manifest_sha256')
 	if not isinstance(sha, str) or not re.fullmatch('[0-9a-f]{64}', sha):
 		raise DirectoryIntegrityError('Invalid directory manifest digest')
-	if any(type(value) is not int or value < 0 for value in
-		(record.get('size_bytes'), record.get('file_count'), record.get('directory_count'))):
+	
+	if any(
+		not isinstance(value, int)
+		or isinstance(value, bool)
+		or value < 0
+		for value in (
+			record.get('size_bytes'),
+			record.get('file_count'),
+			record.get('directory_count')
+		)
+	):
 		raise DirectoryIntegrityError('Invalid directory counts')
+		
 	if any(type(x) is not int or x < 1 for x in (max_entries, max_bytes, max_depth, max_manifest_bytes)):
 		raise DirectoryIntegrityError('Invalid verification limits')
+	
 	try:
 		data = _read_sidecar(base, manifest_name, max_manifest_bytes)
 		if hashlib.sha256(data).hexdigest() != sha:

@@ -15,6 +15,7 @@ from caesar_rest.pipeline import manager
 from caesar_rest.pipeline.artifacts import access
 from caesar_rest.pipeline.artifacts import directory_retention as directory_copy
 from caesar_rest.pipeline.artifacts import directory_integrity
+from caesar_rest.pipeline.artifacts import resume
 from caesar_rest.pipeline.staging.workspace import workspace_for_job
 
 
@@ -65,9 +66,13 @@ def _write_sidecar(base, name, manifest):
 
 
 def _copy_file(db, owner, run, index, artifact, base, max_file_bytes):
+	""" Copy artifact file """
+	
 	size = artifact.get('size_bytes')
-	if type(size) is not int or size < 0 or size > max_file_bytes:
+
+	if not resume._integer(size) or size > max_file_bytes:		
 		raise manager.PipelineError('Artifact exceeds file retention limit', 413)
+
 	source, _, _ = access.open_registered_artifact(db, owner, run, index)
 	fd, temp = tempfile.mkstemp(prefix='.pending-file-', dir=base)
 	digest = hashlib.sha256()
@@ -121,18 +126,56 @@ def promote_mixed_run(db, owner, pipeline_id, node_id, run_id, root,
 			if run.get('retained_artifacts') is not None:
 				return {'run_id': run_id, 'retained': True,
 					'count': len(run['retained_artifacts']), 'already_retained': True}
+				
 			records = []
 			for index, artifact in enumerate(artifacts):
-				if artifact.get('kind', 'file') == 'file':
-					records.append(_copy_file(db, owner, run, index, artifact, base, max_file_bytes))
-					continue
-				source = _source_directory(db, owner, run, artifact)
 				target = os.path.join(base, '%04d' % index)
+				kind = artifact.get('kind', 'file')
+
+				if kind == 'file':
+					# - A previously published file can be reused only
+					#   after comparing its checksum to the authorized source.
+					if os.path.lexists(target):
+						record = resume.reuse_file(
+							db, owner, run, index, artifact,
+							base, max_file_bytes
+						)
+					else:
+						record = _copy_file(
+							db, owner, run, index, artifact,
+							base, max_file_bytes
+						)
+
+					records.append(record)
+					continue
+
+				manifest_name = '%04d.manifest.json' % index
+				manifest_path = os.path.join(base, manifest_name)
+
 				if os.path.lexists(target):
-					# Leftover unpublished result from a previous failed attempt:
-					# refuse to overwrite rather than implicitly deleting it.
-					raise manager.PipelineError('Uncommitted directory exists; administrative recovery required', 409)
-					
+					# - Verify every retained file against the manifest
+					#   before accepting an uncommitted directory.
+					record = resume.reuse_directory(
+						base, index, artifact,
+						max_directory_bytes,
+						max_directory_entries,
+						max_directory_depth
+					)
+					records.append(record)
+					continue
+
+				# - A manifest without its directory must never be
+				#   accepted or silently overwritten.
+				if os.path.lexists(manifest_path):
+					raise manager.PipelineError(
+						'Orphan directory manifest; '
+						'administrative recovery required', 409
+					)
+
+				source = _source_directory(
+					db, owner, run, artifact
+				)
+
 				try:
 					result = directory_copy.copy_directory_artifact(
 						source,
@@ -143,26 +186,47 @@ def promote_mixed_run(db, owner, pipeline_id, node_id, run_id, root,
 						max_depth=max_directory_depth,
 						allow_locked_fallback=True
 					)
-
 				except directory_copy.DirectoryRetentionError as exc:
-					raise manager.PipelineError('Directory retention failed: %s' % exc, 409)
-				
-				manifest_name = '%04d.manifest.json' % index
-				digest = _write_sidecar(base, manifest_name, result['manifest'])
+					raise manager.PipelineError(
+						'Directory retention failed: %s' % exc, 409
+					)
+
+				digest = _write_sidecar(
+					base, manifest_name, result['manifest']
+				)
+
 				if digest != result['manifest_sha256']:
-					raise manager.PipelineError('Directory manifest digest mismatch', 409)
+					raise manager.PipelineError(
+						'Directory manifest digest mismatch', 409
+					)
+
 				record = {
-					'index': index, 'kind': 'directory', 'size_bytes': result['size_bytes'],
-					'file_count': result['file_count'], 'directory_count': result['directory_count'],
-					'manifest_name': manifest_name, 'manifest_sha256': digest
+					'index': index,
+					'kind': 'directory',
+					'size_bytes': result['size_bytes'],
+					'file_count': result['file_count'],
+					'directory_count': result['directory_count'],
+					'manifest_name': manifest_name,
+					'manifest_sha256': digest
 				}
+
 				try:
 					directory_integrity.verify_directory_artifact(
-						base, index, record, max_entries=max_directory_entries,
-						max_bytes=max_directory_bytes, max_depth=max_directory_depth)
+						base,
+						index,
+						record,
+						max_entries=max_directory_entries,
+						max_bytes=max_directory_bytes,
+						max_depth=max_directory_depth
+					)
 				except directory_integrity.DirectoryIntegrityError as exc:
-					raise manager.PipelineError('Retained directory verification failed: %s' % exc, 409)
+					raise manager.PipelineError(
+						'Retained directory verification failed: %s' %
+						exc, 409
+					)
+
 				records.append(record)
+						
 			result = db.pipeline_runs.update_one({
 				'owner': owner, 'pipeline_id': pipeline_id, 'node_id': node_id,
 				'run_id': run_id, 'status': 'COMPLETED',
