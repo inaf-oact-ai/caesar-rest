@@ -12,7 +12,7 @@ from caesar_rest import mongo, jobmgr_slurm, utils
 from caesar_rest.pipeline import manager
 from caesar_rest.pipeline.submission.claimed_preparation import claim_and_prepare_v2
 from caesar_rest.pipeline.submission.slurm_submission import submit_claimed_v2
-
+from caesar_rest.job_configurator import JobConfigurator
 
 _OPTION = re.compile(r'^[A-Za-z][A-Za-z0-9_-]{0,63}$')
 _VALUE = re.compile(r'^[A-Za-z0-9_.:+/-]{1,128}$')
@@ -131,9 +131,34 @@ def submit_v2(owner, request_data, resolve_application):
 				for k in input_options)):
 		raise manager.PipelineError('V2 input binding does not match policy', 409)
 
-	args = _validated_arguments(options, policy.get('parameters', {}))
+	# - Delegate application-specific scientific options to the registered
+	#   configurator. The V2 submission layer remains application-agnostic.
+	allowed_parameters = policy.get('parameters', {})
+
+	configurator_class = JobConfigurator().app_configurators.get(app)
+
+	try:
+		if configurator_class is not None:
+			configurator = configurator_class(app_name=app)
+			args = configurator.build_pipeline_arguments(
+				options,
+				allowed_parameters,
+				_validated_arguments
+			)
+		else:
+			# - Preserve the existing behavior for V2 applications
+			#   without an application configurator.
+			args = _validated_arguments(options, allowed_parameters)
+	except ValueError as exc:
+		raise manager.PipelineError(
+			'Invalid application scientific options: %s' % exc, 409
+		) from exc
+
 	if not args:
-		raise manager.PipelineError('V2 requires explicit configured arguments', 409)
+		raise manager.PipelineError(
+			'V2 requires explicit configured arguments', 409
+		)
+		
 	app_spec = resolve_application(app, 'slurm', {})
 	image = app_spec['image']
 	job_id = utils.get_uuid()

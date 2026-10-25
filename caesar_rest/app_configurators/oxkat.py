@@ -17,6 +17,10 @@ Later calibration and imaging stages remain unsupported.
 """
 
 import os
+import base64
+import json
+import math
+import re
 
 from caesar_rest.app_configurators.base import (
 	AppConfigurator,
@@ -38,6 +42,52 @@ OXKAT_STAGES = [
 # reach Slurm: they require distinct inputs, output contracts and permissions.
 IMPLEMENTED_STAGES = {"GET_INFO", "1GC"}
 
+
+# - Scientific settings exposed by OXKAT's upstream config.py.
+# - Keep this policy inside the application configurator, not the
+#   generic V2 pipeline submission implementation.
+OXKAT_CONFIG_OPTIONS = {
+	"CAL_1GC_PRIMARY": {
+		"type": "field_selection",
+		"stages": {"GET_INFO"},
+	},
+	"CAL_1GC_SECONDARIES": {
+		"type": "field_selection",
+		"stages": {"GET_INFO"},
+	},
+	"CAL_1GC_TARGETS": {
+		"type": "field_selection",
+		"stages": {"GET_INFO"},
+	},
+	"PRE_NCHANS": {
+		"type": "integer",
+		"stages": {"1GC"},
+		"min": 1,
+		"max": 65536,
+	},
+	"WSC_CIRCULARBEAM": {
+		"type": "boolean",
+		"stages": {"FLAG", "2GC", "3GC_PEEL", "3GC_FACET"},
+	},
+	"WSC_NITER": {
+		"type": "integer",
+		"stages": {"FLAG", "2GC", "3GC_PEEL", "3GC_FACET"},
+		"min": 0,
+		"max": 10000000,
+	},
+	"WSC_BRIGGS": {
+		"type": "number",
+		"stages": {"FLAG", "2GC", "3GC_PEEL", "3GC_FACET"},
+		"min": -2.0,
+		"max": 2.0,
+	},
+}
+
+_FIELD_SELECTION = re.compile(r'^(?:auto|[0-9]+(?:,[0-9]+)*)$')
+
+##################################################
+###     APP CONFIG CLASS
+##################################################
 class OxkatAppConfigurator(AppConfigurator):
 	"""Validate oxkat requests and create the runner's application arguments."""
 
@@ -206,6 +256,19 @@ class OxkatAppConfigurator(AppConfigurator):
 				"role": "diagnostic",
 				"description": "Diagnostic visibility plots.",
 				"required": False,
+			},			
+			"oxkat_config_overrides": {
+				"path": "oxkat_config_overrides.json",
+				"glob": None,
+				"type": "application/json",
+				"role": "diagnostic",
+				"description": (
+					"Validated OXKAT scientific overrides requested "
+					"for this pipeline stage."
+				),
+				"format": "",
+				"parser": "json",
+				"required": False,
 			},
 			"log": {
 				"path": None,
@@ -220,6 +283,141 @@ class OxkatAppConfigurator(AppConfigurator):
 			},
 		}
 		self.option_value_transformer = {}
+
+
+
+	def validate_pipeline_options(self, job_options):
+		"""Validate optional stage-specific upstream OXKAT settings."""
+
+		if not isinstance(job_options, dict):
+			raise ValueError('job_options must be an object')
+
+		stage = job_options.get('stage')
+
+		if stage not in IMPLEMENTED_STAGES:
+			raise ValueError('OXKAT stage is not implemented: %s' % stage)
+
+		unknown = set(job_options) - {'stage', 'oxkat_config'}
+
+		if unknown:
+			raise ValueError(
+				'Unsupported OXKAT job options: %s' %
+				', '.join(sorted(unknown))
+			)
+
+		if 'oxkat_config' not in job_options:
+			return None
+
+		overrides = job_options['oxkat_config']
+
+		if not isinstance(overrides, dict):
+			raise ValueError('oxkat_config must be an object')
+
+		if not overrides:
+			raise ValueError('oxkat_config must not be empty')
+
+		if len(overrides) > 32:
+			raise ValueError('Too many OXKAT configuration overrides')
+
+		validated = {}
+
+		for name, value in overrides.items():
+			if not isinstance(name, str):
+				raise ValueError('OXKAT configuration names must be strings')
+
+			spec = OXKAT_CONFIG_OPTIONS.get(name)
+
+			if spec is None:
+				raise ValueError(
+					'Unsupported OXKAT configuration option: %s' % name
+				)
+
+			if stage not in spec['stages']:
+				raise ValueError(
+					'OXKAT option %s is not applicable to stage %s' %
+					(name, stage)
+				)
+
+			value_type = spec['type']
+
+			if value_type == 'boolean':
+				if type(value) is not bool:
+					raise ValueError('%s requires a boolean' % name)
+
+			elif value_type == 'integer':
+				if type(value) is not int:
+					raise ValueError('%s requires an integer' % name)
+
+			elif value_type == 'number':
+				if type(value) not in (int, float):
+					raise ValueError('%s requires a number' % name)
+
+				value = float(value)
+
+				if not math.isfinite(value):
+					raise ValueError('%s must be finite' % name)
+
+			elif value_type == 'field_selection':
+				if (
+					not isinstance(value, str)
+					or len(value) > 128
+					or not _FIELD_SELECTION.fullmatch(value)
+				):
+					raise ValueError(
+						'%s requires auto or comma-separated field IDs' %
+						name
+					)
+
+			else:
+				raise ValueError('Invalid OXKAT option specification')
+
+			if value_type in ('integer', 'number'):
+				if value < spec['min'] or value > spec['max']:
+					raise ValueError(
+						'%s is outside the allowed range' % name
+					)
+
+			validated[name] = value
+
+		return validated
+
+
+	def build_pipeline_arguments(self, parameters, allowed, scalar_validator):
+		"""Validate and encode scientific options for a V2 pipeline run."""
+
+		overrides = self.validate_pipeline_options(parameters)
+
+		# - Preserve existing generic validation for scalar V2 arguments.
+		scalar_parameters = dict(parameters)
+		scalar_parameters.pop('oxkat_config', None)
+
+		args = scalar_validator(scalar_parameters, allowed)
+
+		if overrides is None:
+			return args
+
+		document = {
+			'stage': scalar_parameters['stage'],
+			'overrides': overrides,
+		}
+
+		serialized = json.dumps(
+			document,
+			sort_keys=True,
+			separators=(',', ':'),
+			allow_nan=False
+		).encode('utf-8')
+
+		token = base64.urlsafe_b64encode(serialized).decode('ascii')
+		token = token.rstrip('=')
+
+		if len(token) > 3000:
+			raise ValueError('Encoded OXKAT configuration is too large')
+
+		args.append('--oxkat-config=%s' % token)
+
+		return args
+
 
 	def set_data_input_option_value(self):
 		"""Translate the one resolved dataset path into the runner's MS option."""

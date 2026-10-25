@@ -223,8 +223,17 @@ class AppConfigurator(object):
 		""" Set app input option value (to be overridden in derived classes) """
 			
 		# Left empty as to be overridden in derived classes
-		
+	
+	
+	def build_pipeline_arguments(self, parameters, allowed, scalar_validator):
+		"""Build V2 execution arguments using application-specific policy.
 
+		The default preserves the existing scalar V2 option handling.
+		Applications may override this for structured scientific options.
+		"""
+		return scalar_validator(parameters, allowed)
+
+	
 	def validate(self, job_options, data_inputs):
 		""" Validate job input """
 
