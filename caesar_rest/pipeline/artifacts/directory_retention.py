@@ -240,6 +240,7 @@ def copy_directory_artifact(
 		finally:
 			os.close(tmp_fd)
 
+
 		for key, value in [
 			('size_bytes', total),
 			('file_count', files),
@@ -247,13 +248,25 @@ def copy_directory_artifact(
 		]:
 			registered_value = expected.get(key)
 
-			if type(registered_value) is not int or registered_value != value:
+			# PyMongo may deserialize large BSON integers as bson.int64.Int64.
+			# Accept integer subclasses, but never bool or floating values.
+			if (
+				not isinstance(registered_value, int)
+				or isinstance(registered_value, bool)
+				or registered_value != value
+			):
 				raise DirectoryRetentionError(
 					'Directory metadata mismatch: '
-					'path=%s, field=%s, registered=%r, copied=%r' %
-					(source, key, registered_value, value)
+					'path=%s, field=%s, registered=%r, copied=%r, type=%s' %
+					(
+						source,
+						key,
+						registered_value,
+						value,
+						type(registered_value).__name__
+					)
 				)
-				
+			
 				
 		manifest = {'version': 1, 'kind': 'directory', 'size_bytes': total,
 			'file_count': files, 'directory_count': dirs, 'entries': entries}
