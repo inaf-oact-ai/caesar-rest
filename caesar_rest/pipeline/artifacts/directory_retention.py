@@ -239,9 +239,22 @@ def copy_directory_artifact(
 			os.fsync(tmp_fd)
 		finally:
 			os.close(tmp_fd)
-		for key, value in [('size_bytes', total), ('file_count', files), ('directory_count', dirs)]:
-			if type(expected.get(key)) is not int or expected[key] != value:
-				raise DirectoryRetentionError('Directory changed since discovery: ' + key)
+
+		for key, value in [
+			('size_bytes', total),
+			('file_count', files),
+			('directory_count', dirs)
+		]:
+			registered_value = expected.get(key)
+
+			if type(registered_value) is not int or registered_value != value:
+				raise DirectoryRetentionError(
+					'Directory metadata mismatch: '
+					'path=%s, field=%s, registered=%r, copied=%r' %
+					(source, key, registered_value, value)
+				)
+				
+				
 		manifest = {'version': 1, 'kind': 'directory', 'size_bytes': total,
 			'file_count': files, 'directory_count': dirs, 'entries': entries}
 		manifest_bytes = json.dumps(manifest, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode('utf-8')
