@@ -73,5 +73,5 @@ setup(
 	include_package_data=True,
 	zip_safe=False,
 	install_requires=reqs,
-	scripts=['apps/run_app.py','apps/run_jobmonitor.py','apps/run_accounter.py'],
+	scripts=['apps/run_app.py', 'apps/run_jobmonitor.py', 'apps/run_accounter.py', 'apps/run_artifact_retention.py'],
 )
