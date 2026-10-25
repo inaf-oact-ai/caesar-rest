@@ -132,14 +132,21 @@ def promote_mixed_run(db, owner, pipeline_id, node_id, run_id, root,
 					# Leftover unpublished result from a previous failed attempt:
 					# refuse to overwrite rather than implicitly deleting it.
 					raise manager.PipelineError('Uncommitted directory exists; administrative recovery required', 409)
+					
 				try:
 					result = directory_copy.copy_directory_artifact(
-						source, target, artifact,
+						source,
+						target,
+						artifact,
 						max_bytes=max_directory_bytes,
 						max_entries=max_directory_entries,
-						max_depth=max_directory_depth)
+						max_depth=max_directory_depth,
+						allow_locked_fallback=True
+					)
+
 				except directory_copy.DirectoryRetentionError as exc:
 					raise manager.PipelineError('Directory retention failed: %s' % exc, 409)
+				
 				manifest_name = '%04d.manifest.json' % index
 				digest = _write_sidecar(base, manifest_name, result['manifest'])
 				if digest != result['manifest_sha256']:

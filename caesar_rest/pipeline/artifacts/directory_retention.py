@@ -58,23 +58,74 @@ def _sync_dir(path):
 		os.close(fd)
 
 
-def _publish_directory_noreplace(staging_name, target_name, parent_fd):
-	"""Linux renameat2(RENAME_NOREPLACE); fail closed if unavailable."""
+
+def _publish_directory_noreplace(staging_name, target_name, parent_fd,
+		allow_locked_fallback=False):
+	"""Publish a directory without replacing existing retention data.
+
+	Prefer renameat2(RENAME_NOREPLACE). On unsupported filesystems,
+	allow a standard rename only when the caller holds the run-level
+	exclusive retention lock.
+
+	The fallback assumes a trusted retention directory and that all
+	retention writers cooperate through that lock.
+	"""
 	libc = ctypes.CDLL(None, use_errno=True)
 	renameat2 = getattr(libc, 'renameat2', None)
-	if renameat2 is None:
-		raise DirectoryRetentionError('Atomic no-replace directory publication unavailable')
-	renameat2.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
-	renameat2.restype = ctypes.c_int
-	result = renameat2(parent_fd, os.fsencode(staging_name), parent_fd, os.fsencode(target_name), 1)
-	if result != 0:
+
+	if renameat2 is not None:
+		renameat2.argtypes = [
+			ctypes.c_int,
+			ctypes.c_char_p,
+			ctypes.c_int,
+			ctypes.c_char_p,
+			ctypes.c_uint
+		]
+		renameat2.restype = ctypes.c_int
+
+		result = renameat2(
+			parent_fd,
+			os.fsencode(staging_name),
+			parent_fd,
+			os.fsencode(target_name),
+			1
+		)
+
+		if result == 0:
+			return
+
 		err = ctypes.get_errno()
+
 		if err == errno.EEXIST:
 			raise DirectoryRetentionError('Destination already exists')
-		if err in (errno.ENOSYS, errno.EINVAL, errno.ENOTSUP):
-			raise DirectoryRetentionError('Atomic no-replace directory publication unavailable')
-		raise OSError(err, os.strerror(err))
 
+		if err not in (errno.ENOSYS, errno.EINVAL, errno.ENOTSUP):
+			raise OSError(err, os.strerror(err))
+
+	if not allow_locked_fallback:
+		raise DirectoryRetentionError(
+			'Atomic no-replace directory publication unavailable'
+		)
+
+	# The caller must hold the exclusive run-level retention lock.
+	# Refuse to replace any destination already present.
+	try:
+		os.stat(
+			target_name,
+			dir_fd=parent_fd,
+			follow_symlinks=False
+		)
+	except FileNotFoundError:
+		pass
+	else:
+		raise DirectoryRetentionError('Destination already exists')
+
+	os.rename(
+		staging_name,
+		target_name,
+		src_dir_fd=parent_fd,
+		dst_dir_fd=parent_fd
+	)
 
 def copy_directory_artifact(source, destination, expected,
 		max_bytes=1024 * 1024 * 1024 * 1024,
@@ -189,9 +240,16 @@ def copy_directory_artifact(source, destination, expected,
 			'file_count': files, 'directory_count': dirs, 'entries': entries}
 		manifest_bytes = json.dumps(manifest, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode('utf-8')
 		manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
+		
 		# Separate sidecar in temporary tree is intentionally avoided: preserve
 		# exact scientific contents; caller stores manifest in metadata.
-		_publish_directory_noreplace(os.path.basename(tmp), name, parent_fd)
+		_publish_directory_noreplace(
+			os.path.basename(tmp),
+			name,
+			parent_fd,
+			allow_locked_fallback=allow_locked_fallback
+		)
+		
 		tmp = None
 		os.fsync(parent_fd)
 		return {'kind': 'directory', 'size_bytes': total, 'file_count': files,
