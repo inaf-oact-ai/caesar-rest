@@ -37,7 +37,12 @@ def request():
 
 def test_directory_binding_freezes_identity(monkeypatch):
 	db, run = make_db()
-	monkeypatch.setattr(binding.integrity, 'verify_directory_artifact', lambda *args, **kwargs: {'verified': True})
+	monkeypatch.setattr(
+		binding.integrity,
+		'verify_directory_manifest',
+		lambda *args, **kwargs: {'verified': True}
+	)
+	
 	result = binding.bind_inputs(db, 'alice', 'p1', request(), '/tmp/artifacts')
 	assert result[0]['source_run_id'] == 'r1'
 	assert result[0]['source_node_id'] == 'stage1'
@@ -69,7 +74,9 @@ def test_directory_integrity_failure_rejected(monkeypatch):
 	db, _ = make_db()
 	def fail(*args, **kwargs):
 		raise binding.integrity.DirectoryIntegrityError('bad')
-	monkeypatch.setattr(binding.integrity, 'verify_directory_artifact', fail)
+	#monkeypatch.setattr(binding.integrity, 'verify_directory_artifact', fail)
+	monkeypatch.setattr(binding.integrity, 'verify_directory_manifest', fail)
+		
 	with pytest.raises(manager.PipelineError):
 		binding.bind_inputs(db, 'alice', 'p1', request(), '/tmp/artifacts')
 
