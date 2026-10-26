@@ -1,7 +1,7 @@
 {
   "oxkat": {
     "parameters": {
-      "stage": ["GET_INFO", "1GC"]
+      "stage": ["GET_INFO", "1GC", "FLAG"]
     },
     "dataset_input_name": "measurement_set",
     "input_options_by_stage": {
