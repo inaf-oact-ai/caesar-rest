@@ -13,9 +13,9 @@
         "project-info": "project_info"
       },
       "FLAG": {
-				"input-ms": "target_ms",
-				"project-info": "project_info"
-			}
+        "input-ms": "target_ms",
+        "project-info": "project_info"
+      }
     }
   }
 }
