@@ -7,11 +7,12 @@ will be attached in a later integration step. All reads are owner-scoped.
 import datetime
 import re
 import uuid
+import time
 
 from pymongo import ReturnDocument
 
 from caesar_rest import mongo
-
+from caesar_rest import logger
 
 IDENTIFIER_RE = re.compile(r'^[A-Za-z][A-Za-z0-9_-]{0,63}$')
 RUN_STATES = {
@@ -121,6 +122,8 @@ def create_run(
 ):
 	"""Reserve a distinct experiment. Does NOT submit anything to Slurm."""
 	
+	t_run = time.perf_counter()
+	
 	validate_identifier(node_id, 'node_id')
 	get_pipeline(owner, pipeline_id)
 	if not isinstance(payload, dict):
@@ -169,6 +172,8 @@ def create_run(
 	# artifacts.binding -> artifacts.access -> pipeline.manager.
 	from caesar_rest.pipeline.artifacts import binding as pipeline_artifact_binding
 
+	t_bind = time.perf_counter()
+	
 	bindings = pipeline_artifact_binding.bind_inputs(
 		mongo.db,
 		owner,
@@ -179,6 +184,14 @@ def create_run(
 		max_directory_entries=max_directory_entries,
 		max_directory_depth=max_directory_depth
 	)
+	
+	logger.info(
+		'V2 run registration artifact binding: '
+		'pipeline_id=%s node_id=%s elapsed=%.3fs',
+		pipeline_id,
+		node_id,
+		time.perf_counter() - t_bind
+	)
 
 	bound_run_ids = {item['source_run_id'] for item in bindings}
 
@@ -187,6 +200,8 @@ def create_run(
 			'Every bound source_run_id must also appear in input_runs',
 			400
 		)
+	
+	t_database = time.perf_counter()
 	
 	counter = counters.find_one_and_update(
 		{'pipeline_id': pipeline_id, 'node_id': node_id},
@@ -216,6 +231,23 @@ def create_run(
 		'created_at': utcnow()
 	}
 	runs.insert_one(doc)
+	
+	logger.info(
+		'V2 run registration database finalization: '
+		'pipeline_id=%s node_id=%s elapsed=%.3fs',
+		pipeline_id,
+		node_id,
+		time.perf_counter() - t_database
+	)
+	
+	logger.info(
+		'V2 run registration total: '
+		'pipeline_id=%s node_id=%s elapsed=%.3fs',
+		pipeline_id,
+		node_id,
+		time.perf_counter() - t_run
+	)
+
 	return public_doc(doc)
 
 

@@ -15,6 +15,8 @@ from caesar_rest.pipeline.submission.claimed_preparation import claim_and_prepar
 from caesar_rest.pipeline.submission.slurm_submission import submit_claimed_v2
 from caesar_rest.job_configurator import JobConfigurator
 
+from caesar_rest import logger
+
 _OPTION = re.compile(r'^[A-Za-z][A-Za-z0-9_-]{0,63}$')
 _VALUE = re.compile(r'^[A-Za-z0-9_.:+/-]{1,128}$')
 
@@ -196,7 +198,7 @@ def submit_v2(owner, request_data, resolve_application):
 	)
 	
 	prepare_seconds = time.perf_counter() - t_prepare
-	current_app.logger.info('V2 submission preparation: %.3f seconds', prepare_seconds)
+	logger.info('V2 submission preparation: %.3f seconds', prepare_seconds)
 	
 	# This function manages one-shot scheduler intent and run finalization.
 	t_scheduler = time.perf_counter()
@@ -208,8 +210,7 @@ def submit_v2(owner, request_data, resolve_application):
 	)
 	
 	scheduler_seconds = time.perf_counter() - t_scheduler
-	current_app.logger.info('V2 Slurm submission: %.3f seconds', scheduler_seconds)
-	
+	logger.info('V2 Slurm submission: %.3f seconds', scheduler_seconds)
 	
 	now = datetime.datetime.now().isoformat()
 	workspace = prepared['assets']['workspace_app']
