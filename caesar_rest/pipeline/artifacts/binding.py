@@ -90,7 +90,9 @@ def bind_inputs(db, owner, pipeline_id, requests, retention_root,
 			try:
 				t_verify = time.perf_counter()
 				
-				verified = integrity.verify_directory_artifact(
+				# - verify_directory_manifest replaces verify_directory_artifact (commented out)
+				#   as this is taking too much time to process and would block for seconds the restAPI response
+				verified = integrity.verify_directory_manifest(
 					base, 
 					index, 
 					record, 
@@ -100,12 +102,29 @@ def bind_inputs(db, owner, pipeline_id, requests, retention_root,
 				)
 				
 				logger.info(
-					'V2 retained directory verification: index=%d '
+					'V2 retained directory manifest verification: index=%d '
 					'size_bytes=%d elapsed=%.3fs',
 					index,
 					record['size_bytes'],
 					time.perf_counter() - t_verify
 				)
+			
+				#verified = integrity.verify_directory_artifact(
+				#	base, 
+				#	index, 
+				#	record, 
+				#	max_bytes=max_directory_bytes,
+				#	max_entries=max_directory_entries, 
+				#	max_depth=max_directory_depth
+				#)
+				
+				#logger.info(
+				#	'V2 retained directory verification: index=%d '
+				#	'size_bytes=%d elapsed=%.3fs',
+				#	index,
+				#	record['size_bytes'],
+				#	time.perf_counter() - t_verify
+				#)
 				
 			except integrity.DirectoryIntegrityError as exc:
 				raise manager.PipelineError('Upstream directory integrity verification failed', 409) from exc

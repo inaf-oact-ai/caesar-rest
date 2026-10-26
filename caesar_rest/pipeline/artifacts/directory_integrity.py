@@ -35,6 +35,108 @@ def _read_sidecar(base, filename, limit):
 		os.close(fd)
 
 
+def verify_directory_manifest(base, index, record, max_entries=100000,
+		max_bytes=1024 * 1024 * 1024 * 1024, max_depth=16,
+		max_manifest_bytes=32 * 1024 * 1024):
+	"""Verify retained artifact metadata and manifest without hashing file contents.
+
+	Full byte-level verification is deferred to V2 private-copy staging.
+	This check does not prove that the retained source bytes are unchanged.
+	"""
+	if type(index) is not int or index < 0 or not isinstance(record, dict):
+		raise DirectoryIntegrityError('Invalid directory artifact identity')
+
+	name = '%04d' % index
+	manifest_name = name + '.manifest.json'
+
+	if (
+		record.get('index') != index
+		or record.get('kind') != 'directory'
+		or record.get('manifest_name') != manifest_name
+	):
+		raise DirectoryIntegrityError('Invalid directory artifact metadata')
+
+	sha = record.get('manifest_sha256')
+
+	if not isinstance(sha, str) or not re.fullmatch(r'[0-9a-f]{64}', sha):
+		raise DirectoryIntegrityError('Invalid directory manifest digest')
+
+	for field in ('size_bytes', 'file_count', 'directory_count'):
+		value = record.get(field)
+		if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+			raise DirectoryIntegrityError('Invalid directory counts')
+
+	if any(
+		type(value) is not int or value < 1
+		for value in (max_entries, max_bytes, max_depth, max_manifest_bytes)
+	):
+		raise DirectoryIntegrityError('Invalid verification limits')
+
+	try:
+		data = _read_sidecar(base, manifest_name, max_manifest_bytes)
+
+		if hashlib.sha256(data).hexdigest() != sha:
+			raise DirectoryIntegrityError('Directory manifest checksum mismatch')
+
+		manifest = json.loads(data.decode('utf-8'))
+
+		if (
+			not isinstance(manifest, dict)
+			or manifest.get('version') != 1
+			or manifest.get('kind') != 'directory'
+		):
+			raise DirectoryIntegrityError('Invalid directory manifest')
+
+		for field in ('size_bytes', 'file_count', 'directory_count'):
+			if manifest.get(field) != record[field]:
+				raise DirectoryIntegrityError('Directory manifest metadata mismatch')
+
+		entries = manifest.get('entries')
+
+		if not isinstance(entries, list) or len(entries) > max_entries:
+			raise DirectoryIntegrityError('Invalid directory manifest entries')
+
+		from pipeline_runtime.integrity import validate_expected
+
+		validate_expected({'manifest_entries': entries}, 'directory')
+
+		file_count = sum(entry['kind'] == 'file' for entry in entries)
+		directory_count = len(entries) - file_count
+		total_size = sum(entry.get('size_bytes', 0) for entry in entries)
+
+		if (
+			file_count != record['file_count']
+			or directory_count != record['directory_count']
+			or total_size != record['size_bytes']
+			or total_size > max_bytes
+		):
+			raise DirectoryIntegrityError('Directory manifest entry totals mismatch')
+
+		# Ensure the retained artifact root exists and is not a symlink.
+		parent_fd = _open_directory(base)
+
+		try:
+			artifact_fd = os.open(name, _dirflags(), dir_fd=parent_fd)
+			os.close(artifact_fd)
+		finally:
+			os.close(parent_fd)
+
+		return {
+			'verified': True,
+			'index': index,
+			'size_bytes': total_size,
+			'file_count': file_count,
+			'directory_count': directory_count
+		}
+
+	except (OSError, ValueError, UnicodeError, TypeError, KeyError) as exc:
+		if isinstance(exc, DirectoryIntegrityError):
+			raise
+
+		raise DirectoryIntegrityError(
+			'Cannot verify retained directory manifest'
+		) from exc
+
 def verify_directory_artifact(base, index, record, max_entries=100000, max_bytes=1024 * 1024 * 1024 * 1024,
 		max_depth=16, max_manifest_bytes=32 * 1024 * 1024):
 	"""Verify exact contents and manifest of a retained directory.
