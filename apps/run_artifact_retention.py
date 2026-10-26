@@ -49,20 +49,57 @@ def process_one(db, root, limits):
 	)
 	if run is None:
 		return False
+		
+
 	identity = {'_id': run['_id'], 'retention_status': 'COPYING'}
+	started = time.monotonic()
+
+	logging.info(
+		'Starting artifact retention: pipeline=%s node=%s run=%s '
+		'job=%s artifacts=%d',
+		run['pipeline_id'],
+		run['node_id'],
+		run['run_id'],
+		run.get('job_id'),
+		len(run.get('artifacts') or [])
+	)
+
 	try:
-		result = retention.promote_run(
-			db, run['owner'], run['pipeline_id'], run['node_id'],
-			run['run_id'], root,
-			limits['file_bytes'], limits['directory_bytes'],
-			limits['directory_entries'], limits['directory_depth']
+		result = retention.promote_run(		
+			db, 
+			run['owner'], 
+			run['pipeline_id'], 
+			run['node_id'],
+			run['run_id'], 
+			root,
+			limits['file_bytes'], 
+			limits['directory_bytes'],
+			limits['directory_entries'], 
+			limits['directory_depth']
 		)
 		db.pipeline_runs.update_one(identity, {'$set': {
 			'retention_status': 'READY', 'retention_finished_at': utcnow()
 		}})
-		logging.info('Retained run %s: %s', run['run_id'], result)
+		
+		logging.info(
+			'Artifact retention completed: pipeline=%s run=%s '
+			'elapsed_seconds=%.1f result=%s',
+			run['pipeline_id'],
+			run['run_id'],
+			time.monotonic() - started,
+			result
+		)
+
 	except Exception as exc:
-		logging.exception('Retention failed for run %s', run['run_id'])
+			
+		logging.exception(
+			'Artifact retention failed: pipeline=%s run=%s '
+			'elapsed_seconds=%.1f',
+			run['pipeline_id'],
+			run['run_id'],
+			time.monotonic() - started
+		)
+
 		db.pipeline_runs.update_one(identity, {'$set': {
 			'retention_status': 'FAILED', 'retention_finished_at': utcnow(),
 			'retention_error': str(exc)[:1000]
