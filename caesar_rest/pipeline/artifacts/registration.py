@@ -16,11 +16,10 @@ class ArtifactRegistrationError(ValueError):
 
 
 def register_completed_run(db, owner, pipeline_id, run_id, job_id, contract):
-	"""Register owner-scoped artifacts for a completed staged-container job.
+	"""Register artifacts using an already selected output contract.
 
-	Returns True on a new registration, False if no registration is applicable
-	or if artifacts were already registered. Raises on invalid output/workspace.
-	Caller should log errors without altering the scientific run status.
+	The caller must resolve application-specific output selection
+	before invoking this lower-level registration function.
 	"""
 	if not all(isinstance(x, str) and x for x in (owner, pipeline_id, run_id, job_id)):
 		raise ArtifactRegistrationError('Missing run identity')

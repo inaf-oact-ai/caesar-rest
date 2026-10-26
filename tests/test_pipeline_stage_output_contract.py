@@ -81,3 +81,50 @@ def test_overlapping_ms_globs_are_safe_after_stage_selection(tmp_path):
 	assert [a['name'] for a in second] == ['manifest', 'second_stage_ms']
 	assert first[0]['kind'] == 'directory'
 	assert second[1]['kind'] == 'directory'
+	
+
+def test_registration_uses_persisted_stage(monkeypatch):
+	from types import SimpleNamespace
+	from caesar_rest.pipeline.artifacts import registration
+
+	run = {
+		'application': 'oxkat',
+		'parameters': {'stage': 'FLAG'},
+		'status': 'COMPLETED',
+	}
+
+	class FakeRuns:
+		def find_one(self, query):
+			return run
+
+	db = SimpleNamespace(pipeline_runs=FakeRuns())
+
+	class FakeJobConfigurator:
+		def get_app_description(self, app_name):
+			assert app_name == 'oxkat'
+			return {'job_outputs': _contract()}
+
+	monkeypatch.setattr(
+		registration,
+		'JobConfigurator',
+		lambda: FakeJobConfigurator()
+	)
+
+	captured = {}
+
+	def fake_register(db_arg, owner, pipeline_id, run_id, job_id, contract):
+		captured['contract'] = contract
+		return True
+
+	monkeypatch.setattr(
+		registration,
+		'register_completed_run',
+		fake_register
+	)
+
+	assert registration.register_using_job_config(
+		db, 'owner', 'pipeline', 'run', 'job'
+	)
+
+	assert set(captured['contract']) == {'manifest'}
+
