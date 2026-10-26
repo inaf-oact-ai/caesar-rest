@@ -108,7 +108,12 @@ def build_multi_input_specs(workspace_cluster, sources, image, arguments,
 		):
 			raise MultiInputSpecError('Input source overlaps workspace')
 
-		if kind not in ('file', 'directory') or type(size) is not int or size < 0:
+		if (
+			kind not in ('file', 'directory')
+			or not isinstance(size, int)
+			or isinstance(size, bool)
+			or size < 0
+		):		
 			raise MultiInputSpecError('Invalid input type or size')
 
 		try:

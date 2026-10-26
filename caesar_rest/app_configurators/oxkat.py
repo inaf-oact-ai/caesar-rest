@@ -40,8 +40,7 @@ OXKAT_STAGES = [
 
 # Keep synchronized with run_oxkat.sh. Do not allow unimplemented stages to
 # reach Slurm: they require distinct inputs, output contracts and permissions.
-IMPLEMENTED_STAGES = {"GET_INFO", "1GC"}
-
+IMPLEMENTED_STAGES = {"GET_INFO", "1GC", "FLAG"}
 
 # - Scientific settings exposed by OXKAT's upstream config.py.
 # - Keep this policy inside the application configurator, not the
@@ -204,6 +203,7 @@ class OxkatAppConfigurator(AppConfigurator):
 				),
 				"format": "",
 				"parser": "",
+				"stages": ["1GC"],
 				"required": False,
 			},
 			"working_measurement_sets": {
@@ -216,6 +216,7 @@ class OxkatAppConfigurator(AppConfigurator):
 					"Private derived Measurement Sets produced by "
 					"first-generation calibration."
 				),
+				"stages": ["1GC"],
 				"required": False,
 			},
 			"measurement_set_flagversions": {
@@ -228,6 +229,7 @@ class OxkatAppConfigurator(AppConfigurator):
 					"CASA flag-version histories associated with "
 					"derived Measurement Sets."
 				),
+				"stages": ["1GC","FLAG"],
 				"required": False,
 			},
 			"gain_tables": {
@@ -237,6 +239,7 @@ class OxkatAppConfigurator(AppConfigurator):
 				"type": "application/octet-stream",
 				"role": "primary_result",
 				"description": "First-generation calibration solution tables.",
+				"stages": ["1GC"],
 				"required": False,
 			},
 			"gain_plots": {
@@ -246,6 +249,7 @@ class OxkatAppConfigurator(AppConfigurator):
 				"type": "application/octet-stream",
 				"role": "diagnostic",
 				"description": "Plots of calibration solutions.",
+				"stages": ["1GC"],
 				"required": False,
 			},
 			"visibility_plots": {
@@ -255,6 +259,7 @@ class OxkatAppConfigurator(AppConfigurator):
 				"type": "application/octet-stream",
 				"role": "diagnostic",
 				"description": "Diagnostic visibility plots.",
+				"stages": ["1GC"],
 				"required": False,
 			},			
 			"oxkat_config_overrides": {
@@ -268,6 +273,39 @@ class OxkatAppConfigurator(AppConfigurator):
 				),
 				"format": "",
 				"parser": "json",
+				"required": False,
+			},
+			"flag_execution_script": {
+				"path": "submit_flag_jobs.sh",
+				"glob": None,
+				"type": "text/x-shellscript",
+				"role": "diagnostic",
+				"description": "Generated OXKAT FLAG execution script.",
+				"stages": ["FLAG"],
+				"required": False,
+			},
+			"flag_images": {
+				"path": "IMAGES",
+				"glob": None,
+				"kind": "directory",
+				"type": "application/octet-stream",
+				"role": "primary_result",
+				"description": (
+					"FLAG imaging products, including initial FITS masks."
+				),
+				"stages": ["FLAG"],
+				"required": False,
+			},
+			"flagged_target_measurement_sets": {
+				"path": None,
+				"glob": "*.ms",
+				"kind": "directory",
+				"type": "application/x-casa-measurement-set",
+				"role": "primary_result",
+				"description": (
+					"Private target Measurement Sets after FLAG processing."
+				),
+				"stages": ["FLAG"],
 				"required": False,
 			},
 			"log": {

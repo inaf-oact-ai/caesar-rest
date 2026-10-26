@@ -86,7 +86,21 @@ def register_using_job_config(db, owner, pipeline_id, run_id, job_id):
 	description = configurator.get_app_description(run['application'])
 	if not isinstance(description, dict):
 		raise ArtifactRegistrationError('Unknown application output contract')
+		
+	contract = description.get('job_outputs') or {}
+
+	try:
+		contract = discovery.select_output_contract(
+			contract,
+			(run.get('parameters') or {}).get('stage')
+		)
+	except discovery.ArtifactDiscoveryError as exc:
+		raise ArtifactRegistrationError(
+			'Invalid stage-aware output contract'
+		) from exc
+
 	return register_completed_run(
 		db, owner, pipeline_id, run_id, job_id,
-		description.get('job_outputs') or {}
+		contract
 	)
+

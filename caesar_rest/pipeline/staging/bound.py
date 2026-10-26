@@ -19,19 +19,24 @@ _SHA = re.compile(r'^[0-9a-f]{64}$')
 
 
 def _check_binding(run, record, artifact, bound, index):
+	
 	if record.get('index') != index or bound.get('source_node_id') != run.get('node_id'):
 		raise manager.PipelineError('Frozen artifact identity mismatch', 409)
+	
 	kind = artifact.get('kind', 'file')
 	if (kind not in ('file', 'directory') or bound.get('artifact_kind') != kind
 			or bound.get('artifact_name') != artifact.get('name')
-			or type(artifact.get('size_bytes')) is not int
+			or not isinstance(artifact.get('size_bytes'), int)
+			or isinstance(artifact.get('size_bytes'), bool)			
 			or bound.get('size_bytes') != artifact['size_bytes']
 			or record.get('size_bytes') != artifact['size_bytes']):
 		raise manager.PipelineError('Frozen artifact metadata mismatch', 409)
+	
 	key = 'manifest_sha256' if kind == 'directory' else 'sha256'
 	sha = record.get(key)
 	if not isinstance(sha, str) or not _SHA.fullmatch(sha) or bound.get(key) != sha:
 		raise manager.PipelineError('Frozen artifact checksum mismatch', 409)
+	
 	return kind
 
 

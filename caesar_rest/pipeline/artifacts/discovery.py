@@ -64,6 +64,46 @@ def _directory_summary(path, max_depth, max_entries, max_bytes):
 	return {'size_bytes': total, 'file_count': files, 'directory_count': directories}
 
 
+
+def select_output_contract(contract, stage=None):
+	"""Return output definitions applicable to the requested stage.
+
+	Definitions without 'stages' are global. Definitions with
+	'stages' are enabled only for explicitly matching stages.
+	"""
+	if not isinstance(contract, dict):
+		raise ArtifactDiscoveryError('Invalid output contract')
+
+	selected = {}
+
+	for name, spec in contract.items():
+		if not isinstance(spec, dict):
+			raise ArtifactDiscoveryError('Invalid output definition')
+
+		stages = spec.get('stages')
+
+		if stages is not None:
+			if (
+				not isinstance(stages, (list, tuple))
+				or not stages
+				or any(
+					not isinstance(value, str) or not value
+					for value in stages
+				)
+				or len(set(stages)) != len(stages)
+			):
+				raise ArtifactDiscoveryError(
+					'Invalid output stages for %s' % name
+				)
+
+			if stage not in stages:
+				continue
+
+		selected[name] = spec
+
+	return selected
+
+
 def discover_artifacts(workspace, contract, max_files=1000, max_directory_entries=100000,
 						max_directory_depth=16, max_directory_bytes=1024 * 1024 * 1024 * 1024):
 	"""Discover declared files and directories under ``workspace/results``.
