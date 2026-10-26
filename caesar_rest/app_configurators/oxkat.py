@@ -22,10 +22,12 @@ import json
 import math
 import re
 
+
 from caesar_rest.app_configurators.base import (
 	AppConfigurator,
 	EnumValueOption,
 )
+from caesar_rest.app_configurators import oxkat_scientific_config
 from caesar_rest import logger
 
 
@@ -41,46 +43,6 @@ OXKAT_STAGES = [
 # Keep synchronized with run_oxkat.sh. Do not allow unimplemented stages to
 # reach Slurm: they require distinct inputs, output contracts and permissions.
 IMPLEMENTED_STAGES = {"GET_INFO", "1GC", "FLAG"}
-
-# - Scientific settings exposed by OXKAT's upstream config.py.
-# - Keep this policy inside the application configurator, not the
-#   generic V2 pipeline submission implementation.
-OXKAT_CONFIG_OPTIONS = {
-	"CAL_1GC_PRIMARY": {
-		"type": "field_selection",
-		"stages": {"GET_INFO"},
-	},
-	"CAL_1GC_SECONDARIES": {
-		"type": "field_selection",
-		"stages": {"GET_INFO"},
-	},
-	"CAL_1GC_TARGETS": {
-		"type": "field_selection",
-		"stages": {"GET_INFO"},
-	},
-	"PRE_NCHANS": {
-		"type": "integer",
-		"stages": {"1GC"},
-		"min": 1,
-		"max": 65536,
-	},
-	"WSC_CIRCULARBEAM": {
-		"type": "boolean",
-		"stages": {"FLAG", "2GC", "3GC_PEEL", "3GC_FACET"},
-	},
-	"WSC_NITER": {
-		"type": "integer",
-		"stages": {"FLAG", "2GC", "3GC_PEEL", "3GC_FACET"},
-		"min": 0,
-		"max": 10000000,
-	},
-	"WSC_BRIGGS": {
-		"type": "number",
-		"stages": {"FLAG", "2GC", "3GC_PEEL", "3GC_FACET"},
-		"min": -2.0,
-		"max": 2.0,
-	},
-}
 
 _FIELD_SELECTION = re.compile(r'^(?:auto|[0-9]+(?:,[0-9]+)*)$')
 
@@ -373,68 +335,14 @@ class OxkatAppConfigurator(AppConfigurator):
 		if not overrides:
 			raise ValueError('oxkat_config must not be empty')
 
-		if len(overrides) > 32:
+		if len(overrides) > 128:
 			raise ValueError('Too many OXKAT configuration overrides')
 
-		validated = {}
 
-		for name, value in overrides.items():
-			if not isinstance(name, str):
-				raise ValueError('OXKAT configuration names must be strings')
-
-			spec = OXKAT_CONFIG_OPTIONS.get(name)
-
-			if spec is None:
-				raise ValueError(
-					'Unsupported OXKAT configuration option: %s' % name
-				)
-
-			if stage not in spec['stages']:
-				raise ValueError(
-					'OXKAT option %s is not applicable to stage %s' %
-					(name, stage)
-				)
-
-			value_type = spec['type']
-
-			if value_type == 'boolean':
-				if type(value) is not bool:
-					raise ValueError('%s requires a boolean' % name)
-
-			elif value_type == 'integer':
-				if type(value) is not int:
-					raise ValueError('%s requires an integer' % name)
-
-			elif value_type == 'number':
-				if type(value) not in (int, float):
-					raise ValueError('%s requires a number' % name)
-
-				value = float(value)
-
-				if not math.isfinite(value):
-					raise ValueError('%s must be finite' % name)
-
-			elif value_type == 'field_selection':
-				if (
-					not isinstance(value, str)
-					or len(value) > 128
-					or not _FIELD_SELECTION.fullmatch(value)
-				):
-					raise ValueError(
-						'%s requires auto or comma-separated field IDs' %
-						name
-					)
-
-			else:
-				raise ValueError('Invalid OXKAT option specification')
-
-			if value_type in ('integer', 'number'):
-				if value < spec['min'] or value > spec['max']:
-					raise ValueError(
-						'%s is outside the allowed range' % name
-					)
-
-			validated[name] = value
+		validated = oxkat_scientific_config.validate(
+			overrides,
+			stage
+		)
 
 		return validated
 
