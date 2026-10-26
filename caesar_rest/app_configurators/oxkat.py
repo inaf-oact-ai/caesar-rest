@@ -98,51 +98,67 @@ class OxkatAppConfigurator(AppConfigurator):
 		self.cmd = "run_oxkat.sh"
 		self.cmd_args = []
 		self.batch_processing_support = False
-
+		
 		self.description = (
-			"Process MeerKAT radio-interferometric Measurement Sets using OXKAT. "
-			"The GET_INFO stage inspects an observation and generates metadata "
-			"describing the observing band, fields, calibrators and targets. "
-			"The 1GC stage consumes this metadata together with the original "
-			"Measurement Set to prepare the first-generation calibration recipe. "
-			"Currently, 1GC generates and validates its execution script without "
-			"performing calibration. Subsequent calibration and imaging stages "
+			"Process MeerKAT radio-interferometric Measurement Sets "
+			"using OXKAT. GET_INFO extracts observation metadata; "
+			"1GC performs reference calibration and produces calibrated "
+			"target Measurement Sets; FLAG performs target flagging, "
+			"initial imaging and mask generation using retained "
+			"1GC outputs. Subsequent calibration and imaging stages "
 			"will be enabled incrementally."
-		)
+		)		
 		
 		self.tool_categories = ["measurement-set"]
 		
 		self.input_requirements = {
 			"supported_formats": ["ms"],
 			"expected_data": (
-				"GET_INFO requires one registered MeerKAT Measurement Set "
-				"directory (*.ms). "
-				"1GC additionally requires project_info.json produced by "
-				"a completed upstream GET_INFO pipeline run."
+				"GET_INFO requires one registered MeerKAT Measurement "
+				"Set directory (*.ms). "
+				"1GC requires the original registered Measurement Set "
+				"and retained project_info.json from GET_INFO. "
+				"FLAG requires a calibrated target Measurement Set "
+				"produced and retained by 1GC, together with "
+				"project_info.json describing the target. "
+				"FLAG currently supports one target MS per run."
 			),
 			"notes": [
-				"Measurement Sets are registered server-side and are not uploaded.",
-				"V2 pipeline runs reference the Measurement Set using dataset_id.",
-				"GET_INFO uses a read-only reference without copying the dataset.",
-				"1GC requires the registered Measurement Set and the retained "
-				"project_info artifact from GET_INFO.",
-				"CAESAR-REST resolves V2 inputs using trusted dataset and "
-				"artifact bindings; filesystem paths are not supplied by clients.",
-				"During 1GC preparation, the original Measurement Set is "
-				"not modified."
+				"Measurement Sets are registered server-side; "
+				"large scientific datasets are not uploaded.",
+				"GET_INFO references the original dataset using "
+				"dataset_id and does not modify it.",
+				"1GC uses the registered original Measurement Set "
+				"and the retained GET_INFO project_info artifact.",
+				"1GC performs calibration in a private workspace "
+				"and publishes derived Measurement Sets.",
+				"FLAG uses two retained upstream artifact bindings: "
+				"target_ms and project_info.",
+				"FLAG requires a private writable copy of the "
+				"calibrated target MS; retained upstream data "
+				"must remain unchanged.",
+				"FLAG does not require dataset_id because its "
+				"Measurement Set is an upstream pipeline artifact.",
+				"V2 inputs are resolved from authorized dataset IDs "
+				"and frozen artifact bindings; clients do not "
+				"supply filesystem paths.",
 			],
 		}
 		
+		
 		self.limitations = [
-			"GET_INFO and 1GC preparation are the currently supported stages.",
-			"1GC preparation generates the calibration execution script but "
-			"does not execute calibration.",
-			"Exactly one registered Measurement Set is supported per V2 run.",
-			"1GC requires project_info.json from a completed GET_INFO run.",
-			"The Measurement Set must be accessible to the Slurm execution environment.",
-			"Actual 1GC calibration requires a private writable Measurement Set copy.",
-			"FLAG, 2GC, 3GC_PEEL and 3GC_FACET are not yet supported."
+			"GET_INFO, 1GC and FLAG are supported through V2 pipelines.",
+			"1GC requires a registered original Measurement Set and "
+			"the retained project_info artifact from GET_INFO.",
+			"FLAG requires a retained calibrated target Measurement Set "
+			"from 1GC and validated project_info metadata.",
+			"FLAG initially supports one target Measurement Set per run.",
+			"Derived Measurement Sets are processed in private writable "
+			"workspaces; original datasets and retained upstream artifacts "
+			"must not be modified.",
+			"2GC, 3GC_PEEL and 3GC_FACET are not yet supported."
 		]
+
 		
 		# - Set valid options
 		self.valid_options = {
@@ -151,10 +167,13 @@ class OxkatAppConfigurator(AppConfigurator):
 				value="",
 				value_type=str,
 				description=(
-					"OXKAT processing stage. GET_INFO executes observation metadata "
-					"extraction; 1GC prepares the first-generation calibration recipe "
-					"without executing calibration. Other stages are reserved for "
-					"future implementation."
+					"OXKAT processing stage. GET_INFO extracts observation "
+					"metadata; 1GC executes reference calibration and "
+					"produces calibrated target Measurement Sets; "
+					"FLAG performs target flagging, initial imaging "
+					"and cleaning-mask generation using retained "
+					"1GC products. 2GC and 3GC stages are reserved "
+					"for future implementation."
 				),
 				category="RUN",
 				default_value="GET_INFO",
@@ -467,11 +486,14 @@ class OxkatAppConfigurator(AppConfigurator):
 		# - Legacy V1 submissions do not support upstream artifact bindings.
 		# - 1GC requires project_info.json from a completed GET_INFO run.
 		# - V2 submissions use the separate trusted pipeline staging path.
-		if isinstance(job_options, dict) and job_options.get("stage") == "1GC":
+		if (
+			isinstance(job_options, dict)
+			and job_options.get("stage") in ("1GC", "FLAG")
+		):
 			self.validation_status = (
-				"OXKAT 1GC is supported only through V2 pipeline submission. "
-				"Reserve a pipeline run with a registered Measurement Set "
-				"and the retained project_info artifact from GET_INFO."
+				"OXKAT 1GC and FLAG are supported only through "
+				"V2 pipeline submission. These stages require "
+				"authorized dataset or retained-artifact bindings."
 			)
 			logger.warning(self.validation_status)
 			return False
