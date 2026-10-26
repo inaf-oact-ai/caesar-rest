@@ -3,6 +3,7 @@
 No scheduler operations, staging or writes to source artifacts.
 """
 import re
+import time
 
 from caesar_rest.pipeline import manager
 from caesar_rest.pipeline.artifacts import access
@@ -83,11 +84,27 @@ def bind_inputs(db, owner, pipeline_id, requests, retention_root,
 				raise manager.PipelineError('Invalid directory manifest digest', 409)
 			
 			base = retention.retained_directory(retention_root, owner, pipeline_id, run_id)
+			
 			try:
+				t_verify = time.perf_counter()
+				
 				verified = integrity.verify_directory_artifact(
-					base, index, record, max_bytes=max_directory_bytes,
-					max_entries=max_directory_entries, max_depth=max_directory_depth
+					base, 
+					index, 
+					record, 
+					max_bytes=max_directory_bytes,
+					max_entries=max_directory_entries, 
+					max_depth=max_directory_depth
 				)
+				
+				logger.info(
+					'V2 retained directory verification: index=%d '
+					'size_bytes=%d elapsed=%.3fs',
+					index,
+					record['size_bytes'],
+					time.perf_counter() - t_verify
+				)
+				
 			except integrity.DirectoryIntegrityError as exc:
 				raise manager.PipelineError('Upstream directory integrity verification failed', 409) from exc
 			

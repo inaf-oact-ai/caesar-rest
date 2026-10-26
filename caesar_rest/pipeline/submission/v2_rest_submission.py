@@ -5,6 +5,7 @@ configuration maps frozen parameters and input names into application options.
 """
 import datetime
 import re
+import time
 
 from flask import current_app
 
@@ -175,7 +176,9 @@ def submit_v2(owner, request_data, resolve_application):
 				'V2 retention roots are not configured', 503
 			)
 
-	# Preparation is responsible for claim failure persistence when needed.
+	# Preparation is responsible for claim failure persistence when needed
+	t_prepare = time.perf_counter()
+	
 	prepared = claim_and_prepare_v2(
 		mongo.db, owner, pipeline_id, node_id, run_id, job_id,
 		owner_job_app, owner_job_cluster,
@@ -192,12 +195,22 @@ def submit_v2(owner, request_data, resolve_application):
 		dataset_input_name=dataset_input_name
 	)
 	
+	prepare_seconds = time.perf_counter() - t_prepare
+	current_app.logger.info('V2 submission preparation: %.3f seconds', prepare_seconds)
+	
 	# This function manages one-shot scheduler intent and run finalization.
+	t_scheduler = time.perf_counter()
+	
 	submitted = submit_claimed_v2(
 		prepared, jobmgr_slurm, job_id,
 		python_executable=current_app.config.get('PIPELINE_PYTHON_EXECUTABLE')
 			or '/usr/bin/python3'
 	)
+	
+	scheduler_seconds = time.perf_counter() - t_scheduler
+	current_app.logger.info('V2 Slurm submission: %.3f seconds', scheduler_seconds)
+	
+	
 	now = datetime.datetime.now().isoformat()
 	workspace = prepared['assets']['workspace_app']
 	job_doc = {
