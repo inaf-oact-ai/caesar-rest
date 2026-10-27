@@ -135,6 +135,10 @@ Before running the application you must do some preparatory stuff:
 * Create the top directory for models (by default `/opt/caesar-rest/models`) and put TensorFlow/PyTorch model & weights files under this path.        
 * (OPTIONAL) Create the log directory for system services (see below), e.g. `/opt/caesar-rest/logs` 
 * (OPTIONAL) Create the run directory for system services (see below), e.g. `/opt/caesar-rest/run` 
+* Create a persistent directory for pipeline artifacts, e.g.
+  `/storage/caesar-rest/pipeline-artifacts`. This directory must be
+  accessible to the artifact retention worker, REST application
+  and downstream staging environment.
 
 ### **Run DB service**
 caesar-rest requires a MongoDB service where to store user data and job information. To start the DB service:    
