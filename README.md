@@ -324,7 +324,7 @@ where supported `ARGS` are:
 
    SLURM OPTIONS   
    * `slurm_keyfile=[FILE_PATH]`: Slurm rest service private key file path    
-   * `slurm_user=[SLURM_USER]`: Username enabled to run in Slurm cluster (default=cirasa)   
+   * `slurm_user=[SLURM_USER]`: Username enabled to run in Slurm cluster (default is deployment-specific)   
    * `slurm_host=[SLURM_HOST]`: Slurm cluster host/ipaddress (default=localhost)   
    * `slurm_port=[SLURM_PORT]`: Slurm rest service port (default=6820)  
    * `slurm_batch_workdir=[SLURM_BATCH_WORKDIR]`: Cluster directory where to place Slurm batch logs (must be writable by slurm_user) (default=/opt/slurm/batchlogs/caesar-rest)    
@@ -362,6 +362,9 @@ where supported `ARGS` are:
    * `dataset_emu_gp_pilot`: Path to emu-gp-pilot dataset json filelist      
   
 Flask default options are defined in the `config.py`. Celery options are defined in the `celery_config.py`. Other options may be defined in the future to override default Flask and Celery options.   
+The default RabbitMQ `guest` credentials are intended for local
+development only. Production deployments should use dedicated
+accounts with strong credentials and restricted permissions.
 
 #### **Run the application in production**   
 In a production environment you can run the application behind a nginx+uwsgi (or nginx+gunicorn) server. In the `config` directory of the repository you can find sample files to create and configure required services. For example:  
