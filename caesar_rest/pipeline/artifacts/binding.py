@@ -15,11 +15,12 @@ from caesar_rest import logger
 _INPUT = re.compile(r'^[A-Za-z][A-Za-z0-9_-]{0,63}$')
 _SHA = re.compile(r'^[0-9a-f]{64}$')
 
-def resolve_named_inputs(db, owner, pipeline_id, inputs):
-	"""Resolve explicit run/artifact names to legacy binding references.
+def resolve_named_inputs(db, owner, pipeline_id, inputs, pipeline=None):
+	"""Resolve explicit-run and selected-node references to fixed identities.
 
-	This function resolves logical identities only. bind_inputs() remains
-	responsible for verifying retention, integrity and immutable bindings.
+	The selections document is read once. Every selected-node input in this
+	request uses the same selection snapshot. bind_inputs() subsequently
+	verifies retention and integrity and freezes the resolved identities.
 	"""
 
 	if not isinstance(inputs, dict) or len(inputs) > 32:
@@ -27,6 +28,37 @@ def resolve_named_inputs(db, owner, pipeline_id, inputs):
 			'inputs must be an object containing at most 32 entries',
 			400
 		)
+
+	# A pipeline selection snapshot is only required when at least
+	# one input references a selected node.
+	needs_selections = any(
+		isinstance(reference, dict)
+		and 'node_id' in reference
+		for reference in inputs.values()
+	)
+
+	selections = {}
+
+	if needs_selections:
+		if pipeline is None:
+			pipeline = manager.get_pipeline(owner, pipeline_id)
+
+		if (
+			pipeline.get('owner') != owner
+			or pipeline.get('pipeline_id') != pipeline_id
+		):
+			raise manager.PipelineError(
+				'Invalid pipeline context',
+				403
+			)
+
+		selections = pipeline.get('selections') or {}
+
+		if not isinstance(selections, dict):
+			raise manager.PipelineError(
+				'Invalid pipeline selections metadata',
+				409
+			)		
 
 	result = []
 	run_cache = {}
@@ -36,10 +68,7 @@ def resolve_named_inputs(db, owner, pipeline_id, inputs):
 			not isinstance(input_name, str)
 			or _INPUT.fullmatch(input_name) is None
 		):
-			raise manager.PipelineError(
-				'Invalid input name',
-				400
-			)
+			raise manager.PipelineError('Invalid input name', 400)
 
 		if not isinstance(reference, dict):
 			raise manager.PipelineError(
@@ -47,30 +76,65 @@ def resolve_named_inputs(db, owner, pipeline_id, inputs):
 				400
 			)
 
-		if set(reference) != {'run_id', 'artifact'}:
+		keys = set(reference)
+
+		explicit = keys == {'run_id', 'artifact'}
+		selected = keys == {'node_id', 'selected', 'artifact'}
+
+		if not explicit and not selected:
 			raise manager.PipelineError(
-				'Named input requires run_id and artifact',
+				'Input must specify either run_id and artifact, '
+				'or node_id, selected=true and artifact',
 				400
 			)
 
-		run_id = reference['run_id']
 		artifact_name = reference['artifact']
-
-		if not isinstance(run_id, str) or not run_id:
-			raise manager.PipelineError(
-				'Invalid source run ID',
-				400
-			)
 
 		if (
 			not isinstance(artifact_name, str)
 			or not artifact_name
 			or len(artifact_name) > 255
 		):
-			raise manager.PipelineError(
-				'Invalid artifact name',
-				400
+			raise manager.PipelineError('Invalid artifact name', 400)
+
+		expected_node_id = None
+
+		if explicit:
+			run_id = reference['run_id']
+
+			if not isinstance(run_id, str) or not run_id:
+				raise manager.PipelineError(
+					'Invalid source run ID',
+					400
+				)
+
+		else:
+			expected_node_id = manager.validate_identifier(
+				reference['node_id'],
+				'node_id'
 			)
+
+			if reference['selected'] is not True:
+				raise manager.PipelineError(
+					'selected must be true',
+					400
+				)
+
+			selection = selections.get(expected_node_id)
+
+			if not isinstance(selection, dict):
+				raise manager.PipelineError(
+					'No selected run for node: %s' % expected_node_id,
+					409
+				)
+
+			run_id = selection.get('run_id')
+
+			if not isinstance(run_id, str) or not run_id:
+				raise manager.PipelineError(
+					'Invalid selected run for node: %s' % expected_node_id,
+					409
+				)
 
 		if run_id not in run_cache:
 			run_cache[run_id] = db.pipeline_runs.find_one({
@@ -85,6 +149,17 @@ def resolve_named_inputs(db, owner, pipeline_id, inputs):
 		if run is None:
 			raise manager.PipelineError(
 				'Source run not found or not completed',
+				409
+			)
+
+		# A stale or corrupted node selection must never cause an
+		# artifact from a different logical node to be consumed.
+		if (
+			expected_node_id is not None
+			and run.get('node_id') != expected_node_id
+		):
+			raise manager.PipelineError(
+				'Selected run does not belong to the requested node',
 				409
 			)
 

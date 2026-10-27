@@ -231,3 +231,246 @@ def test_named_input_rejects_more_than_32_inputs():
 
 	assert exc.value.status == 400
 
+def test_selected_input_resolves_preferred_run():
+	db, run = make_db()
+
+	pipeline = {
+		'owner': 'alice',
+		'pipeline_id': 'p1',
+		'selections': {
+			'stage1': {
+				'run_id': 'r1'
+			}
+		}
+	}
+
+	result = binding.resolve_named_inputs(
+		db,
+		'alice',
+		'p1',
+		{
+			'calibrated_ms': {
+				'node_id': 'stage1',
+				'selected': True,
+				'artifact': 'output'
+			}
+		},
+		pipeline=pipeline
+	)
+
+	assert result == [{
+		'input_name': 'calibrated_ms',
+		'source_run_id': 'r1',
+		'artifact_index': 0
+	}]
+
+
+def test_selected_input_rejects_missing_selection():
+	db, _ = make_db()
+
+	pipeline = {
+		'owner': 'alice',
+		'pipeline_id': 'p1',
+		'selections': {}
+	}
+
+	with pytest.raises(manager.PipelineError) as exc:
+		binding.resolve_named_inputs(
+			db,
+			'alice',
+			'p1',
+			{
+				'calibrated_ms': {
+					'node_id': 'stage1',
+					'selected': True,
+					'artifact': 'output'
+				}
+			},
+			pipeline=pipeline
+		)
+
+	assert exc.value.status == 409
+
+
+def test_selected_input_rejects_wrong_node():
+	db, _ = make_db()
+
+	pipeline = {
+		'owner': 'alice',
+		'pipeline_id': 'p1',
+		'selections': {
+			'other_node': {
+				'run_id': 'r1'
+			}
+		}
+	}
+
+	with pytest.raises(manager.PipelineError) as exc:
+		binding.resolve_named_inputs(
+			db,
+			'alice',
+			'p1',
+			{
+				'calibrated_ms': {
+					'node_id': 'other_node',
+					'selected': True,
+					'artifact': 'output'
+				}
+			},
+			pipeline=pipeline
+		)
+
+	assert exc.value.status == 409
+
+
+def test_selected_input_requires_true_boolean():
+	db, _ = make_db()
+
+	pipeline = {
+		'owner': 'alice',
+		'pipeline_id': 'p1',
+		'selections': {
+			'stage1': {
+				'run_id': 'r1'
+			}
+		}
+	}
+
+	for value in (False, 1, 'true', None):
+		with pytest.raises(manager.PipelineError) as exc:
+			binding.resolve_named_inputs(
+				db,
+				'alice',
+				'p1',
+				{
+					'calibrated_ms': {
+						'node_id': 'stage1',
+						'selected': value,
+						'artifact': 'output'
+					}
+				},
+				pipeline=pipeline
+			)
+
+		assert exc.value.status == 400
+
+
+def test_selected_input_rejects_foreign_pipeline_context():
+	db, _ = make_db()
+
+	pipeline = {
+		'owner': 'bob',
+		'pipeline_id': 'p1',
+		'selections': {
+			'stage1': {
+				'run_id': 'r1'
+			}
+		}
+	}
+
+	with pytest.raises(manager.PipelineError) as exc:
+		binding.resolve_named_inputs(
+			db,
+			'alice',
+			'p1',
+			{
+				'calibrated_ms': {
+					'node_id': 'stage1',
+					'selected': True,
+					'artifact': 'output'
+				}
+			},
+			pipeline=pipeline
+		)
+
+	assert exc.value.status == 403
+
+
+def test_selected_input_rejects_mixed_reference_fields():
+	db, _ = make_db()
+
+	pipeline = {
+		'owner': 'alice',
+		'pipeline_id': 'p1',
+		'selections': {
+			'stage1': {
+				'run_id': 'r1'
+			}
+		}
+	}
+
+	with pytest.raises(manager.PipelineError) as exc:
+		binding.resolve_named_inputs(
+			db,
+			'alice',
+			'p1',
+			{
+				'calibrated_ms': {
+					'run_id': 'r1',
+					'node_id': 'stage1',
+					'selected': True,
+					'artifact': 'output'
+				}
+			},
+			pipeline=pipeline
+		)
+
+	assert exc.value.status == 400
+
+
+def test_explicit_input_still_supported_with_pipeline_context():
+	db, _ = make_db()
+
+	pipeline = {
+		'owner': 'alice',
+		'pipeline_id': 'p1',
+		'selections': {}
+	}
+
+	result = binding.resolve_named_inputs(
+		db,
+		'alice',
+		'p1',
+		{
+			'calibrated_ms': {
+				'run_id': 'r1',
+				'artifact': 'output'
+			}
+		},
+		pipeline=pipeline
+	)
+
+	assert result[0]['source_run_id'] == 'r1'
+	assert result[0]['artifact_index'] == 0
+	
+def test_explicit_named_input_does_not_require_pipeline_lookup(monkeypatch):
+	db, _ = make_db()
+
+	def forbidden_lookup(*args, **kwargs):
+		raise AssertionError(
+			'Explicit run references must not resolve pipeline selections'
+		)
+
+	monkeypatch.setattr(
+		manager,
+		'get_pipeline',
+		forbidden_lookup
+	)
+
+	result = binding.resolve_named_inputs(
+		db,
+		'alice',
+		'p1',
+		{
+			'calibrated_ms': {
+				'run_id': 'r1',
+				'artifact': 'output'
+			}
+		}
+	)
+
+	assert result == [{
+		'input_name': 'calibrated_ms',
+		'source_run_id': 'r1',
+		'artifact_index': 0
+	}]	

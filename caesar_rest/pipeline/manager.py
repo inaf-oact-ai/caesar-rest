@@ -498,8 +498,10 @@ def create_run_simple(
 			mongo.db,
 			owner,
 			pipeline_id,
-			payload['inputs']
-		)
+			payload['inputs'],
+			pipeline=pipeline
+		)		
+		
 	else:
 		input_artifacts = payload.get('input_artifacts', [])
 
