@@ -107,6 +107,46 @@ def run_readiness(run):
 		}
 	}
 
+
+def run_submission_info(run):
+	"""Describe the persisted submission state without scheduler queries.
+
+	No state reported here authorizes resubmission of an existing run.
+	Only the original PLANNED run may initiate the one-shot submission path.
+	"""
+
+	status = run.get('status')
+	intent = run.get('submission_intent')
+
+	state_mapping = {
+		'PLANNED': 'NOT_STARTED',
+		'SUBMITTING': 'IN_PROGRESS',
+		'SUBMITTED': 'SUBMITTED',
+		'RUNNING': 'ACCEPTED',
+		'COMPLETED': 'ACCEPTED',
+		'FAILED': 'ACCEPTED',
+		'CANCELLED': 'ACCEPTED',
+		'SUBMISSION_FAILED': 'FAILED',
+		'SUBMISSION_UNCERTAIN': 'UNCERTAIN'
+	}
+
+	state = state_mapping.get(status, 'UNKNOWN')
+
+	requires_reconciliation = (
+		status == 'SUBMISSION_UNCERTAIN'
+		or (
+			status == 'SUBMITTING'
+			and isinstance(intent, dict)
+		)
+	)
+
+	return {
+		'state': state,
+		'job_id': run.get('job_id'),
+		'retry_allowed': status == 'PLANNED',
+		'requires_reconciliation': requires_reconciliation
+	}
+
 def ensure_indexes():
 	"""Call at deployment initialization, not during each request."""
 	pipelines, runs, counters = collections()
@@ -683,6 +723,7 @@ def get_pipeline_tree(owner, pipeline_id):
 			'status': run['status'],
 			'artifacts_status': readiness['artifacts_status'],
 			'readiness': readiness['readiness'],
+			'submission': run_submission_info(run),
 			'job_id': run.get('job_id'),
 			'created_at': run.get('created_at'),
 			'finished_at': run.get('finished_at'),
@@ -706,4 +747,77 @@ def get_pipeline_tree(owner, pipeline_id):
 			nodes[node_id]
 			for node_id in sorted(nodes)
 		]
+	}
+	
+def select_run_conditional(owner, pipeline_id, node_id, run_id, expected_run_id):
+	"""Select a completed run only if the preferred run has not changed.
+
+	expected_run_id=None means that no run is currently selected.
+	The comparison and update occur atomically in MongoDB.
+	"""
+	validate_identifier(node_id, 'node_id')
+
+	if not isinstance(run_id, str) or not run_id:
+		raise PipelineError('run_id must be a nonempty string', 400)
+
+	if expected_run_id is not None:
+		if not isinstance(expected_run_id, str) or not expected_run_id:
+			raise PipelineError(
+				'expected_run_id must be a nonempty string or null',
+				400
+			)
+
+	pipelines, runs, _ = collections()
+
+	get_pipeline(owner, pipeline_id)
+
+	run = runs.find_one({
+		'owner': owner,
+		'pipeline_id': pipeline_id,
+		'node_id': node_id,
+		'run_id': run_id
+	})
+
+	if run is None:
+		raise PipelineError('Run not found', 404)
+
+	if run.get('status') != 'COMPLETED':
+		raise PipelineError('Only completed runs can be selected', 409)
+
+	selection_key = 'selections.' + node_id
+	selected_run_key = selection_key + '.run_id'
+
+	query = {
+		'owner': owner,
+		'pipeline_id': pipeline_id
+	}
+
+	if expected_run_id is None:
+		query[selected_run_key] = {'$exists': False}
+	else:
+		query[selected_run_key] = expected_run_id
+
+	result = pipelines.update_one(
+		query,
+		{
+			'$set': {
+				selection_key: {
+					'run_id': run_id,
+					'selected_at': utcnow()
+				}
+			}
+		}
+	)
+
+	if result.matched_count != 1:
+		raise PipelineError(
+			'Preferred run changed; retrieve the current selection '
+			'and retry with the new expected_run_id',
+			409
+		)
+
+	return {
+		'node_id': node_id,
+		'run_id': run_id,
+		'previous_run_id': expected_run_id
 	}

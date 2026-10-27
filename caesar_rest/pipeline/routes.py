@@ -160,9 +160,10 @@ def get_pipeline_run(pipeline_id, run_id):
 		doc['stage'] = (run.get('parameters') or {}).get('stage')
 
 		readiness = manager.run_readiness(run)
-
+		
 		doc['artifacts_status'] = readiness['artifacts_status']
 		doc['readiness'] = readiness['readiness']
+		doc['submission'] = manager.run_submission_info(run)		
 
 		selections = pipeline.get('selections') or {}
 		node_id = run.get('node_id')
@@ -293,6 +294,36 @@ def select_run(pipeline_id, node_id):
 		return jsonify(manager.select_run(owner, pipeline_id, node_id, payload['run_id']))
 	return invoke(action)
 	
+
+@pipeline_bp.route('/pipelines/<pipeline_id>/nodes/<node_id>/selection', methods=['PUT'])
+@custom_require_login
+def select_run_conditional(pipeline_id, node_id):
+	"""Conditionally replace a node's preferred completed run."""
+
+	def action(owner):
+		payload = request.get_json(silent=True)
+
+		if (
+			not isinstance(payload, dict)
+			or set(payload) != {'run_id', 'expected_run_id'}
+		):
+			raise manager.PipelineError(
+				'run_id and expected_run_id are required',
+				400
+			)
+
+		result = manager.select_run_conditional(
+			owner,
+			pipeline_id,
+			node_id,
+			payload['run_id'],
+			payload['expected_run_id']
+		)
+
+		return jsonify(result), 200
+
+	return invoke(action)
+
  
 @pipeline_bp.route('/pipelines/<pipeline_id>/sync', methods=['POST'])
 @custom_require_login

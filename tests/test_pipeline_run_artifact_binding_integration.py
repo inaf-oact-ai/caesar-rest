@@ -226,4 +226,200 @@ def test_failed_run_cannot_be_selected_or_consumed():
 	assert result['readiness']['can_consume'] is False
 	
 		
+def test_conditional_selection_succeeds_when_expected_selection_matches(monkeypatch):
+	from types import SimpleNamespace
+
+	queries = []
+
+	class FakePipelines:
+		def update_one(self, query, update):
+			queries.append((query, update))
+			return SimpleNamespace(matched_count=1)
+
+	class FakeRuns:
+		def find_one(self, query):
+			return {
+				'owner': 'alice',
+				'pipeline_id': 'p1',
+				'node_id': 'flag',
+				'run_id': 'r2',
+				'status': 'COMPLETED'
+			}
+
+	monkeypatch.setattr(
+		manager,
+		'collections',
+		lambda: (FakePipelines(), FakeRuns(), None)
+	)
+
+	monkeypatch.setattr(
+		manager,
+		'get_pipeline',
+		lambda owner, pipeline_id: {
+			'owner': owner,
+			'pipeline_id': pipeline_id
+		}
+	)
+
+	result = manager.select_run_conditional(
+		'alice', 'p1', 'flag', 'r2', 'r1'
+	)
+
+	assert result['run_id'] == 'r2'
+	assert result['previous_run_id'] == 'r1'
+	assert queries[0][0]['selections.flag.run_id'] == 'r1'
+	assert queries[0][1]['$set']['selections.flag']['run_id'] == 'r2'
+
+
+def test_conditional_selection_rejects_stale_expected_run(monkeypatch):
+	from types import SimpleNamespace
+
+	class FakePipelines:
+		def update_one(self, query, update):
+			return SimpleNamespace(matched_count=0)
+
+	class FakeRuns:
+		def find_one(self, query):
+			return {
+				'node_id': 'flag',
+				'run_id': 'r2',
+				'status': 'COMPLETED'
+			}
+
+	monkeypatch.setattr(
+		manager,
+		'collections',
+		lambda: (FakePipelines(), FakeRuns(), None)
+	)
+
+	monkeypatch.setattr(
+		manager,
+		'get_pipeline',
+		lambda owner, pipeline_id: {
+			'owner': owner,
+			'pipeline_id': pipeline_id
+		}
+	)
+
+	with pytest.raises(manager.PipelineError) as exc:
+		manager.select_run_conditional(
+			'alice', 'p1', 'flag', 'r2', 'r1'
+		)
+
+	assert exc.value.status == 409
+
+
+def test_conditional_selection_null_expects_absent_selection(monkeypatch):
+	from types import SimpleNamespace
+
+	queries = []
+
+	class FakePipelines:
+		def update_one(self, query, update):
+			queries.append(query)
+			return SimpleNamespace(matched_count=1)
+
+	class FakeRuns:
+		def find_one(self, query):
+			return {
+				'node_id': 'flag',
+				'run_id': 'r2',
+				'status': 'COMPLETED'
+			}
+
+	monkeypatch.setattr(
+		manager,
+		'collections',
+		lambda: (FakePipelines(), FakeRuns(), None)
+	)
+
+	monkeypatch.setattr(
+		manager,
+		'get_pipeline',
+		lambda owner, pipeline_id: {
+			'owner': owner,
+			'pipeline_id': pipeline_id
+		}
+	)
+
+	manager.select_run_conditional(
+		'alice', 'p1', 'flag', 'r2', None
+	)
+
+	assert queries[0]['selections.flag.run_id'] == {
+		'$exists': False
+	}
+
+
+def test_conditional_selection_rejects_noncompleted_run(monkeypatch):
+	class FakeRuns:
+		def find_one(self, query):
+			return {
+				'node_id': 'flag',
+				'run_id': 'r2',
+				'status': 'PLANNED'
+			}
+
+	monkeypatch.setattr(
+		manager,
+		'collections',
+		lambda: (None, FakeRuns(), None)
+	)
+
+	monkeypatch.setattr(
+		manager,
+		'get_pipeline',
+		lambda owner, pipeline_id: {
+			'owner': owner,
+			'pipeline_id': pipeline_id
+		}
+	)
+
+	with pytest.raises(manager.PipelineError) as exc:
+		manager.select_run_conditional(
+			'alice', 'p1', 'flag', 'r2', None
+		)
+
+	assert exc.value.status == 409
+
+
+@pytest.mark.parametrize(
+	'status, expected_state, retry_allowed, reconciliation',
+	[
+		('PLANNED', 'NOT_STARTED', True, False),
+		('SUBMITTING', 'IN_PROGRESS', False, False),
+		('SUBMITTED', 'SUBMITTED', False, False),
+		('RUNNING', 'ACCEPTED', False, False),
+		('COMPLETED', 'ACCEPTED', False, False),
+		('FAILED', 'ACCEPTED', False, False),
+		('CANCELLED', 'ACCEPTED', False, False),
+		('SUBMISSION_FAILED', 'FAILED', False, False),
+		('SUBMISSION_UNCERTAIN', 'UNCERTAIN', False, True)
+	]
+)
+def test_submission_state_mapping(
+	status, expected_state, retry_allowed, reconciliation
+):
+	result = manager.run_submission_info({
+		'status': status,
+		'job_id': None
+	})
+
+	assert result['state'] == expected_state
+	assert result['retry_allowed'] is retry_allowed
+	assert result['requires_reconciliation'] is reconciliation
+
+
+def test_submitting_with_durable_intent_requires_reconciliation():
+	result = manager.run_submission_info({
+		'status': 'SUBMITTING',
+		'submission_intent': {
+			'attempt_id': 'attempt1'
+		}
+	})
+
+	assert result['state'] == 'IN_PROGRESS'
+	assert result['retry_allowed'] is False
+	assert result['requires_reconciliation'] is True
 	
+		
