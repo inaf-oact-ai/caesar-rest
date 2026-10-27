@@ -42,7 +42,7 @@ OXKAT_STAGES = [
 
 # Keep synchronized with run_oxkat.sh. Do not allow unimplemented stages to
 # reach Slurm: they require distinct inputs, output contracts and permissions.
-IMPLEMENTED_STAGES = {"GET_INFO", "1GC", "FLAG"}
+IMPLEMENTED_STAGES = {"GET_INFO", "1GC", "FLAG", "2GC"}
 
 _FIELD_SELECTION = re.compile(r'^(?:auto|[0-9]+(?:,[0-9]+)*)$')
 
@@ -210,7 +210,7 @@ class OxkatAppConfigurator(AppConfigurator):
 					"CASA flag-version histories associated with "
 					"derived Measurement Sets."
 				),
-				"stages": ["1GC","FLAG"],
+				"stages": ["1GC","FLAG","2GC"],
 				"required": False,
 			},
 			"gain_tables": {
@@ -287,6 +287,45 @@ class OxkatAppConfigurator(AppConfigurator):
 					"Private target Measurement Sets after FLAG processing."
 				),
 				"stages": ["FLAG"],
+				"required": False,
+			},
+			"gc2_execution_script": {
+				"path": "submit_2GC_jobs.sh",
+				"glob": None,
+				"type": "text/x-shellscript",
+				"role": "diagnostic",
+				"description": "Generated OXKAT 2GC execution script.",
+				"stages": ["2GC"],
+				"required": False,
+			},
+			"gc2_images": {
+				"path": "IMAGES",
+				"glob": None,
+				"kind": "directory",
+				"type": "application/octet-stream",
+				"role": "primary_result",
+				"description": "2GC imaging, beam correction and mask products.",
+				"stages": ["2GC"],
+				"required": False,
+			},
+			"gc2_target_measurement_sets": {
+				"path": None,
+				"glob": "*.ms",
+				"kind": "directory",
+				"type": "application/x-casa-measurement-set",
+				"role": "primary_result",
+				"description": "Target Measurement Sets after 2GC self-calibration.",
+				"stages": ["2GC"],
+				"required": False,
+			},
+			"gc2_gain_tables": {
+				"path": "GAINTABLES",
+				"glob": None,
+				"kind": "directory",
+				"type": "application/octet-stream",
+				"role": "primary_result",
+				"description": "Second-generation CubiCal calibration solutions.",
+				"stages": ["2GC"],
 				"required": False,
 			},
 			"log": {
@@ -396,16 +435,15 @@ class OxkatAppConfigurator(AppConfigurator):
 		# - V2 submissions use the separate trusted pipeline staging path.
 		if (
 			isinstance(job_options, dict)
-			and job_options.get("stage") in ("1GC", "FLAG")
+			and job_options.get("stage") in ("1GC", "FLAG", "2GC")
 		):
 			self.validation_status = (
-				"OXKAT 1GC and FLAG are supported only through "
-				"V2 pipeline submission. These stages require "
-				"authorized dataset or retained-artifact bindings."
+				"OXKAT 1GC, FLAG and 2GC are supported only through "
+				"V2 pipeline submission."
 			)
 			logger.warning(self.validation_status)
 			return False
-		
+			
 		if not isinstance(data_inputs, str):
 			logger.warning("oxkat requires exactly one Measurement Set path")
 			return False
