@@ -8,6 +8,7 @@ import os
 import shutil
 import stat
 import uuid
+import time
 from pathlib import Path
 
 from pipeline_runtime.integrity import verify_copy
@@ -15,7 +16,12 @@ from pipeline_runtime.integrity import verify_copy
 class StagingError(Exception):
 	"""Invalid staging request or incomplete preparation."""
 
-
+def _stage_log(event, **fields):
+	"""Emit an immediately visible staging event to the worker stdout."""
+	timestamp = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+	details = ' '.join('%s=%r' % (key, value) for key, value in fields.items())
+	print('%s %s %s' % (timestamp, event, details), flush=True)
+	
 def _inside(path, parent):
 	return path == parent or parent in path.parents
 
@@ -159,10 +165,23 @@ def stage_inputs(inputs, workspace):
 		if not isinstance(writable, bool):
 			raise StagingError('writable must be boolean')
 		
+		_stage_log(
+			'STAGING_SOURCE_CHECK_START',
+			input=spec.get('name'),
+			mode=mode,
+			source=spec.get('source')
+		)
+		
 		if mode == 'reference_ro':
 			src = _check_reference_source(spec.get('source'))
 		else:
 			src = _check_source(spec.get('source'))
+			
+		_stage_log(
+			'STAGING_SOURCE_CHECK_DONE',
+			input=spec.get('name'),
+			source=str(src)
+		)	
 				
 		if _inside(base, src) or _inside(src, base):
 			raise StagingError('Source and workspace must not overlap')
@@ -183,8 +202,24 @@ def stage_inputs(inputs, workspace):
 			if kind != ('directory' if src.is_dir() else 'file'):
 				raise StagingError('v2 source kind mismatch')
 
-			if _measured_size(src) != size:
+
+			_stage_log(
+				'STAGING_SIZE_CHECK_START',
+				input=name,
+				expected_bytes=size
+			)
+
+			measured_bytes = _measured_size(src)
+
+			_stage_log(
+				'STAGING_SIZE_CHECK_DONE',
+				input=name,
+				measured_bytes=measured_bytes
+			)
+
+			if measured_bytes != size:
 				raise StagingError('v2 source size mismatch')
+
 
 		prepared.append((src, name, writable, mode))
 
@@ -201,6 +236,14 @@ def stage_inputs(inputs, workspace):
 		for src, name, writable, mode in prepared:
 			dest = input_dir / name
 
+			_stage_log(
+				'STAGING_INPUT_START',
+				input=name,
+				mode=mode,
+				source=str(src),
+				destination=str(dest)
+			)
+
 			if mode == 'reference_ro':
 				# A placeholder is created inside the private
 				# workspace, but no dataset bytes are copied.
@@ -208,6 +251,14 @@ def stage_inputs(inputs, workspace):
 				# EXECUTE will eventually mount the authorized
 				# source over this placeholder as read-only.
 				# No symbolic link to the source is created.
+				
+				_stage_log(
+					'STAGING_REFERENCE',
+					input=name,
+					source=str(src),
+					destination=str(dest)
+				)
+				
 				dest.mkdir(mode=0o700)
 
 				source_stat = src.stat()
@@ -223,14 +274,39 @@ def stage_inputs(inputs, workspace):
 					'source_dev': source_stat.st_dev,
 					'source_ino': source_stat.st_ino
 				})
+				
+				_stage_log(
+					'STAGING_INPUT_READY',
+					input=name,
+					destination=str(dest),
+					writable=False
+				)
 
 				continue
 
-			
+				
+			copy_start = time.perf_counter()
+			copy_kind = 'directory' if src.is_dir() else 'file'
+
+			_stage_log(
+				'STAGING_COPY_START',
+				input=name,
+				kind=copy_kind,
+				source=str(src),
+				destination=str(dest)
+			)
+
 			if src.is_dir():
 				shutil.copytree(str(src), str(dest), symlinks=True)
 			else:
 				shutil.copy2(str(src), str(dest), follow_symlinks=False)
+
+			_stage_log(
+				'STAGING_COPY_DONE',
+				input=name,
+				kind=copy_kind,
+				elapsed_seconds=round(time.perf_counter() - copy_start, 3)
+			)	
 			
 			_check_source(dest)
 
@@ -247,10 +323,31 @@ def stage_inputs(inputs, workspace):
 				if _measured_size(dest) != original['size_bytes']:
 					raise StagingError('v2 staged size mismatch')
 
+				
+				verify_start = time.perf_counter()
+
+				_stage_log(
+					'STAGING_VERIFY_START',
+					input=name,
+					destination=str(dest)
+				)
+
 				try:
 					verify_copy(dest, original)
 				except ValueError as exc:
+					_stage_log(
+						'STAGING_VERIFY_FAILED',
+						input=name,
+						error=str(exc)
+					)
 					raise StagingError('v2 staged digest mismatch') from exc
+
+				_stage_log(
+					'STAGING_VERIFY_DONE',
+					input=name,
+					elapsed_seconds=round(time.perf_counter() - verify_start, 3)
+				)
+
 
 			_set_writable(dest, writable)
 			
@@ -260,14 +357,31 @@ def stage_inputs(inputs, workspace):
 				'strategy': 'full_copy', 'input_isolation': 'private_copy',
 				'writable': writable
 			})
+			
+			_stage_log(
+				'STAGING_INPUT_READY',
+				input=name,
+				destination=str(dest),
+				writable=writable
+			)
+			
 		manifest = {'staging_state': 'READY', 'inputs': entries}
 		tmp = input_dir / ('.staging-' + uuid.uuid4().hex)
 		with open(str(tmp), 'x') as fp:
 			json.dump(manifest, fp, indent=2, sort_keys=True)
 			fp.flush()
 			os.fsync(fp.fileno())
+			
 		os.replace(str(tmp), str(input_dir / 'staging.json'))
+		
+		_stage_log(
+			'STAGING_READY',
+			input_count=len(entries),
+			workspace=str(base)
+		)
+		
 		return manifest
+		
 	except Exception as exc:
 		raise StagingError('Staging failed; partial input retained without READY manifest: %s' % exc)
 
