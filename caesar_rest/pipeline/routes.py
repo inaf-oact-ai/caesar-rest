@@ -135,17 +135,16 @@ def pipeline_runs(pipeline_id):
 	return invoke(action)
 
 
-
 @pipeline_bp.route(
 	'/pipelines/<pipeline_id>/runs/<run_id>',
 	methods=['GET']
 )
 @custom_require_login
 def get_pipeline_run(pipeline_id, run_id):
-	"""Return a run without requiring clients to know its node ID."""
+	"""Return a run with scientific and artifact readiness metadata."""
 
 	def action(owner):
-		manager.get_pipeline(owner, pipeline_id)
+		pipeline = manager.get_pipeline(owner, pipeline_id)
 
 		run = mongo.db.pipeline_runs.find_one({
 			'owner': owner,
@@ -160,16 +159,18 @@ def get_pipeline_run(pipeline_id, run_id):
 
 		doc['stage'] = (run.get('parameters') or {}).get('stage')
 
-		retained = run.get('retained_artifacts')
+		readiness = manager.run_readiness(run)
 
-		if isinstance(retained, list):
-			doc['artifacts_status'] = 'READY'
-		elif run.get('retention_status'):
-			doc['artifacts_status'] = run['retention_status']
-		elif run.get('artifacts_registered_at'):
-			doc['artifacts_status'] = 'REGISTERED'
-		else:
-			doc['artifacts_status'] = 'NOT_REGISTERED'
+		doc['artifacts_status'] = readiness['artifacts_status']
+		doc['readiness'] = readiness['readiness']
+
+		selections = pipeline.get('selections') or {}
+		node_id = run.get('node_id')
+		selection = selections.get(node_id) or {}
+
+		doc['selected'] = (
+			selection.get('run_id') == run_id
+		)
 
 		return jsonify(doc)
 

@@ -109,3 +109,121 @@ def test_missing_parent_reference_does_not_allocate_sequence(monkeypatch):
 		manager.create_run('alice', 'p1', 'imaging', _payload(include_parent=False))
 	assert counters.calls == 0
 	assert runs.created == []
+	
+def test_readiness_for_planned_run():
+	run = {
+		'status': 'PLANNED',
+		'artifacts': []
+	}
+
+	result = manager.run_readiness(run)
+
+	assert result['artifacts_status'] == 'NOT_REGISTERED'
+	assert result['readiness'] == {
+		'can_select': False,
+		'can_consume': False
+	}
+
+
+def test_readiness_for_completed_run_without_artifacts():
+	run = {
+		'status': 'COMPLETED',
+		'artifacts': []
+	}
+
+	result = manager.run_readiness(run)
+
+	assert result['artifacts_status'] == 'NOT_REGISTERED'
+	assert result['readiness'] == {
+		'can_select': True,
+		'can_consume': False
+	}
+
+
+def test_readiness_for_registered_run_without_retention():
+	run = {
+		'status': 'COMPLETED',
+		'artifacts_registered_at': 'now',
+		'artifacts': [{'name': 'output'}]
+	}
+
+	result = manager.run_readiness(run)
+
+	assert result['artifacts_status'] == 'REGISTERED'
+	assert result['readiness'] == {
+		'can_select': True,
+		'can_consume': False
+	}
+
+
+def test_readiness_for_pending_retention():
+	run = {
+		'status': 'COMPLETED',
+		'artifacts_registered_at': 'now',
+		'artifacts': [{'name': 'output'}],
+		'retention_status': 'PENDING'
+	}
+
+	result = manager.run_readiness(run)
+
+	assert result['artifacts_status'] == 'PENDING'
+	assert result['readiness']['can_consume'] is False
+
+
+def test_readiness_for_completed_retained_run():
+	run = {
+		'status': 'COMPLETED',
+		'artifacts_registered_at': 'now',
+		'artifacts': [{'name': 'output'}],
+		'retained_artifacts': [
+			{'index': 0, 'name': 'output'}
+		],
+		'retention_status': 'READY'
+	}
+
+	result = manager.run_readiness(run)
+
+	assert result['artifacts_status'] == 'READY'
+	assert result['readiness'] == {
+		'can_select': True,
+		'can_consume': True
+	}
+
+
+def test_readiness_rejects_incomplete_retention_metadata():
+	run = {
+		'status': 'COMPLETED',
+		'artifacts_registered_at': 'now',
+		'artifacts': [
+			{'name': 'output1'},
+			{'name': 'output2'}
+		],
+		'retained_artifacts': [
+			{'index': 0, 'name': 'output1'}
+		]
+	}
+
+	result = manager.run_readiness(run)
+
+	assert result['artifacts_status'] != 'READY'
+	assert result['readiness']['can_consume'] is False
+
+
+def test_failed_run_cannot_be_selected_or_consumed():
+	run = {
+		'status': 'FAILED',
+		'artifacts_registered_at': 'now',
+		'artifacts': [{'name': 'output'}],
+		'retained_artifacts': [
+			{'index': 0, 'name': 'output'}
+		]
+	}
+
+	result = manager.run_readiness(run)
+
+	assert result['artifacts_status'] != 'READY'
+	assert result['readiness']['can_select'] is False
+	assert result['readiness']['can_consume'] is False
+	
+		
+	

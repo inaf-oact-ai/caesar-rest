@@ -53,6 +53,60 @@ def public_doc(doc):
 	return {key: value for key, value in doc.items() if key != '_id' and key != 'owner'}
 
 
+def run_readiness(run):
+	"""Summarize scientific and artifact readiness without filesystem I/O.
+
+	This is a metadata snapshot, not an integrity verification.
+	The downstream binding layer remains authoritative for consumption.
+	"""
+
+	status = run.get('status')
+	registered = bool(run.get('artifacts_registered_at'))
+	artifacts = run.get('artifacts')
+	retained = run.get('retained_artifacts')
+
+	if not isinstance(artifacts, list):
+		artifacts = []
+
+	retention_status = run.get('retention_status')
+
+	if (
+		status == 'COMPLETED'
+		and registered
+		and artifacts
+		and isinstance(retained, list)
+		and len(retained) == len(artifacts)
+		and all(
+			isinstance(record, dict)
+			and record.get('index') == index
+			for index, record in enumerate(retained)
+		)		
+	):
+		artifacts_status = 'READY'
+
+	elif retention_status in ('PENDING', 'COPYING', 'FAILED'):
+		artifacts_status = retention_status
+
+	elif registered:
+		artifacts_status = 'REGISTERED'
+
+	else:
+		artifacts_status = 'NOT_REGISTERED'
+
+	can_select = status == 'COMPLETED'
+	can_consume = (
+		status == 'COMPLETED'
+		and artifacts_status == 'READY'
+	)
+
+	return {
+		'artifacts_status': artifacts_status,
+		'readiness': {
+			'can_select': can_select,
+			'can_consume': can_consume
+		}
+	}
+
 def ensure_indexes():
 	"""Call at deployment initialization, not during each request."""
 	pipelines, runs, counters = collections()
@@ -614,6 +668,8 @@ def get_pipeline_tree(owner, pipeline_id):
 			if artifact.get('role') == 'primary_result'
 		)
 
+		readiness = run_readiness(run)
+
 		nodes[node_id]['runs'].append({
 			'run_id': run['run_id'],
 			'run_name': run['run_name'],
@@ -625,6 +681,8 @@ def get_pipeline_tree(owner, pipeline_id):
 			'input_runs': run.get('input_runs') or [],
 			'input_artifacts': run.get('input_artifacts') or [],
 			'status': run['status'],
+			'artifacts_status': readiness['artifacts_status'],
+			'readiness': readiness['readiness'],
 			'job_id': run.get('job_id'),
 			'created_at': run.get('created_at'),
 			'finished_at': run.get('finished_at'),
