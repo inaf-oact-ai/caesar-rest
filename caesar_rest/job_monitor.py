@@ -43,13 +43,13 @@ from caesar_rest.app import celery as celery_app
 from caesar_rest import utils
 from caesar_rest import jobmgr_kube
 from caesar_rest import jobmgr_slurm
+from caesar_rest.pipeline import status as pipeline_status_sync
 
 # Import mongo
 from pymongo import MongoClient
 
 
 # Get logger
-#logger = logging.getLogger(__name__)
 from caesar_rest import logger
 
 ##############################
@@ -273,6 +273,36 @@ def monitor_jobs(db):
 
 	return 0
 	
+def safe_sync_monitored_pipeline_job(job_obj, job_collection, state, exit_code=None):
+	"""Best-effort pipeline sync; never interrupt legacy job monitoring."""
+
+	if not job_obj.get('pipeline_id') or not job_obj.get('run_id'):
+		return
+
+	try:
+		sync_job = dict(job_obj)
+		collection_name = job_collection.name
+
+		if not collection_name.endswith('.jobs'):
+			return
+
+		sync_job['_pipeline_sync_owner'] = collection_name[:-5]
+
+		pipeline_status_sync.synchronize_monitored_job(
+			job_collection.database,
+			sync_job,
+			state,
+			exit_code=exit_code
+		)
+
+	except Exception as exc:
+		logger.error(
+			"Pipeline status sync failed for job %s (err=%s)!" %
+			(job_obj.get('job_id'), str(exc)),
+			action="jobmonitor"
+		)
+
+
 
 ####################################
 ##   MONITOR KUBERNETES JOB
@@ -337,14 +367,20 @@ def monitor_kubernetes_job(job_obj, job_collection):
 			logger.warn("Won't create output data tar file %s as job output directory %s not found ..." % (tar_file, job_dir), action="jobmonitor")
 
 			
-	# - Update job status
+	# - Update job & pipeline-associated job status
 	try:
 		logger.info("Updating job %s state to %s (status=%s) ..." % (job_id, state, status), action="jobmonitor")
-		job_collection.update_one({'job_id':job_id},{'$set':{'state':state,'status':status,'elapsed_time':elapsed_time}},upsert=False)
+		#job_collection.update_one({'job_id':job_id},{'$set':{'state':state, 'status':status, 'elapsed_time':elapsed_time}}, upsert=False)
+		update_result= job_collection.update_one({'job_id':job_id},{'$set':{'state':state, 'status':status, 'elapsed_time': elapsed_time}}, upsert=False)
 	except Exception as e:
 		errmsg= 'Exception caught when updating job ' + str(job_id) + ' in DB (err=' + str(e) + ')!'
 		logger.warn(errmsg, action="jobmonitor")
 		return -1
+
+	if update_result.matched_count == 1:
+		safe_sync_monitored_pipeline_job(
+			job_obj, job_collection, state
+		)
 
 	# - If SUCCESS or FAILURE clear the pod
 	#   NB: ttl option not working when job is SUCCESS.
@@ -406,25 +442,23 @@ def monitor_slurm_jobs(job_objs, job_collection):
 		logger.warn("None reply returned from Slurm client get_job_statuses(), cannot update job!", action="jobmonitor")
 		return -1
 
-	if not resdict:
-		logger.warn("Empty reply returned from Slurm client get_job_statuses(), will set previously RUNNING jobs to CLEARED state ...", action="jobmonitor")
-		for job_obj in job_objs:
-			job_id= job_obj['job_id']
-			job_pid= str(job_obj['pid'])
-			job_state= job_obj['state']
-			elapsed= job_obj['elapsed_time']
-
-			if job_state=='RUNNING':
-				resdict[job_pid]= {
-					'state': 'CLEARED',
-					'status': 'Job was presumably cleared and finished with unknown state',
-					'elapsed_time': elapsed,
-					'exit_code': -1
-				}
-				
-
-	print("resdict")
-	print(resdict)
+	#if not resdict:
+	#	logger.warn("Empty reply returned from Slurm client get_job_statuses(), will set previously RUNNING jobs to CLEARED state ...", action="jobmonitor")
+	#	for job_obj in job_objs:
+	#		job_id= job_obj['job_id']
+	#		job_pid= str(job_obj['pid'])
+	#		job_state= job_obj['state']
+	#		elapsed= job_obj['elapsed_time']
+	#		if job_state=='RUNNING':
+	#			resdict[job_pid]= {
+	#				'state': 'CLEARED',
+	#				'status': 'Job was presumably cleared and finished with unknown state',
+	#				'elapsed_time': elapsed,
+	#				'exit_code': -1
+	#			}
+	#			
+	#print("resdict")
+	#print(resdict)
 
 	# - Loop over jobs and update their status
 	for job_obj in job_objs:
@@ -434,20 +468,26 @@ def monitor_slurm_jobs(job_objs, job_collection):
 		elapsed= job_obj['elapsed_time']
 
 		# - Search status data with this pid
-		if job_pid not in resdict:
-			#logger.warn("Cannot find Slurm job pid %s in dictionary of job status data, skip to next job ..." % job_pid, action="jobmonitor")
-			#continue
-			logger.warn("Cannot find Slurm job pid %s in dictionary of job status data, probably it was cleared, will set to CLEARED if it was previously RUNNING ..." % job_pid, action="jobmonitor")
-			res= {}
-			if job_state=='RUNNING':
-				res= {
-					'state': 'CLEARED',
-					'status': 'Job was presumably cleared and finished with unknown state',
-					'elapsed_time': elapsed,
-					'exit_code': -1
-				}
-		else:	
-			res= resdict[job_pid]
+		#if job_pid not in resdict:
+		#	logger.warn("Cannot find Slurm job pid %s in dictionary of job status data, probably it was cleared, will set to CLEARED if it was previously RUNNING ..." % job_pid, action="jobmonitor")
+		#	res= {}
+		#	if job_state=='RUNNING':
+		#		res= {
+		#			'state': 'CLEARED',
+		#			'status': 'Job was presumably cleared and finished with unknown state',
+		#			'elapsed_time': elapsed,
+		#			'exit_code': -1
+		#		}
+		#else:	
+		#	res= resdict[job_pid]
+
+		# - Use the controller result when available.
+		# - For a missing record, attempt accounting recovery.
+		# - Preserve the historical CLEARED fallback.
+		if job_pid in resdict:
+			res = resdict[job_pid]
+		else:
+			res = recover_missing_slurm_job(job_obj)
 
 		if not res or res is None:
 			logger.warn("Empty or None job status dict for job pid %s, cannot update job, skip to next job ..." % job_pid, action="jobmonitor")
@@ -461,9 +501,74 @@ def monitor_slurm_jobs(job_objs, job_collection):
 
 	return 0
 	
+	
+def make_slurm_job_archive(job_obj, tar_file, job_dir):
+	"""Use input-excluding archives only for staged pipeline jobs."""
 
-def monitor_slurm_job(job_obj, job_collection):
-	""" Monitor and update job status in DB """
+	if job_obj.get('execution_mode') == 'staged_container':
+		utils.make_staged_pipeline_tar(tar_file, job_dir)
+	else:
+		utils.make_tar(tar_file, job_dir)	
+
+
+def recover_missing_slurm_job(job_obj):
+	"""Recover a missing RUNNING job from accounting, if possible.
+
+	Fall back to the existing CLEARED state when its final outcome
+	cannot be established. Never raise an accounting exception.
+	"""
+
+	if job_obj.get('state') != 'RUNNING':
+		return None
+
+	job_pid = str(job_obj['pid'])
+
+	try:
+		accounting = jobmgr_slurm.get_accounting_job_status(job_pid)
+	except Exception as exc:
+		logger.warn(
+			'Slurm accounting lookup failed for pid %s (err=%s)' %
+			(job_pid, str(exc)),
+			action='jobmonitor'
+		)
+		accounting = None
+
+	if accounting is not None:
+		# Do not allow unexpected accounting data to affect
+		# the existing monitoring state machine.
+		if (
+			isinstance(accounting, dict)
+			and str(accounting.get('pid')) == job_pid
+			and accounting.get('state') in (
+				'SUCCESS', 'FAILURE', 'CANCELED', 'TIMED-OUT'
+			)
+		):
+			logger.info(
+				'Recovered Slurm job pid %s from accounting '
+				'(state=%s)' % (job_pid, accounting['state']),
+				action='jobmonitor'
+			)
+			return accounting
+
+	logger.warn(
+		'Slurm job pid %s missing from controller and '
+		'accounting; using CLEARED fallback' % job_pid,
+		action='jobmonitor'
+	)
+
+	return {
+		'state': 'CLEARED',
+		'status': 'Job was presumably cleared and finished with unknown state',
+		'elapsed_time': job_obj.get('elapsed_time', 0),
+		'exit_code': -1
+	}
+
+def monitor_slurm_job_old(job_obj, job_collection):
+	"""LEGACY: retained for reference only.
+
+	Do not use in production. This implementation bypasses
+	accounting recovery and guarded MongoDB updates.
+	"""
 	
 	# - Extract field
 	if not job_obj or job_obj is None:
@@ -524,22 +629,68 @@ def monitor_slurm_job(job_obj, job_collection):
 				logger.info("Job %s output tar file %s already existing, won't create it again ..." % (job_id, tar_file), action="jobmonitor")
 			else:
 				logger.info("Creating a tar file %s with job output data ..." % tar_file, action="jobmonitor")
-				utils.make_tar(tar_file, job_dir)
+				make_slurm_job_archive(job_obj, tar_file, job_dir)
 		else:
 			logger.warn("Won't create output data tar file %s as job output directory %s not found ..." % (tar_file, job_dir), action="jobmonitor")
 
 			
-	# - Update job status
+	# - Update job & pipeline-associated job status
 	try:
 		logger.info("Updating job %s state to %s (status=%s) ..." % (job_id, state, status), action="jobmonitor")
-		job_collection.update_one({'job_id':job_id},{'$set':{'state':state,'status':status,'exit_code':exit_code,'elapsed_time':elapsed_time}},upsert=False)
+		update_result= job_collection.update_one({'job_id':job_id},{'$set':{'state':state, 'status':status, 'exit_code':exit_code, 'elapsed_time':elapsed_time}}, upsert=False)
 	except Exception as e:
 		errmsg= 'Exception caught when updating job ' + str(job_id) + ' in DB (err=' + str(e) + ')!'
 		logger.warn(errmsg, action="jobmonitor")
-		return -1
+		return -1	
+
+	if update_result.matched_count == 1:
+		safe_sync_monitored_pipeline_job(
+			job_obj, job_collection, state, exit_code=exit_code
+		)
 
 	return 0
 
+
+def monitor_slurm_job(job_obj, job_collection):
+	"""Monitor a single Slurm job through the shared batch path.
+
+	This ensures identical controller polling, accounting recovery,
+	CLEARED fallback, and guarded MongoDB updates.
+	"""
+
+	if not job_obj:
+		logger.warn(
+			"Given job obj is None or empty!",
+			action="jobmonitor"
+		)
+		return -1
+
+	if job_collection is None:
+		logger.warn(
+			"Given mongo job collection is None!",
+			action="jobmonitor"
+		)
+		return -1
+
+	if jobmgr_slurm is None:
+		logger.warn(
+			"Slurm client is None!",
+			action="jobmonitor"
+		)
+		return -1
+
+	job_pid = str(job_obj.get('pid', ''))
+
+	if not job_pid:
+		logger.warn(
+			"Given job pid is empty, cannot monitor Slurm job!",
+			action="jobmonitor"
+		)
+		return -1
+
+	# - Use the same polling/recovery/persistence logic
+	#   as the batch monitor.
+	return monitor_slurm_jobs([job_obj], job_collection)
 
 
 def update_slurm_job(job_obj, res, job_collection):
@@ -580,18 +731,81 @@ def update_slurm_job(job_obj, res, job_collection):
 				logger.info("Job %s output tar file %s already existing, won't create it again ..." % (job_id, tar_file), action="jobmonitor")
 			else:
 				logger.info("Creating a tar file %s with job output data ..." % tar_file, action="jobmonitor")
-				utils.make_tar(tar_file, job_dir)
+				make_slurm_job_archive(job_obj, tar_file, job_dir)
 		else:
 			logger.warn("Won't create output data tar file %s as job output directory %s not found ..." % (tar_file, job_dir), action="jobmonitor")
 
-	# - Update job status
+	# - Update job & pipeline-associated job status
+	#try:
+	#	logger.info("Updating job %s state to %s (status=%s) ..." % (job_id, state, status), action="jobmonitor")
+	#	update_result= job_collection.update_one({'job_id':job_id},{'$set':{'state':state, 'status':status, 'exit_code':exit_code, 'elapsed_time':elapsed_time}}, upsert=False)
+	#except Exception as e:
+	#	errmsg= 'Exception caught when updating job ' + str(job_id) + ' in DB (err=' + str(e) + ')!'
+	#	logger.warn(errmsg, action="jobmonitor")
+	#	return -1	
+
+	#if update_result.matched_count == 1:
+	#	safe_sync_monitored_pipeline_job(
+	#		job_obj, job_collection, state, exit_code=exit_code
+	#	)
+
+
+	# - Apply monitoring observations only to active jobs.
+	# - RUNNING -> RUNNING updates remain permitted so elapsed time
+	#   and status information can continue to be refreshed.
+	# - Terminal states must not be overwritten by stale observations.
+	update_filter = {
+		'job_id': job_id,
+		'pid': job_obj['pid'],
+		'state': {
+			'$in': ['PENDING', 'STARTED', 'RUNNING']
+		}
+	}
+
+	# - CLEARED is meaningful only for a previously running job.
+	if state == 'CLEARED':
+		update_filter['state'] = 'RUNNING'
+
+	# - Update job & pipeline-associated job status.
 	try:
-		logger.info("Updating job %s state to %s (status=%s) ..." % (job_id, state, status), action="jobmonitor")
-		job_collection.update_one({'job_id':job_id},{'$set':{'state':state,'status':status,'exit_code':exit_code,'elapsed_time':elapsed_time}},upsert=False)
+		logger.info(
+			"Updating job %s state to %s (status=%s) ..." %
+			(job_id, state, status),
+			action="jobmonitor"
+		)
+
+		update_result = job_collection.update_one(
+			update_filter,
+			{
+				'$set': {
+					'state': state,
+					'status': status,
+					'exit_code': exit_code,
+					'elapsed_time': elapsed_time
+				}
+			},
+			upsert=False
+		)
+
 	except Exception as e:
-		errmsg= 'Exception caught when updating job ' + str(job_id) + ' in DB (err=' + str(e) + ')!'
+		errmsg = (
+			'Exception caught when updating job %s in DB (err=%s)!' %
+			(job_id, str(e))
+		)
 		logger.warn(errmsg, action="jobmonitor")
 		return -1
+
+	if update_result.matched_count == 1:
+		safe_sync_monitored_pipeline_job(
+			job_obj, job_collection, state, exit_code=exit_code
+		)
+	else:
+		logger.info(
+			'Skipping stale Slurm monitoring update for job %s '
+			'(observed state=%s)' % (job_id, state),
+			action='jobmonitor'
+		)		
+		
 
 	return 0
 

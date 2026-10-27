@@ -1,0 +1,26 @@
+{
+  "oxkat": {
+    "parameters": {
+      "stage": ["GET_INFO", "1GC", "FLAG", "2GC"]
+    },
+    "dataset_input_name": "measurement_set",
+    "input_options_by_stage": {
+      "GET_INFO": {
+        "input-ms": "measurement_set"
+      },
+      "1GC": {
+        "input-ms": "measurement_set",
+        "project-info": "project_info"
+      },
+      "FLAG": {
+        "input-ms": "target_ms",
+        "project-info": "project_info"
+      },
+      "2GC": {
+  			"input-ms": "target_ms",
+  			"project-info": "project_info",
+  			"flag-images": "flag_images"
+			}
+    }
+  }
+}

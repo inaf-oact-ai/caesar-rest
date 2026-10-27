@@ -324,6 +324,87 @@ def get_args():
 		help='Path to OxKAT Singularity container (default=/opt/containers/oxkat/oxkat-caesar.sif)'
 	)
 	
+	# - Generic staged pipeline execution options
+	parser.add_argument(
+		'--pipeline_staged_execution_enabled',
+		dest='pipeline_staged_execution_enabled',
+		action='store_true',
+		help='Enable staged pipeline execution through Slurm'
+	)
+
+	parser.add_argument(
+		'--pipeline_staged_applications',
+		dest='pipeline_staged_applications',
+		default='oxkat',
+		type=str,
+		help='Comma-separated applications allowed for staged pipeline execution (default=oxkat)'
+	)
+
+	parser.add_argument(
+		'--pipeline_python_executable',
+		dest='pipeline_python_executable',
+		default='/usr/bin/python3',
+		type=str,
+		help='Absolute path to the Python interpreter available on Slurm compute nodes'
+	)
+	
+	# - Pipeline artifact retention options
+	parser.add_argument(
+		'--pipeline_artifact_retention_root',
+		dest='pipeline_artifact_retention_root',
+		default='',
+		type=str,
+		help='Absolute directory for retained pipeline artifacts (empty disables retention)'
+	)
+
+	parser.add_argument(
+		'--pipeline_artifact_retention_max_file_bytes',
+		dest='pipeline_artifact_retention_max_file_bytes',
+		default=1024 * 1024 * 1024,
+		type=int,
+		help='Maximum size in bytes of each retained artifact (default: 1 GiB)'
+	)
+	
+	parser.add_argument(
+		'--pipeline_artifact_retention_max_directory_bytes',
+		dest='pipeline_artifact_retention_max_directory_bytes',
+		default=1024 * 1024 * 1024 * 1024,
+		type=int,
+		help='Maximum total size in bytes of a retained directory artifact (default: 1 TiB)'
+	)
+
+	parser.add_argument(
+		'--pipeline_artifact_retention_max_directory_entries',
+		dest='pipeline_artifact_retention_max_directory_entries',
+		default=100000,
+		type=int,
+		help='Maximum number of files and subdirectories per retained directory artifact'
+	)
+
+	parser.add_argument(
+		'--pipeline_artifact_retention_max_directory_depth',
+		dest='pipeline_artifact_retention_max_directory_depth',
+		default=16,
+		type=int,
+		help='Maximum nesting depth of a retained directory artifact'
+	)	
+	
+	parser.add_argument(
+		'--pipeline_artifact_retention_root_cluster',
+		dest='pipeline_artifact_retention_root_cluster',
+		default='',
+		type=str,
+		help='Slurm-visible root for retained pipeline artifacts (V2)'
+	)
+
+	parser.add_argument(
+		'--pipeline_v2_applications',
+		dest='pipeline_v2_applications',
+		default='{}',
+		type=str,
+		help='JSON object defining V2 application policies'
+	)	
+	
 	# - Dynamic dataset registry options
 	parser.add_argument(
 		'--dataset_registry_enabled',
@@ -522,6 +603,111 @@ dataset_emu= args.dataset_emu
 dataset_emu_scorpio_pilot= args.dataset_emu_scorpio_pilot
 dataset_emu_gp_pilot= args.dataset_emu_gp_pilot
 
+# - Generic staged pipeline execution options
+pipeline_staged_execution_enabled = args.pipeline_staged_execution_enabled
+
+pipeline_staged_applications = tuple(
+	name.strip().lower()
+	for name in args.pipeline_staged_applications.split(',')
+	if name.strip()
+)
+
+pipeline_python_executable = args.pipeline_python_executable
+
+
+# - Validate staged execution configuration
+if pipeline_staged_execution_enabled:
+	if job_scheduler != 'slurm':
+		logger.error("Staged pipeline execution requires the Slurm scheduler")
+		sys.exit(1)
+
+	if not args.dataset_registry_enabled:
+		logger.error("Staged pipeline execution requires the dynamic dataset registry")
+		sys.exit(1)
+
+	if not pipeline_staged_applications:
+		logger.error("No staged pipeline applications configured")
+		sys.exit(1)
+
+	if (
+		not os.path.isabs(pipeline_python_executable)
+		or os.path.normpath(pipeline_python_executable) != pipeline_python_executable
+	):
+		logger.error("Pipeline Python executable must be a normalized absolute path")
+		sys.exit(1)
+		
+# - Pipeline artifact retention options
+pipeline_artifact_retention_root = args.pipeline_artifact_retention_root.strip()
+pipeline_artifact_retention_max_file_bytes = args.pipeline_artifact_retention_max_file_bytes
+pipeline_artifact_retention_max_directory_bytes = args.pipeline_artifact_retention_max_directory_bytes
+pipeline_artifact_retention_max_directory_entries = args.pipeline_artifact_retention_max_directory_entries
+pipeline_artifact_retention_max_directory_depth = args.pipeline_artifact_retention_max_directory_depth
+pipeline_artifact_retention_root_cluster = args.pipeline_artifact_retention_root_cluster.strip()
+
+try:
+	pipeline_v2_applications = json.loads(args.pipeline_v2_applications)
+except (ValueError, TypeError):
+	logger.error("Invalid pipeline V2 application policy JSON")
+	sys.exit(1)
+
+		
+# - Validate retention configuration
+if pipeline_artifact_retention_root:
+	if (
+		not os.path.isabs(pipeline_artifact_retention_root)
+		or os.path.normpath(pipeline_artifact_retention_root)
+		!= pipeline_artifact_retention_root
+	):
+		logger.error(
+			"Pipeline artifact retention root must be a normalized absolute path"
+		)
+		sys.exit(1)
+
+if pipeline_artifact_retention_max_file_bytes <= 0:
+	logger.error(
+		"Pipeline artifact retention maximum file size must be positive"
+	)
+	sys.exit(1)		
+		
+if (
+	pipeline_artifact_retention_max_directory_bytes <= 0
+	or pipeline_artifact_retention_max_directory_entries <= 0
+	or pipeline_artifact_retention_max_directory_depth <= 0
+):
+	logger.error(
+		"Pipeline artifact retention directory limits must be positive"
+	)
+	sys.exit(1)
+
+	
+if pipeline_artifact_retention_root_cluster:
+	if (
+		not os.path.isabs(pipeline_artifact_retention_root_cluster)
+		or os.path.normpath(pipeline_artifact_retention_root_cluster)
+		!= pipeline_artifact_retention_root_cluster
+		or pipeline_artifact_retention_root_cluster == '/'
+	):
+		logger.error("Invalid cluster artifact retention root")
+		sys.exit(1)
+	
+if not isinstance(pipeline_v2_applications, dict):
+	logger.error("V2 application policies must be a JSON object")
+	sys.exit(1)
+
+if pipeline_v2_applications:
+	if not pipeline_staged_execution_enabled:
+		logger.error("V2 requires staged execution to be enabled")
+		sys.exit(1)
+
+	if not pipeline_artifact_retention_root:
+		logger.error("V2 requires an application artifact retention root")
+		sys.exit(1)
+
+	if not pipeline_artifact_retention_root_cluster:
+		logger.error("V2 requires a cluster artifact retention root")
+		sys.exit(1)
+
+		
 # - Dynamic dataset registry options
 dataset_registry_enabled = args.dataset_registry_enabled
 
@@ -539,19 +725,19 @@ dataset_admin_identities = [
 ]
 logger.info("Parsed dataset admin identities: %r", dataset_admin_identities)
 
-# Validate administrator identities.
+# - Validate administrator identities.
 for identity in dataset_admin_identities:
 	if '|' not in identity:
 		logger.error("Invalid dataset administrator identity: expected issuer|subject")
 		sys.exit(1)
 
-# Validate storage roots.
+# - Validate storage roots.
 for path in dataset_allowed_roots:
 	if not os.path.isdir(path):
 		logger.error("Dataset storage root does not exist or is not a directory: %s", path)
 		sys.exit(1)
 
-# Registry requires AAI and MongoDB.
+# - Registry requires AAI and MongoDB.
 if dataset_registry_enabled:
 	if not use_aai or oidc is None:
 		logger.error("Dynamic dataset registry requires AAI")
@@ -647,6 +833,18 @@ config.SLURM_FEXTRACTOR_LICU_JOB_IMAGE= fextractor_licu_container
 config.SLURM_FEXTRACTOR_FALCON_JOB_IMAGE= fextractor_falcon_container
 config.SLURM_OXKAT_JOB_IMAGE= oxkat_container
 
+# - Generic staged pipeline execution
+config.PIPELINE_STAGED_EXECUTION_ENABLED = pipeline_staged_execution_enabled
+config.PIPELINE_STAGED_APPLICATIONS = pipeline_staged_applications
+config.PIPELINE_PYTHON_EXECUTABLE = pipeline_python_executable
+config.PIPELINE_ARTIFACT_RETENTION_ROOT = pipeline_artifact_retention_root
+config.PIPELINE_ARTIFACT_RETENTION_MAX_FILE_BYTES = pipeline_artifact_retention_max_file_bytes
+config.PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_BYTES = pipeline_artifact_retention_max_directory_bytes
+config.PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_ENTRIES = pipeline_artifact_retention_max_directory_entries
+config.PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_DEPTH = pipeline_artifact_retention_max_directory_depth
+config.PIPELINE_ARTIFACT_RETENTION_ROOT_CLUSTER = pipeline_artifact_retention_root_cluster
+config.PIPELINE_V2_APPLICATIONS = pipeline_v2_applications
+
 # - Create data manager (DEPRECATED BY MONGO)
 ##logger.info("Creating data manager ...")
 ##datamgr= DataManager(rootdir=config.UPLOAD_FOLDER)
@@ -679,8 +877,7 @@ config.DATASET_ADMIN_IDENTITIES = dataset_admin_identities
 #==   CREATE APP
 #===============================
 logger.info("Creating and configuring app ...")
-##app= create_app(config,datamgr,jobcfg)
-app= create_app(config,jobcfg)
+app= create_app(config, jobcfg)
 app.app_context().push()
 
 #===============================
@@ -712,6 +909,10 @@ if use_db and mongo is not None:
 	logger.info("Initializing MongoDB to app ...")
 	try:
 		mongo.init_app(app)
+		from caesar_rest.pipeline_manager import ensure_indexes
+		with app.app_context():
+			ensure_indexes()
+			
 	except:
 		logger.error("Failed to initialize MongoDB to app!")
 else:

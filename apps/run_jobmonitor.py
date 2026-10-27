@@ -25,6 +25,7 @@ from caesar_rest import jobmgr_kube
 from caesar_rest import jobmgr_slurm
 from caesar_rest import job_monitor
 from caesar_rest.job_monitor import monitor_jobs
+from caesar_rest.pipeline import status as pipeline_status_sync
 
 #### GET SCRIPT ARGS ####
 def str2bool(v):
@@ -49,7 +50,6 @@ def get_args():
 	parser.add_argument('-dbname','--dbname', dest='dbname', default='caesardb', required=False, type=str, help='Name of MongoDB database (default=caesardb)')
 	parser.add_argument('-dbport','--dbport', dest='dbport', default=27017, required=False, type=int, help='Port of MongoDB database (default=27017)')
 
-	
 	# - Kubernetes scheduler options
 	parser.add_argument('--kube_incluster', dest='kube_incluster', action='store_true')	
 	parser.set_defaults(kube_incluster=False)
@@ -71,6 +71,38 @@ def get_args():
 	parser.add_argument('-logdir','--logdir', dest='logdir', default='/opt/caesar-rest/logs', required=False, type=str, help='Directory where to store logs')
 	parser.add_argument('-logfile','--logfile', dest='logfile', default='app_logs.json', required=False, type=str, help='Name of json log file')
 	parser.add_argument('-logfile_maxsize','--logfile_maxsize', dest='logfile_maxsize', default=5.0, required=False, type=float, help='Max file size in MB (default=5)')
+
+	# - Automatic retention of completed pipeline outputs.
+	parser.add_argument(
+		'--pipeline_artifact_retention_root',
+		default='',
+		type=str,
+		help='Storage root for automatically retained pipeline artifacts'
+	)
+
+	parser.add_argument(
+		'--pipeline_artifact_retention_max_file_bytes',
+		default=1024 * 1024 * 1024,
+		type=int
+	)
+
+	parser.add_argument(
+		'--pipeline_artifact_retention_max_directory_bytes',
+		default=1024 * 1024 * 1024 * 1024,
+		type=int
+	)
+
+	parser.add_argument(
+		'--pipeline_artifact_retention_max_directory_entries',
+		default=100000,
+		type=int
+	)
+
+	parser.add_argument(
+		'--pipeline_artifact_retention_max_directory_depth',
+		default=16,
+		type=int
+	)
 
 	args = parser.parse_args()	
 
@@ -206,6 +238,50 @@ def main():
 		except Exception as e:
 			logger.error("Failed to initialize Slurm job manager (err=%s)!" % str(e))
 			sys.exit(1)
+
+	#============================================
+	#==   PIPELINE ARTIFACT RETENTION
+	#============================================
+	retention_root = args.pipeline_artifact_retention_root.strip()
+
+	if retention_root:
+		if (
+			not os.path.isabs(retention_root)
+			or os.path.normpath(retention_root) != retention_root
+			or retention_root == '/'
+		):
+			logger.error('Invalid pipeline artifact retention root')
+			sys.exit(1)
+
+		retention_config = {
+			'PIPELINE_ARTIFACT_RETENTION_ROOT': retention_root,
+			'PIPELINE_ARTIFACT_RETENTION_MAX_FILE_BYTES':
+				args.pipeline_artifact_retention_max_file_bytes,
+			'PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_BYTES':
+				args.pipeline_artifact_retention_max_directory_bytes,
+			'PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_ENTRIES':
+				args.pipeline_artifact_retention_max_directory_entries,
+			'PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_DEPTH':
+				args.pipeline_artifact_retention_max_directory_depth
+		}
+
+		if any(
+			not isinstance(value, int) or value <= 0
+			for key, value in retention_config.items()
+			if key != 'PIPELINE_ARTIFACT_RETENTION_ROOT'
+		):
+			logger.error('Invalid pipeline artifact retention limits')
+			sys.exit(1)
+
+		pipeline_status_sync.configure_monitor_retention(retention_config)
+
+		logger.info(
+			'Automatic pipeline artifact retention enabled (root=%s)' %
+			retention_root
+		)
+	else:
+		pipeline_status_sync.configure_monitor_retention({})
+		logger.info('Automatic pipeline artifact retention not configured')
 
 	#============================================
 	#==   MONITORING LOOP

@@ -402,6 +402,8 @@ class SlurmJobManager(object):
 		job_outdir="", 
 		job_run_opts={},
 		app_mode="",
+		read_only_data=False,
+		preparation=None,
 	):
 		""" Create a standard job object with rclone mounted volume """
 
@@ -507,20 +509,30 @@ class SlurmJobManager(object):
 		run_opts= "--containall --no-home "
 
 		# - Set singularity volume mount options
+		# - Optional read-only data mount for pipeline jobs, disabled by default for normal jobs for backward compatibility
+		data_bind_mode = "ro" if read_only_data else "rw"
+		
 		vol_opts= ""
 		vol_opts+= "".join("--scratch %s " % job_dir)
-		#vol_opts+= "".join("-B %s " % job_outdir)
-		#vol_opts+= "".join("-B %s " % inputfile)	
 		if job_outdir_cluster!="":
 			vol_opts+= "".join("-B %s:%s " % (job_outdir_cluster, job_outdir))
 			logger.info("Binding host %s to container %s ..." % (job_outdir_cluster, job_outdir))
 			
-		###vol_opts+= "".join("-B %s:%s " % (inputfile_cluster, inputfile)) ## ORIGINAL CODE (BUG?)
-		###vol_opts+= "".join("-B %s:%s " % (inputfile, inputfile_cluster)) ## TEST
-		vol_opts+= "".join("-B %s:%s " % (self.cluster_datadir, self.app_datadir)) # bind entire data volume (NB: this invalidate previous bind)
-		logger.info("Binding host %s to container %s ..." % (self.cluster_datadir, self.app_datadir))
+		# bind entire data volume (NB: this invalidate previous bind)	
+		#vol_opts+= "".join(
+		#	"-B %s:%s " % 
+		#	(self.cluster_datadir, self.app_datadir)
+		#) 
 		
-		vol_opts+= "".join("-B %s:%s " % (self.cluster_modeldir, self.app_modeldir)) # bind entire data volume (NB: this invalidate previous bind)
+		vol_opts+= "".join(
+			"-B %s:%s:%s " %
+			(self.cluster_datadir, self.app_datadir, data_bind_mode)
+		)
+
+		logger.info("Binding host %s to container %s (mode=%s) ..." % (self.cluster_datadir, self.app_datadir, data_bind_mode))
+		
+		# bind entire data volume (NB: this invalidate previous bind)
+		vol_opts+= "".join("-B %s:%s " % (self.cluster_modeldir, self.app_modeldir))
 		logger.info("Binding host %s to container %s ..." % (self.cluster_modeldir, self.app_modeldir))
 		
 		if nproc>1:
@@ -538,11 +550,156 @@ class SlurmJobManager(object):
 		cmd+= env_vars
 		cmd+= image
 		
+		#############################
+		###   CREATE JOB SCRIPT
+		#############################
 		# - Set job script
-		script= "#!/bin/bash \n "
-		if self.sleep_before_run:
-			script+= "".join("sleep %d \n " % self.sleeptime_before_run)
-		script+= "".join("%s" % cmd)
+		if preparation is None:
+			# - Standalone and existing pipeline jobs
+			script= "#!/bin/bash \n "
+			if self.sleep_before_run:
+				script+= "".join("sleep %d \n " % self.sleeptime_before_run)
+			script+= "".join("%s" % cmd)
+		
+		else:
+			# - Guarded staging preparation
+			from caesar_rest.pipeline.submission.slurm_preparation import preparation_command
+			
+			# - Validate preparation mode
+			if not isinstance(preparation, dict):
+				logger.error("Invalid preparation configuration", action="submitjob")
+				return None
+
+			preparation_mode = preparation.get('mode')
+
+			if preparation_mode not in (
+				'prepare_only',
+				'prepare_then_execute_synthetic',
+				'prepare_then_execute_singularity_synthetic',
+				'prepare_then_execute_container'
+			):
+				logger.error("Unsupported preparation mode: %s" % preparation_mode, action="submitjob")
+				return None
+
+			# - Require private job workspace
+			if job_outdir == '':
+				logger.error("Preparation requires a per-job output directory", action="submitjob")
+				return None
+				
+			# - Workspace must match cluster-side job output directory
+			if preparation.get('workspace') != job_outdir_cluster:
+				logger.error("Preparation workspace must match the private Slurm job directory", action="submitjob")
+				return None
+
+			# - Workspace must reside under the configured cluster job root
+			if job_outdir_cluster == self.cluster_jobdir or not job_outdir_cluster.startswith(self.cluster_jobdir.rstrip('/') + '/'):
+				logger.error("Preparation workspace must be below the cluster job root", action="submitjob")
+				return None
+
+			# - Build trusted preparation command
+			#   Production pipeline jobs use the standalone worker.
+			#   Synthetic diagnostics retain the existing script-based
+			#   execution mechanism.
+			verify_cmd = None
+			worker_execute_cmd = None
+
+			if preparation_mode == 'prepare_then_execute_container':
+				from caesar_rest.pipeline.submission.worker_slurm import worker_commands
+				
+				try:
+					verify_cmd, prepare_cmd, worker_execute_cmd = worker_commands(
+						preparation['workspace'],
+						preparation.get('spec_path'),
+						preparation.get('execution_spec_path'),
+						preparation.get('worker_path'),
+						preparation.get('worker_sha256'),
+						preparation.get('python_executable') or '/usr/bin/python3'
+					)
+
+				except (ValueError, TypeError, KeyError) as e:
+					logger.error(
+						"Invalid pipeline worker configuration (err=%s)" % str(e),
+						action="submitjob"
+					)
+					return None
+
+			else:
+				try:
+					prepare_cmd = preparation_command(
+						preparation.get('spec_path'),
+						preparation['workspace'],
+						preparation.get('runner_path'),
+						preparation.get('python_executable', '/usr/bin/python3')
+					)
+
+				except (ValueError, TypeError, KeyError) as e:
+					logger.error(
+						"Invalid pipeline preparation configuration (err=%s)" % str(e),
+						action="submitjob"
+					)
+					return None
+				
+			# - Build guarded Slurm script
+			script = '#!/bin/bash\nset -e\n'
+
+			if self.sleep_before_run:
+				script += 'sleep %d\n' % self.sleeptime_before_run
+
+			# - Phase 1: Verify worker and prepare private inputs.
+			if verify_cmd is not None:
+				script += verify_cmd + '\n'
+
+			script += prepare_cmd + '\n'
+
+			# - Phase 2: RESOLVE and EXECUTE (synthetic test only)
+			if preparation_mode == 'prepare_then_execute_synthetic':
+				from caesar_rest.pipeline.execution.synthetic import synthetic_execution_command
+
+				try:
+					execute_cmd = synthetic_execution_command(
+						preparation['workspace'],
+						preparation.get('execution_runner_path'),
+						preparation.get('python_executable', '/usr/bin/python3')
+					)
+
+				except (ValueError, TypeError, KeyError) as e:
+					logger.error(
+						"Invalid synthetic execution configuration (err=%s)" % str(e),
+						action="submitjob"
+					)
+					return None
+
+				script += execute_cmd + '\n'
+
+			
+			# - Phase 2: RESOLVE, MAP and EXECUTE inside Singularity
+			elif preparation_mode == 'prepare_then_execute_singularity_synthetic':
+				from caesar_rest.pipeline.execution.singularity_synthetic import singularity_synthetic_command
+
+				try:
+					execute_cmd = singularity_synthetic_command(
+						preparation['workspace'],
+						preparation.get('container_image'),
+						preparation.get('container_workspace'),
+						preparation.get('container_execution_runner_path'),
+						preparation.get('python_executable', '/usr/bin/python3')
+					)
+
+				except (ValueError, TypeError, KeyError) as e:
+					logger.error(
+						"Invalid synthetic Singularity configuration (err=%s)" % str(e),
+						action="submitjob"
+					)
+					return None
+
+				script += execute_cmd + '\n'
+
+			
+			# - Phase 2: Execute the registered scientific container
+			#   through the same standalone worker.
+			elif preparation_mode == 'prepare_then_execute_container':
+				script += worker_execute_cmd + '\n'
+
 		
 		logger.info("Slurm script: %s" % script, action="submitjob")
 
@@ -587,6 +744,215 @@ class SlurmJobManager(object):
 	#============================
 	#==     GET JOB STATUS
 	#============================
+	def normalize_accounting_job(self, job_obj, job_id):
+		"""Convert one SlurmDB job record to the legacy monitoring format.
+
+		Return None for missing, mismatched, malformed or nonterminal data.
+		Never infer successful execution from an ambiguous record.
+		"""
+
+		if not isinstance(job_obj, dict):
+			return None
+
+		# - Validate the returned Slurm job identity.
+		try:
+			requested_id = str(int(job_id))
+			returned_id = str(int(job_obj.get('job_id')))
+		except (TypeError, ValueError, OverflowError):
+			return None
+
+		if requested_id != returned_id:
+			return None
+
+		# - SlurmDB v0.0.36 represents state as an object.
+		state_obj = job_obj.get('state')
+		if not isinstance(state_obj, dict):
+			return None
+
+		raw_state = state_obj.get('current')
+		if not isinstance(raw_state, str):
+			return None
+
+		raw_state = raw_state.upper()
+
+		# - Exit status is structured, not the sacct "0:0" string.
+		exit_obj = job_obj.get('exit_code')
+		if not isinstance(exit_obj, dict):
+			return None
+
+		exit_status = exit_obj.get('status')
+		exit_code = exit_obj.get('return_code')
+
+		if isinstance(exit_code, bool) or not isinstance(exit_code, int):
+			return None
+
+		if exit_code < 0:
+			return None
+
+		if not isinstance(exit_status, str):
+			return None
+
+		exit_status = exit_status.strip().upper()
+
+		# - Missing exit status is not evidence of success or failure.
+		if not exit_status:
+			return None
+
+		# - A completed job is successful only with consistent
+		#   zero-exit-code evidence.
+		if raw_state == 'COMPLETED':
+			if exit_code == 0 and exit_status == 'SUCCESS':
+				state = 'SUCCESS'
+			elif exit_code != 0 or exit_status != 'SUCCESS':
+				state = 'FAILURE'
+
+		elif raw_state in (
+			'FAILED',
+			'NODE_FAIL',
+			'PREEMPTED',
+			'BOOT_FAIL',
+			'DEADLINE',
+			'OUT_OF_MEMORY'
+		):
+			state = 'FAILURE'
+
+		elif raw_state == 'TIMEOUT':
+			state = 'TIMED-OUT'
+
+		elif raw_state == 'CANCELLED':
+			state = 'CANCELED'
+
+		else:
+			# - Do not replace a controller observation with
+			#   accounting data that is pending or inconclusive.
+			return None
+
+		time_obj = job_obj.get('time') or {}
+		if not isinstance(time_obj, dict):
+			time_obj = {}
+
+		elapsed = time_obj.get('elapsed', 0)
+		if isinstance(elapsed, bool) or not isinstance(
+			elapsed, (int, float)
+		):
+			elapsed = 0
+
+		return {
+			'pid': requested_id,
+			'state': state,
+			'status': 'Slurm accounting state: %s' % raw_state,
+			'exit_code': exit_code,
+			'elapsed_time': elapsed
+		}
+
+
+	def get_accounting_job_status(self, job_id):
+		"""Retrieve an authoritative terminal job result from SlurmDB.
+
+		Return None if accounting is unavailable, reports an error,
+		or cannot establish the requested job's final outcome.
+		"""
+
+		# - Accept only a positive numeric Slurm job ID.
+		try:
+			if isinstance(job_id, bool):
+				return None
+
+			job_id_str = str(int(job_id))
+			if int(job_id_str) <= 0:
+				return None
+
+			if str(job_id).strip() != job_id_str:
+				return None
+		except (TypeError, ValueError, OverflowError):
+			return None
+
+		# - Reuse the existing JWT lifecycle.
+		if not self.is_token_active():
+			if self.generate_token() < 0:
+				logger.warn(
+					'Cannot refresh Slurm REST token for accounting',
+					action='jobstatus'
+				)
+				return None
+
+		headers = {
+			'Content-Type': 'application/json',
+			'X-SLURM-USER-NAME': self.username,
+			'X-SLURM-USER-TOKEN': self.token
+		}
+
+		# - The configured controller URL ends with /slurm/v0.0.36.
+		# - SlurmDB uses the same server with /slurmdb/v0.0.36.
+		controller_suffix = '/slurm/v0.0.36'
+
+		if not self.cluster_url.endswith(controller_suffix):
+			logger.warn(
+				'Unsupported Slurm controller URL for accounting',
+				action='jobstatus'
+			)
+			return None
+
+		base_url = self.cluster_url[:-len(controller_suffix)]
+		url = (
+			base_url +
+			'/slurmdb/v0.0.36/job/' +
+			job_id_str
+		)
+
+		try:
+			response = requests.get(
+				url,
+				headers=headers,
+				timeout=self.request_timeout
+			)
+			response.raise_for_status()
+			reply = response.json()
+
+		except requests.RequestException as exc:
+			logger.warn(
+				'Failed to retrieve Slurm accounting for job %s '
+				'(err=%s)' % (job_id_str, str(exc)),
+				action='jobstatus'
+			)
+			return None
+
+		except (ValueError, TypeError) as exc:
+			logger.warn(
+				'Invalid Slurm accounting JSON for job %s '
+				'(err=%s)' % (job_id_str, str(exc)),
+				action='jobstatus'
+			)
+			return None
+
+		if not isinstance(reply, dict):
+			return None
+
+		# - Slurm REST can return HTTP 200 with errors in the body.
+		if reply.get('errors'):
+			logger.warn(
+				'Slurm accounting reported errors for job %s' %
+				job_id_str,
+				action='jobstatus'
+			)
+			return None
+
+		job_records = reply.get('jobs')
+
+		if not isinstance(job_records, list):
+			return None
+
+		# - The job-ID endpoint must return one matching record.
+		# - Never choose an arbitrary record from an ambiguous reply.
+		if len(job_records) != 1:
+			return None
+
+		return self.normalize_accounting_job(
+			job_records[0],
+			job_id_str
+		)	
+	
+	
 	def get_job_statuses(self, job_pids):
 		""" Retrieve job status for selected list of jobs """
 	

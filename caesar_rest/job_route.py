@@ -37,9 +37,15 @@ from werkzeug.utils import secure_filename
 
 # Import celery modules
 from celery import states
-from celery.task.control import revoke
+# - Celery task revocation compatibility.
+# - Modern Celery uses app.control.revoke().
+# - Older installations may require celery.task.control.revoke.
+try:
+	from celery.task.control import revoke as legacy_celery_revoke
+except ImportError:
+	legacy_celery_revoke = None
 
-# Import Celery app
+# Import caesar modules
 from caesar_rest.app import celery as celery_app
 from caesar_rest import workers
 from caesar_rest.workers import background_task
@@ -50,9 +56,12 @@ from caesar_rest import mongo
 from caesar_rest import dataset_registry
 from caesar_rest import jobmgr_kube
 from caesar_rest import jobmgr_slurm
+from caesar_rest.pipeline.submission import job_binding as pipeline_job_binding
+from caesar_rest.pipeline.staging import workspace as pipeline_workspace
+from caesar_rest.pipeline.submission import v2_rest_submission as pipeline_v2_submission
+
 
 # Get logger
-#logger = logging.getLogger(__name__)
 from caesar_rest import logger
 
 ##############################
@@ -70,26 +79,221 @@ job_preview_bp = Blueprint('job_preview', __name__, url_prefix='/caesar/api/v1.0
 job_preview_file_bp = Blueprint('job_preview_file', __name__, url_prefix='/caesar/api/v1.0')
 dataset_names_bp = Blueprint('dataset_names', __name__, url_prefix='/caesar/api/v1.0')
 
+##################################
+##       HELPERS
+##################################
+def revoke_celery_task(task_id, terminate=True, signal='SIGTERM'):
+	"""Revoke a Celery task across supported Celery versions."""
+	control = getattr(celery_app, 'control', None)
+
+	if control is not None and hasattr(control, 'revoke'):
+		return control.revoke(
+			task_id,
+			terminate=terminate,
+			signal=signal
+		)
+
+	if legacy_celery_revoke is not None:
+		return legacy_celery_revoke(
+			task_id,
+			terminate=terminate,
+			signal=signal
+		)
+
+	raise RuntimeError('Celery task revocation is unavailable')
+
+
+def safe_fail_pipeline_submission(claim, message, uncertain=False, job_id=None):
+	"""Record pipeline submission failure without masking the original error."""
+
+	if claim is None:
+		return
+
+	try:
+		pipeline_job_binding.fail_submission(
+			claim, message, uncertain=uncertain, job_id=job_id
+		)
+	except Exception as exc:
+		logger.error(
+			"Failed to record pipeline submission failure for run %s (err=%s)!" %
+			(claim.run_id, str(exc)),
+			action="submitjob",
+			user=claim.owner
+		)
+
+
+class SlurmPreSubmissionError(RuntimeError):
+	"""Slurm submission was not attempted; safe to classify as definite failure."""
+
+
+# -------------------------------------------
+# Application container configuration
+# -------------------------------------------
+
+JOB_APPLICATIONS = {
+	'caesar': {
+		'kubernetes': ('CAESAR_JOB_IMAGE', 'caesar-job'),
+		'slurm': 'SLURM_CAESAR_JOB_IMAGE',
+	},
+	'mrcnn': {
+		'kubernetes': ('MASKRCNN_JOB_IMAGE', 'mrcnn-job'),
+		'slurm': 'SLURM_MASKRCNN_JOB_IMAGE',
+	},
+	'aegean': {
+		'kubernetes': ('AEGEAN_JOB_IMAGE', 'aegean-job'),
+		'slurm': 'SLURM_AEGEAN_JOB_IMAGE',
+	},
+	'cutex': {
+		'kubernetes': ('CUTEX_JOB_IMAGE', 'cutex-job'),
+		'slurm': 'SLURM_CUTEX_JOB_IMAGE',
+	},
+	'classifier-cnn': {
+		'kubernetes': ('CNN_CLASSIFIER_JOB_IMAGE', 'cnn_classifier-job'),
+		'slurm': 'SLURM_CNN_CLASSIFIER_JOB_IMAGE',
+	},
+	'classifier-vit': {
+		'kubernetes': ('VIT_CLASSIFIER_JOB_IMAGE', 'vit_classifier-job'),
+		'slurm': 'SLURM_VIT_CLASSIFIER_JOB_IMAGE',
+		'app_mode': 'image',
+	},
+	'classifier-vit-catalog': {
+		'kubernetes': ('VIT_CLASSIFIER_JOB_IMAGE', 'vit_classifier_catalog-job'),
+		'slurm': 'SLURM_VIT_CLASSIFIER_JOB_IMAGE',
+		'app_mode': 'catalog',
+	},
+	'umap': {
+		'kubernetes': ('UMAP_JOB_IMAGE', 'umap-job'),
+		'slurm': 'SLURM_UMAP_JOB_IMAGE',
+	},
+	'outlier-finder': {
+		'kubernetes': ('OUTLIER_FINDER_JOB_IMAGE', 'outlier-finder-job'),
+		'slurm': 'SLURM_OUTLIER_FINDER_JOB_IMAGE',
+	},
+	'hdbscan': {
+		'kubernetes': ('HDBSCAN_JOB_IMAGE', 'hdbscan-job'),
+		'slurm': 'SLURM_HDBSCAN_JOB_IMAGE',
+	},
+	'similarity-search': {
+		'kubernetes': ('SIMSEARCH_JOB_IMAGE', 'simsearch-job'),
+		'slurm': 'SLURM_SIMSEARCH_JOB_IMAGE',
+	},
+	'caesar-yolo': {
+		'kubernetes': ('CAESAR_YOLO_JOB_IMAGE', 'caesar-yolo-job'),
+		'slurm': 'SLURM_CAESAR_YOLO_JOB_IMAGE',
+	},
+	'sfforecaster': {
+		'kubernetes': ('SFFORECASTER_JOB_IMAGE', 'sfforecaster-job'),
+		'slurm': 'SLURM_SFFORECASTER_JOB_IMAGE',
+	},
+	'fextractor': {
+		'kubernetes_label': 'fextractor-job',
+		'variants': {
+			'tf': (
+				'FEXTRACTOR_TF_JOB_IMAGE',
+				'SLURM_FEXTRACTOR_TF_JOB_IMAGE',
+			),
+			'torch': (
+				'FEXTRACTOR_TORCH_JOB_IMAGE',
+				'SLURM_FEXTRACTOR_TORCH_JOB_IMAGE',
+			),
+			'chronos': (
+				'FEXTRACTOR_CHRONOS_JOB_IMAGE',
+				'SLURM_FEXTRACTOR_CHRONOS_JOB_IMAGE',
+			),
+			'moirai': (
+				'FEXTRACTOR_MOIRAI_JOB_IMAGE',
+				'SLURM_FEXTRACTOR_MOIRAI_JOB_IMAGE',
+			),
+			'fats': (
+				'FEXTRACTOR_FATS_JOB_IMAGE',
+				'SLURM_FEXTRACTOR_FATS_JOB_IMAGE',
+			),
+			'licu': (
+				'FEXTRACTOR_LICU_JOB_IMAGE',
+				'SLURM_FEXTRACTOR_LICU_JOB_IMAGE',
+			),
+			'falcon': (
+				'FEXTRACTOR_FALCON_JOB_IMAGE',
+				'SLURM_FEXTRACTOR_FALCON_JOB_IMAGE',
+			),
+		},
+	},
+	'oxkat': {
+		'kubernetes': ('OXKAT_JOB_IMAGE', 'oxkat-job'),
+		'slurm': 'SLURM_OXKAT_JOB_IMAGE',
+	},
+}
+
+
+class JobApplicationConfigError(ValueError):
+	"""Unsupported job application or container variant."""
+
+
+def resolve_job_application(app_name, scheduler, run_opts=None):
+	"""Resolve trusted container settings for a supported application.
+
+	Returns:
+		dict containing image and app_mode, plus job_label
+		for Kubernetes.
+
+	Raises:
+		JobApplicationConfigError for unsupported selections.
+		KeyError for missing server configuration.
+	"""
+
+	if scheduler not in ('kubernetes', 'slurm'):
+		raise JobApplicationConfigError(
+			"Unsupported scheduler '%s'" % scheduler
+		)
+
+	spec = JOB_APPLICATIONS.get(app_name)
+
+	if spec is None:
+		raise JobApplicationConfigError(
+			"Unknown/unsupported app '%s'" % app_name
+		)
+
+	run_opts = run_opts or {}
+	app_mode = spec.get('app_mode', '')
+
+	if app_name == 'fextractor':
+		variant = run_opts.get('container_variant', '')
+		variant_keys = spec['variants'].get(variant)
+
+		if variant_keys is None:
+			raise JobApplicationConfigError(
+				"Unknown fextractor container variant '%s'" %
+				variant
+			)
+
+		if scheduler == 'kubernetes':
+			config_key = variant_keys[0]
+		else:
+			config_key = variant_keys[1]
+
+		job_label = spec['kubernetes_label']
+
+	elif scheduler == 'kubernetes':
+		config_key, job_label = spec['kubernetes']
+
+	else:
+		config_key = spec['slurm']
+		job_label = None
+
+	result = {
+		'image': current_app.config[config_key],
+		'app_mode': app_mode,
+	}
+
+	if scheduler == 'kubernetes':
+		result['job_label'] = job_label
+
+	return result
+
 
 #=================================
 #===      DATASETS
 #=================================
-#@job_bp.route('/datasets',methods=['GET'])
-#@custom_require_login
-#def get_dataset_names():
-#	""" Get supported datasets (with paths not empty) """
-
-#	datasets= current_app.config['DATASETS']
-#	dataset_names= {}
-#	for key, value in datasets.items():
-#		if value["path"]=="":
-#			continue
-#		dataset_names[key]= value.copy()
-#		del dataset_names[key]["path"]
-	
-#	return make_response(jsonify(dataset_names), 200)
-
-
 @job_bp.route('/datasets', methods=['GET'])
 @custom_require_login
 def get_dataset_names():
@@ -132,12 +336,6 @@ def submit_job():
 	res['job_id']= ''
 	res['submit_date']= ''
 
-	# - Get aai info
-	#username= 'anonymous'
-	#if ('oidc_token_info' in g) and (g.oidc_token_info is not None and 'email' in g.oidc_token_info):
-	#	email= g.oidc_token_info['email']
-	#	username= utils.sanitize_username(email)
-
 	# - Get authenticated user storage identifier
 	username = utils.get_storage_username()
 
@@ -159,6 +357,52 @@ def submit_job():
 		return make_response(jsonify(res),400)
 	logger.info("Received job data %s " % str(req_data), action="submitjob", user=username)
 
+
+	# - Explicit V2 submission path.
+	# - V1 remains the default, unchanged.
+	# - Do not enter legacy input processing or legacy claim handling
+	#   for a V2 request.
+	version = req_data.get('submission_version', 1)
+
+	if type(version) is not int or version not in (1, 2):
+		res['state'] = 'ABORTED'
+		res['status'] = 'Unsupported submission_version'
+		return make_response(jsonify(res), 400)
+
+	if version == 2:
+		try:
+			v2_result = pipeline_v2_submission.submit_v2(
+				username,
+				req_data,
+				resolve_job_application
+			)
+			return make_response(jsonify(v2_result), 200)
+
+		except pipeline_job_binding.manager.PipelineError as exc:
+			logger.error(
+				"V2 submission failed: %s" % exc,
+				action="submitjob",
+				user=username
+			)
+			res['state'] = 'ABORTED'
+			res['status'] = str(exc)
+			return make_response(jsonify(res), exc.status)
+
+		except Exception:
+			logger.exception(
+				"Unexpected V2 submission failure",
+				action="submitjob"
+			)
+			res['state'] = 'ABORTED'
+			res['status'] = 'V2 submission failed; inspect run state before retry'
+			return make_response(jsonify(res), 500)
+
+	if version == 1 and 'submission_version' in req_data:
+		req_data = dict(req_data)
+		req_data.pop('submission_version')	
+
+
+	# - Check app name & job options
 	app_name = req_data['app']
 	job_options = req_data['job_options']
 	if not app_name:
@@ -209,27 +453,159 @@ def submit_job():
 	cmd_args= ''
 	if cmd_arg_list:
 		cmd_args= ' '.join(cmd_arg_list)
+		
+	# - Optional pipeline-run context.
+	#   Pipeline features are activated only when explicitly requested.
+	pipeline_claim = None
+	pipeline_id = req_data.get('pipeline_id')
+	run_id = req_data.get('run_id')
+		
+	# - Enable staged execution only for explicitly configured
+	#   pipeline applications on Slurm.
+	staged_submission = (
+		pipeline_id is not None
+		and run_id is not None
+		and job_scheduler == 'slurm'
+		and current_app.config.get('PIPELINE_STAGED_EXECUTION_ENABLED', False)
+		and app_name in current_app.config.get('PIPELINE_STAGED_APPLICATIONS', ())
+	)
+	
+	# - Do not silently fall back to legacy execution when staged
+	#   pipeline execution is enabled but the application is unsupported.
+	if (
+		pipeline_id is not None
+		and run_id is not None
+		and job_scheduler == 'slurm'
+		and current_app.config.get('PIPELINE_STAGED_EXECUTION_ENABLED', False)
+		and not staged_submission
+	):
+		res['state'] = 'ABORTED'
+		res['status'] = 'Application is not enabled for staged pipeline execution'
+		return make_response(jsonify(res), 400)
+
+
+	if staged_submission:
+		data_spec = req_data.get('data_inputs')
+		if (
+			not current_app.config.get('DATASET_REGISTRY_ENABLED', False)
+			or not isinstance(data_spec, dict)
+			or data_spec.get('format') != 'dataset'
+			or not isinstance(data_spec.get('data'), str)
+			or not isinstance(inputfile, str)
+		):
+			res['state'] = 'ABORTED'
+			res['status'] = 'Staged pipeline execution requires one authorized dataset ID'
+			return make_response(jsonify(res), 400)
+
+
+	if pipeline_id is not None or run_id is not None:
+		if pipeline_id is None or run_id is None:
+			res['state'] = 'ABORTED'
+			res['status'] = 'pipeline_id and run_id must be provided together'
+			return make_response(jsonify(res), 400)
+
+		try:			
+			submitted_dataset_id = None
+			if isinstance(req_data.get('data_inputs'), dict):
+				if req_data['data_inputs'].get('format') == 'dataset':
+					submitted_dataset_id = req_data['data_inputs'].get('data')
+
+			pipeline_claim = pipeline_job_binding.claim_run(
+				username,
+				pipeline_id,
+				run_id,
+				app_name,
+				job_options,
+				dataset_id=submitted_dataset_id,
+				require_dataset_binding=staged_submission
+			)
+
+		except pipeline_job_binding.manager.PipelineError as exc:
+			res['state'] = 'ABORTED'
+			res['status'] = str(exc)
+			return make_response(jsonify(res), exc.status)
 	
 	# - Set job top directory
 	job_top_dir= current_app.config['JOB_DIR'] + '/' + username
 
-	# - Submit task
-	submit_res= None
-	if job_scheduler=='celery':
-		submit_res= submit_job_celery(app_name, cmd, cmd_args, job_top_dir, username, mongo_dbhost, mongo_dbport, mongo_dbname)
-	
-	elif job_scheduler=='kubernetes':
-		submit_res= submit_job_kubernetes(app_name, cmd_args, job_top_dir, username, run_opts)
 
-	elif job_scheduler=='slurm':
-		submit_res= submit_job_slurm(app_name, inputfile, cmd_args, job_top_dir, username, run_opts)
+	# - Submit the job
+	submit_res = None
+	try:
+		if job_scheduler == 'celery':
+			submit_res = submit_job_celery(
+				app_name, cmd, cmd_args, job_top_dir, username,
+				mongo_dbhost, mongo_dbport, mongo_dbname
+			)
+
+		elif job_scheduler == 'kubernetes':
+			submit_res = submit_job_kubernetes(
+				app_name, cmd_args, job_top_dir, username, run_opts
+			)
+
+		elif job_scheduler == 'slurm':
+			submit_res = submit_job_slurm(
+				app_name, inputfile, cmd_args, job_top_dir, username,
+				run_opts,
+				read_only_data=(
+					pipeline_claim is not None and app_name == 'oxkat'
+				),
+				staged_cmd_arg_list=(
+					cmd_arg_list if staged_submission else None
+				)
+			)
+			
+	
+	except SlurmPreSubmissionError as exc:
+		logger.error(
+			"Pipeline Slurm pre-submission validation failed (err=%s)" % exc,
+			action="submitjob",
+			user=username
+		)
+
+		safe_fail_pipeline_submission(
+			pipeline_claim,
+			str(exc),
+			uncertain=False
+		)
+
+		res['state'] = 'ABORTED'
+		res['status'] = 'Pipeline job preparation failed'
+		return make_response(jsonify(res), 400)
+
+	except Exception as exc:
+		logger.error(
+			"Exception while submitting job to scheduler %s (err=%s)!" %
+			(job_scheduler, str(exc)),
+			action="submitjob",
+			user=username
+		)
+
+		safe_fail_pipeline_submission(
+			pipeline_claim, str(exc), uncertain=True
+		)	
+
+		res['state'] = 'ABORTED'
+		res['status'] = 'Exception while submitting job to scheduler!'
+		return make_response(jsonify(res), 500)
 
 	if submit_res is None:
-		logger.warn("Failed to submit job to scheduler %s!" % job_scheduler, action="submitjob", user=username)
-		res['state']= 'ABORTED'
-		res['status']= 'Job failed to be submitted!'
-		return make_response(jsonify(res),500)
+		logger.warn(
+			"Failed to submit job to scheduler %s!" % job_scheduler,
+			action="submitjob",
+			user=username
+		)
 
+		safe_fail_pipeline_submission(
+			pipeline_claim, 'Scheduler submission returned no result',
+			uncertain=True
+		)
+
+		res['state'] = 'ABORTED'
+		res['status'] = 'Job failed to be submitted!'
+		return make_response(jsonify(res), 500)
+		
+	# - Retrieve job info
 	submit_date= submit_res['submit_date']
 	job_id= submit_res['job_id']
 	pid= submit_res['pid']
@@ -253,6 +629,19 @@ def submit_job():
 		"exit_code": -1
 	}
 
+	# - Add pipeline metadata only for pipeline-associated jobs.
+	#   Standalone jobs retain the original MongoDB structure.
+	if pipeline_claim is not None:
+		job_obj['pipeline_id'] = pipeline_id
+		job_obj['run_id'] = run_id
+
+		if staged_submission:
+			job_obj['execution_mode'] = 'staged_container'
+			job_obj['workspace'] = submit_res['workspace']
+			job_obj['output_root'] = submit_res['output_root']
+			job_obj['output_layout'] = 'results_subdirectory_v1'
+
+	# - Create/retrieve job collection for user
 	collection_name= username + '.jobs'
 
 	try:
@@ -272,9 +661,62 @@ def submit_job():
 		logger.warn("Job %s submitted but failed to be registered in DB!" % job_id, action="submitjob", user=username)
 		res['state']= 'PENDING'
 		res['status']= 'WARN: Job submitted but failed to be registered in DB!'
+		
+		safe_fail_pipeline_submission(
+			pipeline_claim,
+			'Job submitted but MongoDB job registration failed',
+			uncertain=True,
+			job_id=job_id
+		)
+			
 		return make_response(jsonify(res),500)
 
+	# - Associate the submitted job with its pipeline run.
+	if pipeline_claim is not None:
+		try:
+			pipeline_job_binding.finish_submission(
+				pipeline_claim, job_id, job_scheduler, pid
+			)
+		except Exception as exc:
+			logger.error(
+				"Job %s submitted but pipeline association failed (err=%s)!" %
+				(job_id, str(exc)),
+				action="submitjob",
+				user=username
+			)
 
+			res['job_id'] = job_id
+			res['state'] = 'PENDING'
+			res['status'] = 'Job submitted; pipeline association requires reconciliation'
+			return make_response(jsonify(res), 202)
+
+
+	# - Record the existing per-job output workspace.
+	#   Failure to record workspace metadata must not affect a
+	#   successfully submitted job.
+	if pipeline_claim is not None:
+		try:
+			recorded = pipeline_workspace.record_workspace(
+				username,
+				pipeline_id,
+				run_id,
+				job_id,
+				job_top_dir
+			)
+			if not recorded:
+				logger.warn(
+					"Workspace metadata was not recorded for run %s" % run_id,
+					action="submitjob",
+					user=username
+				)
+		except Exception as exc:
+			logger.error(
+				"Failed to record workspace for run %s (err=%s)!" %
+				(run_id, str(exc)),
+				action="submitjob",
+				user=username
+			)
+	
 	# - Fill response
 	res['job_id']= job_id
 	res['submit_date']= submit_date
@@ -352,123 +794,26 @@ def submit_job_kubernetes(app_name, cmd_args, job_top_dir, username, run_opts):
 			logger.error(errmsg, action="submitjob", user=username)
 			return None
 
-	# - Set job options
-	app_mode= ""
-	if app_name=="caesar":
-		image= current_app.config['CAESAR_JOB_IMAGE']
-		job_label= 'caesar-job'
-
-	elif app_name=="mrcnn":
-		image= current_app.config['MASKRCNN_JOB_IMAGE']
-		job_label= 'mrcnn-job'
-
-	elif app_name=="aegean":
-		image= current_app.config['AEGEAN_JOB_IMAGE']
-		job_label= 'aegean-job'
-
-	elif app_name=="cutex":
-		image= current_app.config['CUTEX_JOB_IMAGE']
-		job_label= 'cutex-job'
-		
-	elif app_name=="classifier-cnn":
-		image= current_app.config['CNN_CLASSIFIER_JOB_IMAGE']
-		job_label= 'cnn_classifier-job'
-		
-	elif app_name=="classifier-vit":
-		image= current_app.config['VIT_CLASSIFIER_JOB_IMAGE']
-		job_label= 'vit_classifier-job'
-		app_mode= 'image'
-		
-	elif app_name=="classifier-vit-catalog":
-		image= current_app.config["VIT_CLASSIFIER_JOB_IMAGE"]
-		job_label= "vit_classifier_catalog-job"
-		app_mode= 'catalog'
-		
-	elif app_name=="umap":
-		image= current_app.config['UMAP_JOB_IMAGE']
-		job_label= 'umap-job'
-		
-	elif app_name=="outlier-finder":
-		image= current_app.config['OUTLIER_FINDER_JOB_IMAGE']
-		job_label= 'outlier-finder-job'
-		
-	elif app_name=="hdbscan":
-		image= current_app.config['HDBSCAN_JOB_IMAGE']
-		job_label= 'hdbscan-job'
-		
-	elif app_name=="similarity-search":
-		image= current_app.config['SIMSEARCH_JOB_IMAGE']
-		job_label= 'simsearch-job'
-
-	elif app_name=="caesar-yolo":
-		image= current_app.config['CAESAR_YOLO_JOB_IMAGE']
-		job_label= 'caesar-yolo-job'
-
-	elif app_name=="sfforecaster":
-		image= current_app.config['SFFORECASTER_JOB_IMAGE']
-		job_label= 'sfforecaster-job'
-		
-	elif app_name=="fextractor":
-		container_variant= run_opts.get(
-			"container_variant",
-			"",
+	# - Resolve application image, label and execution mode
+	try:
+		app_spec = resolve_job_application(
+			app_name,
+			'kubernetes',
+			run_opts
 		)
 
-		if container_variant=="tf":
-			image= current_app.config[
-				'FEXTRACTOR_TF_JOB_IMAGE'
-			]
-
-		elif container_variant=="torch":
-			image= current_app.config[
-				'FEXTRACTOR_TORCH_JOB_IMAGE'
-			]
-			
-		elif container_variant=="chronos":
-			image= current_app.config[
-				'FEXTRACTOR_CHRONOS_JOB_IMAGE'
-			]
-			
-		elif container_variant=="moirai":
-			image= current_app.config[
-				'FEXTRACTOR_MOIRAI_JOB_IMAGE'
-			]
-			
-		elif container_variant=="fats":
-			image= current_app.config[
-				'FEXTRACTOR_FATS_JOB_IMAGE'
-			]
-			
-		elif container_variant=="licu":
-			image= current_app.config[
-				'FEXTRACTOR_LICU_JOB_IMAGE'
-			]
-			
-		elif container_variant=="falcon":
-			image= current_app.config[
-				'FEXTRACTOR_FALCON_JOB_IMAGE'
-			]
-
-		else:
-			logger.warn(
-				"Unknown fextractor container variant '%s'!" %
-				container_variant,
-				action="submitjob",
-				user=username,
-			)
-			return None
-
-		job_label= 'fextractor-job'	
-		
-	elif app_name=="oxkat":
-		image= current_app.config['OXKAT_JOB_IMAGE']
-		job_label= 'oxkat-job'	
-		
-	else:
-		logger.warn("Unknown/unsupported app %s!" % app_name, action="submitjob", user=username)
+	except JobApplicationConfigError as exc:
+		logger.warn(
+			str(exc),
+			action="submitjob",
+			user=username
+		)
 		return None
 
-
+	image = app_spec['image']
+	job_label = app_spec['job_label']
+	app_mode = app_spec['app_mode']
+	
 	# - Create job object
 	if mount_rclone_vol:
 		job= jobmgr_kube.create_job_rclone(
@@ -515,7 +860,16 @@ def submit_job_kubernetes(app_name, cmd_args, job_top_dir, username, run_opts):
 #=================================
 #===    SUBMIT JOB SLURM
 #=================================
-def submit_job_slurm(app_name, inputfile, cmd_args, job_top_dir, username, run_opts):
+def submit_job_slurm(
+	app_name, 
+	inputfile, 
+	cmd_args, 
+	job_top_dir, 
+	username, 
+	run_opts,
+	read_only_data=False,
+	staged_cmd_arg_list=None,
+):
 	""" Submit job to Slurm scheduler """
 
 	# - Init response
@@ -537,106 +891,117 @@ def submit_job_slurm(app_name, inputfile, cmd_args, job_top_dir, username, run_o
 			logger.error(errmsg, action="submitjob", user=username)
 			return None
 
-	# - Set job options
-	image= ''
-	app_mode= ''
-	if app_name=="caesar":
-		image= current_app.config['SLURM_CAESAR_JOB_IMAGE']
 
-	elif app_name=="mrcnn":
-		image= current_app.config['SLURM_MASKRCNN_JOB_IMAGE']
-
-	elif app_name=="aegean":
-		image= current_app.config['SLURM_AEGEAN_JOB_IMAGE']
-	
-	elif app_name=="cutex":
-		image= current_app.config['SLURM_CUTEX_JOB_IMAGE']
-	
-	elif app_name=="classifier-cnn":
-		image= current_app.config['SLURM_CNN_CLASSIFIER_JOB_IMAGE']
-		
-	elif app_name=="classifier-vit":
-		image= current_app.config['SLURM_VIT_CLASSIFIER_JOB_IMAGE']
-		app_mode = "image"
-	
-	elif app_name=="classifier-vit-catalog":
-		image= current_app.config["SLURM_VIT_CLASSIFIER_JOB_IMAGE"]
-		app_mode = "catalog"
-		
-	elif app_name=="umap":
-		image= current_app.config['SLURM_UMAP_JOB_IMAGE']
-		
-	elif app_name=="outlier-finder":
-		image= current_app.config['SLURM_OUTLIER_FINDER_JOB_IMAGE']
-		
-	elif app_name=="hdbscan":
-		image= current_app.config['SLURM_HDBSCAN_JOB_IMAGE']
-		
-	elif app_name=="similarity-search":
-		image= current_app.config['SLURM_SIMSEARCH_JOB_IMAGE']
-		
-	elif app_name=="caesar-yolo":
-		image= current_app.config['SLURM_CAESAR_YOLO_JOB_IMAGE']
-		
-	elif app_name=="sfforecaster":
-		image= current_app.config['SLURM_SFFORECASTER_JOB_IMAGE']
-			
-	elif app_name=="fextractor":
-		container_variant= run_opts.get(
-			"container_variant",
-			"",
+	# - Resolve application image and execution mode
+	try:
+		app_spec = resolve_job_application(
+			app_name,
+			'slurm',
+			run_opts
 		)
 
-		if container_variant=="tf":
-			image= current_app.config[
-				'SLURM_FEXTRACTOR_TF_JOB_IMAGE'
-			]
-
-		elif container_variant=="torch":
-			image= current_app.config[
-				'SLURM_FEXTRACTOR_TORCH_JOB_IMAGE'
-			]
-			
-		elif container_variant=="chronos":
-			image= current_app.config[
-				'SLURM_FEXTRACTOR_CHRONOS_JOB_IMAGE'
-			]
-			
-		elif container_variant=="moirai":
-			image= current_app.config[
-				'SLURM_FEXTRACTOR_MOIRAI_JOB_IMAGE'
-			]
-			
-		elif container_variant=="fats":
-			image= current_app.config[
-				'SLURM_FEXTRACTOR_FATS_JOB_IMAGE'
-			]
-			
-		elif container_variant=="licu":
-			image= current_app.config[
-				'SLURM_FEXTRACTOR_LICU_JOB_IMAGE'
-			]
-			
-		elif container_variant=="falcon":
-			image= current_app.config[
-				'SLURM_FEXTRACTOR_FALCON_JOB_IMAGE'
-			]
-
-		else:
-			logger.warn(
-				"Unknown fextractor container variant '%s'!" %
-				container_variant,
-				action="submitjob",
-				user=username,
-			)
-			return None		
-			
-	elif app_name=="oxkat":
-		image= current_app.config['SLURM_OXKAT_JOB_IMAGE']
-				
-	else:
-		logger.warn("Unknown/unsupported app %s!" % app_name, action="submitjob", user=username)
+	except JobApplicationConfigError as exc:
+		logger.warn(
+			str(exc),
+			action="submitjob",
+			user=username
+		)
 		return None
+
+	image = app_spec['image']
+	app_mode = app_spec['app_mode']
+
+	# - Prepare generic staged-container execution.
+	# - All image and application arguments originate from trusted
+	#   server-side configuration, not from a client execution spec.
+	preparation = None
+
+	if staged_cmd_arg_list is not None:
+		from caesar_rest.pipeline.staging.submission_specs import (
+			create_specs,
+			write_specs,
+			PipelineSubmissionError
+		)
+
+		try:
+			app_job_root = jobmgr_slurm.app_jobdir
+			cluster_job_root = jobmgr_slurm.cluster_jobdir
+
+			# - Preserve the relative job path across the configured
+			#   application and Slurm storage roots.
+			relative_job_path = os.path.relpath(job_dir, app_job_root)
+
+			if relative_job_path == '..' or relative_job_path.startswith('../'):
+				raise PipelineSubmissionError('Job workspace is outside application job root')
+
+			cluster_workspace = os.path.join(
+				cluster_job_root, relative_job_path
+			)
+
+			# - Obtain the input staging strategy selected by
+			#   the trusted application configurator.
+			# - Ordinary applications retain private-copy staging.
+			input_staging_mode = run_opts.get(
+				'input_staging_mode',
+				'copy'
+			)
+
+
+			staging_spec, execution_spec = create_specs(
+				workspace_app=job_dir,
+				workspace_cluster=cluster_workspace,
+				inputfile=inputfile,
+				cmd_arg_list=staged_cmd_arg_list,
+				image=image,
+				app_data_root=jobmgr_slurm.app_datadir,
+				cluster_data_root=jobmgr_slurm.cluster_datadir,
+				app_job_root=app_job_root,
+				cluster_job_root=cluster_job_root,
+				model_dir=jobmgr_slurm.app_modeldir,
+				app_mode=app_mode,
+				input_mode=input_staging_mode,
+			)
+
+			write_specs(job_dir, staging_spec, execution_spec)
+
+			# - Package the shared pipeline runtime into a standalone
+			#   worker archive inside the private job workspace.
+			# - Deployment must complete before Slurm submission.
+			from caesar_rest.pipeline.submission.worker_bundle import deploy_worker
+
+			worker_info = deploy_worker(job_dir)
+
+			preparation = {
+				'mode': 'prepare_then_execute_container',
+				'workspace': cluster_workspace,
+				'spec_path': os.path.join(
+					cluster_workspace, 'staging_spec.json'
+				),
+				'execution_spec_path': os.path.join(
+					cluster_workspace, 'execution_spec.json'
+				),
+				'worker_path': os.path.join(
+					cluster_workspace, worker_info['name']
+				),
+				'worker_sha256': worker_info['sha256'],
+				'python_executable': (
+					current_app.config.get('PIPELINE_PYTHON_EXECUTABLE')
+					or '/usr/bin/python3'
+				)
+			}
+
+		except (PipelineSubmissionError, OSError, ValueError, KeyError) as exc:
+			logger.error(
+				"Failed to prepare staged pipeline submission (err=%s)" % exc,
+				action="submitjob",
+				user=username
+			)
+			#return None
+
+			raise SlurmPreSubmissionError(
+				"Staged pipeline preparation failed: %s" % exc
+			) from exc
+
 
 	# - Create job object
 	job= jobmgr_slurm.create_job(
@@ -647,11 +1012,24 @@ def submit_job_slurm(app_name, inputfile, cmd_args, job_top_dir, username, run_o
 		job_outdir=job_dir,
 		job_run_opts=run_opts,
 		app_mode=app_mode,
+		read_only_data=read_only_data,
+		preparation=preparation,
 	)
 	
-	if job is None or job=="":
-		logger.warn("Failed to create Slurm job data!", action="submitjob", user=username)
+	if job is None or job == "":
+		logger.warn(
+			"Failed to create Slurm job data!",
+			action="submitjob",
+			user=username
+		)
+
+		if staged_cmd_arg_list is not None:
+			raise SlurmPreSubmissionError(
+				"Failed to generate staged pipeline Slurm job"
+			)
+
 		return None
+	
 
 	# - Submit job
 	now = datetime.datetime.now()
@@ -680,7 +1058,7 @@ def submit_job_slurm(app_name, inputfile, cmd_args, job_top_dir, username, run_o
 
 	logger.info("Submitted job with id=%s (pid=%s) ..." % (job_id, pid), action="submitjob", user=username)
 	
-	# - Response
+	# - Fill response payload
 	res= {
 		"job_id": job_id,
 		"pid": pid,
@@ -688,6 +1066,10 @@ def submit_job_slurm(app_name, inputfile, cmd_args, job_top_dir, username, run_o
 		"state": "PENDING",
 		"status": "Job submitted to Slurm scheduler"
 	}
+	
+	if staged_cmd_arg_list is not None:
+		res['output_root'] = os.path.join(job_dir, 'results')
+		res['workspace'] = job_dir
 
 	return res
 
@@ -852,10 +1234,8 @@ def cancel_celery_task(task_id):
 	# - Revoke task
 	logger.info("Revoking task %s ..." % task_id, action="canceljob")
 	try:
-		#task.revoke(task_id,terminate=True,signal='SIGKILL')
-		#task.revoke(task_id,terminate=True,signal='SIGUSR1')
-		#revoke(task_id, terminate=True,signal='SIGUSR1') # force celery task to go to SOFT TIME OUT
-		revoke(task_id, terminate=True,signal='SIGTERM')
+		#revoke(task_id, terminate=True, signal='SIGTERM')
+		revoke_celery_task(task_id, terminate=True, signal='SIGTERM')
 		
 	except Exception as e:
 		errmsg= 'Exception caught when attempting to rekove task ' + task_id + ' (err=' + str(e) + ')!' 

@@ -6,8 +6,39 @@
 caesar-rest is a REST-ful web service for astronomical source extraction and classification with the caesar source extractor [https://github.com/SKA-INAF/caesar]. The software is developed in python and consists of a few containerized microservices, deployable on standalone servers or on a distributed cloud infrastructure. The core component is the REST web application, based on the Flask framework and running behind a nginx+uwsgi http server, and providing APIs for managing the input data (e.g. data upload/download/removal) and source finding jobs (e.g. submit, get status, get outputs) with different job management systems (Kubernetes, Slurm, Celery). Additional services (AAI, user DB, log storage, job monitor, accounting) enable the user authentication, the storage and retrieval of user data and job information, the monitoring of submitted jobs, and the aggregation of service logs and user data/job stats.
 Besides caesar, we also foresee to integrate other tools widely used in the radio community (e.g. Aegean, PyBDSF) and newly developed source finders based on deep learning models.    
 
+### Scientific pipelines and agent orchestration
+
+CAESAR-REST also provides an authenticated REST API for managing
+multi-stage scientific pipelines on Slurm-based infrastructures.
+
+The pipeline framework supports:
+
+- Application-independent pipeline and experiment registration.
+- Configurable scientific stages and execution parameters.
+- Multiple alternative runs per logical pipeline node.
+- Named input artifacts and immutable cross-stage dependencies.
+- Registration and retention of file and directory artifacts.
+- Selection of preferred completed runs, including concurrency-safe updates.
+- Explicit scientific, artifact-readiness and submission-state reporting.
+- One-shot job submission with safeguards against duplicate Slurm execution.
+
+These capabilities support agent-driven scientific workflows, where
+external orchestration systems such as MAASAI propose experiments,
+evaluate results, select preferred runs and decide which stage to
+execute next.
+
+The API does not automatically select scientifically optimal runs
+or execute downstream stages. These decisions remain under the
+control of the orchestrating application.
+
+See:
+
+- [Pipeline V2 REST API](docs/pipeline_v2_api.md)
+- [MAASAI integration guide](docs/maasai_integration.md)
+
+
 ## **Status**
-This software is under development. Tested originally with python 2.7 but switched to python 3.6 later on (some apps are only available for python 3). 
+This software is under development. Original implementation developed in python 2.7, switched to python 3.6 later on (some apps are only available for python 3), now testing on python 3.8/3.10.
 
 ## **Credit**
 This software is distributed with GPLv3 license. If you use caesar-rest for your research, please add repository link or acknowledge authors in your papers.   
@@ -104,6 +135,10 @@ Before running the application you must do some preparatory stuff:
 * Create the top directory for models (by default `/opt/caesar-rest/models`) and put TensorFlow/PyTorch model & weights files under this path.        
 * (OPTIONAL) Create the log directory for system services (see below), e.g. `/opt/caesar-rest/logs` 
 * (OPTIONAL) Create the run directory for system services (see below), e.g. `/opt/caesar-rest/run` 
+* Create a persistent directory for pipeline artifacts, e.g.
+  `/storage/caesar-rest/pipeline-artifacts`. This directory must be
+  accessible to the artifact retention worker, REST application
+  and downstream staging environment.
 
 ### **Run DB service**
 caesar-rest requires a MongoDB service where to store user data and job information. To start the DB service:    
@@ -289,7 +324,7 @@ where supported `ARGS` are:
 
    SLURM OPTIONS   
    * `slurm_keyfile=[FILE_PATH]`: Slurm rest service private key file path    
-   * `slurm_user=[SLURM_USER]`: Username enabled to run in Slurm cluster (default=cirasa)   
+   * `slurm_user=[SLURM_USER]`: Username enabled to run in Slurm cluster (default is deployment-specific)   
    * `slurm_host=[SLURM_HOST]`: Slurm cluster host/ipaddress (default=localhost)   
    * `slurm_port=[SLURM_PORT]`: Slurm rest service port (default=6820)  
    * `slurm_batch_workdir=[SLURM_BATCH_WORKDIR]`: Cluster directory where to place Slurm batch logs (must be writable by slurm_user) (default=/opt/slurm/batchlogs/caesar-rest)    
@@ -327,6 +362,9 @@ where supported `ARGS` are:
    * `dataset_emu_gp_pilot`: Path to emu-gp-pilot dataset json filelist      
   
 Flask default options are defined in the `config.py`. Celery options are defined in the `celery_config.py`. Other options may be defined in the future to override default Flask and Celery options.   
+The default RabbitMQ `guest` credentials are intended for local
+development only. Production deployments should use dedicated
+accounts with strong credentials and restricted permissions.
 
 #### **Run the application in production**   
 In a production environment you can run the application behind a nginx+uwsgi (or nginx+gunicorn) server. In the `config` directory of the repository you can find sample files to create and configure required services. For example:  
@@ -921,7 +959,18 @@ For normal use, certificate validation should remain enabled. Upgrade Insomnia o
 The working CAESAR-REST API authentication can be verified independently using `curl`.
 
 ### **Run job monitoring service**   
-The job monitoring service periodically monitors user jobs, updating their status on the DB. It can be started as:    
+The job monitoring service periodically monitors user jobs, updating their status on the DB. 
+
+For scientific pipeline runs, successful completion also triggers
+output artifact registration. The standalone pipeline artifact
+retention worker subsequently promotes registered outputs into
+persistent storage.
+
+Job monitoring and artifact retention are independent services:
+the former tracks scientific execution, while the latter preserves
+artifacts for downstream pipeline stages.
+
+The job monitoring service can be started as:    
 
 ```$INSTALL_DIR/bin/run_jobmonitor.py --[ARGS]```    
 
@@ -942,6 +991,144 @@ where supported `ARGS` are:
    * `slurm_port=[SLURM_PORT]`: Slurm rest service port (default=6820)  
 
 Alternatively, you can use the Docker container `sriggi/caesar-rest-jobmonitor:latest` (see https://hub.docker.com/r/sriggi/caesar-rest-jobmonitor) and deploy it with DockerCompose or Kubernetes (see sample configuration files).    
+
+
+### **Run pipeline artifact retention service**
+
+CAESAR-REST provides a standalone artifact retention worker responsible
+for preserving the outputs of completed scientific pipeline runs.
+
+The service is implemented in `apps/run_artifact_retention.py` and runs
+independently of the REST application and job monitoring service.
+
+The pipeline artifact lifecycle consists of three main steps:
+
+1. The scientific job completes successfully and its pipeline run
+   transitions to `COMPLETED`.
+2. The output artifacts are registered in MongoDB, including their
+   names, types, sizes and integrity metadata.
+3. The artifact retention worker copies and verifies registered
+   artifacts into the configured persistent retention storage.
+
+The retention worker processes completed, registered pipeline runs
+whose artifacts have not yet been retained.
+
+**For multi-stage Pipeline V2 execution, artifact retention is
+required:** downstream stages consume retained upstream artifacts,
+not arbitrary files from the original job working directory.
+
+#### Starting the retention worker
+
+After installing CAESAR-REST, start the service with:
+
+```bash
+$INSTALL_DIR/bin/run_artifact_retention.py \
+  --dbhost=localhost \
+  --dbport=27017 \
+  --dbname=caesardb \
+  --retention-root=/opt/caesar-rest/pipeline-artifacts \
+  --poll-seconds=30
+```
+
+Replace the retention root with the absolute path configured for
+your installation.
+
+The retention root must be accessible and writable by the
+retention worker. It must also be accessible to the REST service
+and to the staging environment used for downstream pipeline runs.
+
+The REST application and retention worker must be configured to
+use the same MongoDB database and artifact retention storage.
+
+#### Worker configuration
+
+The retention worker accepts the following command-line options:
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--dbhost` | MongoDB hostname | `localhost` |
+| `--dbport` | MongoDB port | `27017` |
+| `--dbname` | MongoDB database name | `caesardb` |
+| `--retention-root` | Absolute directory for persistent artifacts | Required |
+| `--poll-seconds` | Polling interval in seconds | `30` |
+| `--max-file-bytes` | Maximum size of an individual artifact file | `1073741824` (1 GiB) |
+| `--max-directory-bytes` | Maximum size of a retained artifact directory | `1099511627776` (1 TiB) |
+| `--max-directory-entries` | Maximum entries in a retained directory | `100000` |
+| `--max-directory-depth` | Maximum artifact directory depth | `16` |
+
+Size and directory limits should be configured according to
+the requirements of the scientific applications being executed.
+
+For example, radio-interferometric measurement sets can require
+significant storage capacity and may contain many files.
+
+#### Retention processing
+
+The worker periodically queries MongoDB for eligible runs.
+
+A run is eligible when:
+
+- Its scientific status is `COMPLETED`.
+- Its output artifacts have been registered.
+- At least one artifact is registered.
+- No retained artifact list has been published.
+- Its retention status is absent or `PENDING`.
+
+The worker atomically marks an eligible run as `COPYING` before
+processing it.
+
+Artifact promotion includes integrity checks. The retained
+artifacts are published only after successful promotion.
+
+On success, the run receives:
+
+`retention_status = READY`
+
+On failure, the worker records:
+
+`retention_status = FAILED`
+
+and stores diagnostic information in the run metadata.
+
+Failed retention operations require investigation and recovery;
+the worker does not automatically repeat failed copying operations.
+
+For an initial deployment, run exactly one retention worker
+instance. The existing per-run filesystem locking mechanism
+provides additional protection, but a single worker is the
+recommended initial configuration.
+
+#### Monitoring artifact readiness
+
+Clients can inspect the retention state using:
+
+`GET /caesar/api/v1.0/pipelines/{pipeline_id}/runs/{run_id}`
+
+A successfully completed and retained run reports:
+
+```json
+{
+  "status": "COMPLETED",
+  "artifacts_status": "READY",
+  "readiness": {
+    "can_select": true,
+    "can_consume": true
+  }
+}
+```
+
+A scientifically completed run may not immediately report
+`can_consume = true`, because artifact registration and retention
+are performed independently of scientific execution.
+
+For agent-driven workflows such as MAASAI, downstream run
+registration should be attempted only when the required
+upstream artifacts are available. The artifact-binding layer
+performs the authoritative integrity verification.
+
+See the [Pipeline V2 API reference](docs/pipeline_v2_api.md)
+for further details.
+
    
 ### **Run accounting service**   
 The accounting service periodically monitors user data and job info, storing aggregated stats in the DB. It can be started as:    
@@ -962,6 +1149,301 @@ where supported `ARGS` are:
    * `rclone_storage_path=[PATH]`: rclone remote storage path (default=.)   
 
 Alternatively, you can use the Docker container `sriggi/caesar-rest-accounter:latest` (see https://hub.docker.com/r/sriggi/caesar-rest-accounter) and deploy it with DockerCompose or Kubernetes (see sample configuration files).    
+
+
+## Scientific Pipeline V2 API
+
+CAESAR-REST provides an authenticated API for registering,
+executing and monitoring multi-stage scientific pipelines.
+
+The pipeline API is application-independent. Scientific stages,
+allowed parameters and input mappings are configured on the
+server. The examples below use OXKAT, but the same pipeline
+infrastructure can support other scientific applications.
+
+All endpoints use the prefix:
+
+`/caesar/api/v1.0`
+
+Pipeline requests require authentication. REST clients should
+provide a valid access token:
+
+`Authorization: Bearer <access-token>`
+
+Refer to the Keycloak/OpenID Connect section above for
+authentication and TLS configuration.
+
+### Pipeline concepts
+
+A **pipeline** groups related scientific experiments.
+
+A **stage** identifies the scientific processing operation
+(e.g. GET_INFO, 1GC, FLAG or 2GC for OXKAT).
+
+A **node** groups alternative runs for the same stage.
+Different nodes may represent independent experimental groups
+for the same scientific stage. For example, an agent may use
+`flag_conservative` and `flag_aggressive` as separate nodes
+for the OXKAT `FLAG` stage.
+
+Each node maintains its own preferred-run selection.
+
+If `node_id` is omitted, CAESAR-REST assigns a generic
+identifier such as `stage_flag` or `stage_2gc`.
+
+A **run** represents a registered experiment with fixed
+scientific parameters and input dependencies.
+
+A **selected run** is the preferred completed experiment
+within a node. Selection is mutable, but previously registered
+downstream input bindings remain immutable.
+
+### Core REST endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/pipelines` | Create a pipeline |
+| GET | `/pipelines` | List pipelines |
+| GET | `/pipelines/{pipeline_id}` | Retrieve pipeline metadata |
+| GET | `/pipelines/{pipeline_id}/runs` | List pipeline runs |
+| POST | `/pipelines/{pipeline_id}/runs` | Register a V2 run |
+| GET | `/pipelines/{pipeline_id}/runs/{run_id}` | Retrieve run details and readiness |
+| POST | `/pipelines/{pipeline_id}/runs/{run_id}/submit` | Submit a registered run |
+| GET | `/pipelines/{pipeline_id}/tree` | Retrieve pipeline execution tree |
+| POST | `/pipelines/{pipeline_id}/sync` | Synchronize run states |
+| POST | `/pipelines/{pipeline_id}/nodes/{node_id}/selection` | Select a completed run unconditionally |
+| PUT | `/pipelines/{pipeline_id}/nodes/{node_id}/selection` | Conditionally select a completed run |
+
+Additional node-oriented run, artifact listing, artifact download,
+selected-artifact resolution and retention endpoints are documented
+in the [Pipeline V2 API reference](docs/pipeline_v2_api.md).
+
+### Quick start
+
+#### 1. Create a pipeline
+
+`POST /caesar/api/v1.0/pipelines`
+
+```json
+{
+  "app": "oxkat",
+  "name": "OXKAT calibration experiments",
+  "description": "Agent-driven calibration and imaging"
+}
+```
+
+The response contains a `pipeline_id`.
+
+#### 2. Register an initial run
+
+`POST /caesar/api/v1.0/pipelines/{pipeline_id}/runs`
+
+```json
+{
+  "stage": "GET_INFO",
+  "dataset_id": "oxkat-test-dataset-v3"
+}
+```
+
+This creates a `PLANNED` run; it does not submit a job.
+
+#### 3. Submit the registered run
+
+`POST /caesar/api/v1.0/pipelines/{pipeline_id}/runs/{run_id}/submit`
+
+```json
+{}
+```
+
+CAESAR-REST derives the execution request from the registered
+run. Clients do not resubmit scientific parameters or storage paths.
+
+#### 4. Monitor the run
+
+`GET /caesar/api/v1.0/pipelines/{pipeline_id}/runs/{run_id}`
+
+The response includes:
+
+```json
+{
+  "status": "COMPLETED",
+  "artifacts_status": "READY",
+  "readiness": {
+    "can_select": true,
+    "can_consume": true
+  },
+  "submission": {
+    "state": "ACCEPTED",
+    "retry_allowed": false,
+    "requires_reconciliation": false
+  }
+}
+```
+
+These values illustrate a successfully completed and retained run.
+
+`COMPLETED` describes scientific execution. `READY` indicates
+that the registered outputs have complete retained-artifact
+metadata. Actual downstream input binding still verifies artifact
+availability and integrity.
+
+The submission state `ACCEPTED` does not by itself mean that
+the scientific execution succeeded.
+
+#### 5. Register a downstream run with named inputs
+
+A typical OXKAT calibration pipeline progresses through:
+
+`GET_INFO → 1GC → FLAG → 2GC`
+
+Each stage produces registered scientific artifacts that can be
+consumed by subsequent stages. The orchestrating application
+decides whether to execute another experiment, select a preferred
+run or proceed to the next scientific stage.
+
+The examples below focus on 2GC input registration. See the
+MAASAI integration guide for the complete orchestration workflow.
+
+A later OXKAT stage can reference concrete artifacts from
+an upstream run:
+
+```json
+{
+  "stage": "2GC",
+  "inputs": {
+    "target_ms": {
+      "run_id": "FLAG_RUN_ID",
+      "artifact": "flagged_target_measurement_sets"
+    },
+    "flag_images": {
+      "run_id": "FLAG_RUN_ID",
+      "artifact": "flag_images"
+    },
+    "project_info": {
+      "run_id": "FLAG_RUN_ID",
+      "artifact": "project_info"
+    }
+  }
+}
+```
+
+Alternatively, the client can reference the currently selected
+run of a logical node:
+
+```json
+{
+  "stage": "2GC",
+  "inputs": {
+    "target_ms": {
+      "node_id": "flag",
+      "selected": true,
+      "artifact": "flagged_target_measurement_sets"
+    },
+    "flag_images": {
+      "node_id": "flag",
+      "selected": true,
+      "artifact": "flag_images"
+    },
+    "project_info": {
+      "node_id": "flag",
+      "selected": true,
+      "artifact": "project_info"
+    }
+  }
+}
+```
+
+The selected run is resolved at registration time. The server
+stores immutable upstream run IDs, artifact indices and integrity
+metadata. Later changes to a preferred selection do not affect
+previously registered downstream runs.
+
+The node identifier must match an existing node in the pipeline.
+
+### Preferred-run selection
+
+To select a completed run unconditionally:
+
+`POST /pipelines/{pipeline_id}/nodes/{node_id}/selection`
+
+```json
+{
+  "run_id": "PREFERRED_RUN_ID"
+}
+```
+
+For concurrency-safe updates, use PUT:
+
+`PUT /pipelines/{pipeline_id}/nodes/{node_id}/selection`
+
+```json
+{
+  "run_id": "NEW_PREFERRED_RUN_ID",
+  "expected_run_id": "CURRENT_PREFERRED_RUN_ID"
+}
+```
+
+The operation succeeds only if the current selection matches
+`expected_run_id`. Otherwise the server returns HTTP 409.
+
+Set `expected_run_id` to JSON `null` when the node is expected
+to have no selected run.
+
+Conditional selection is recommended for concurrent agents.
+
+### Submission safety
+
+Pipeline V2 uses atomic run claims and durable one-shot
+submission intents to prevent duplicate scheduler submissions.
+
+A timed-out HTTP request does not necessarily mean that Slurm
+rejected the submission.
+
+Clients should retrieve the run status and inspect the
+`submission` object before taking further action.
+
+For uncertain submissions, automatic resubmission is not safe.
+Reconciliation may be required. 
+
+The `submission.retry_allowed` field indicates whether the
+stored run state permits an initial submission attempt.
+
+When `retry_allowed` is `true` for a `PLANNED` run, the server
+still performs atomic claiming and all normal submission checks.
+
+This field must not be interpreted as authorization to
+automatically retry a timed-out HTTP submission request.
+
+Runs in `SUBMITTING`, `SUBMITTED`, `SUBMISSION_FAILED` or
+`SUBMISSION_UNCERTAIN` must not be blindly resubmitted.
+
+### Artifact lifecycle
+
+Scientific completion, artifact registration, retention and
+preferred-run selection are separate operations.
+
+A completed run may be selected before its outputs are retained,
+but downstream stages require retained and verified input artifacts.
+
+CAESAR-REST maintains frozen artifact identities and integrity
+metadata so that downstream runs consume the intended outputs
+even when preferred selections change.
+
+### Detailed documentation
+
+- [Pipeline V2 API reference](docs/pipeline_v2_api.md)
+- [MAASAI integration guide](docs/maasai_integration.md)
+
+The API reference documents the complete route set, artifact
+operations, run lifecycle, validation rules and error handling.
+
+The MAASAI guide explains agent-oriented registration, submission,
+monitoring, experiment comparison, selected-run resolution and
+safe recovery from ambiguous submission outcomes.
+
+---
+
+
 
 ## **Usage**  
 caesar-rest provides the following REST endpoints:   
