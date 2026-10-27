@@ -67,6 +67,88 @@ def validate_identifier(value, field):
 		raise PipelineError('%s must match %s' % (field, IDENTIFIER_RE.pattern))
 	return value
 
+def default_node_id(stage):
+	"""Derive a stable, generic experiment-group ID from a stage."""
+
+	if not isinstance(stage, str) or not stage:
+		raise PipelineError('Invalid scientific stage')
+
+	node_id = 'stage_' + stage.lower()
+
+	return validate_identifier(node_id, 'node_id')
+
+
+def validate_pipeline_stage(app, stage):
+	"""Validate a stage against the configured V2 application policy."""
+
+	from flask import current_app
+
+	app = validate_identifier(app, 'app')
+
+	if not isinstance(stage, str) or not stage:
+		raise PipelineError('stage must be a nonempty string')
+
+	policies = current_app.config.get('PIPELINE_V2_APPLICATIONS', {})
+
+	if not isinstance(policies, dict):
+		raise PipelineError('Invalid V2 application configuration', 503)
+
+	policy = policies.get(app)
+
+	if not isinstance(policy, dict):
+		raise PipelineError('Application is not enabled for V2', 409)
+
+	parameters = policy.get('parameters')
+
+	if not isinstance(parameters, dict):
+		raise PipelineError('Invalid V2 parameter policy', 503)
+
+	stages = parameters.get('stage')
+
+	if not isinstance(stages, (list, tuple)) or not stages:
+		raise PipelineError('Application has no configured stages', 503)
+
+	if stage not in stages:
+		raise PipelineError('Unsupported scientific stage', 400)
+
+	input_policies = policy.get('input_options_by_stage')
+
+	if input_policies is not None:
+		if not isinstance(input_policies, dict):
+			raise PipelineError('Invalid V2 stage input policy', 503)
+
+		if stage not in input_policies:
+			raise PipelineError(
+				'Scientific stage has no V2 input policy', 409
+			)
+
+	return stage
+
+
+def get_pipeline_app(pipeline):
+	"""Return the authoritative application of a pipeline."""
+
+	app = pipeline.get('app')
+
+	if app is not None:
+		return validate_identifier(app, 'app')
+
+	# Compatibility with pipelines created before the API refactor.
+	metadata = pipeline.get('metadata') or {}
+
+	if not isinstance(metadata, dict):
+		raise PipelineError('Invalid legacy pipeline metadata', 409)
+
+	app = metadata.get('application')
+
+	if app is None:
+		raise PipelineError(
+			'Legacy pipeline has no application; create a new pipeline '
+			'or use the legacy run registration endpoint',
+			409
+		)
+
+	return validate_identifier(app, 'app')
 
 def get_pipeline(owner, pipeline_id):
 	pipelines, _, _ = collections()
@@ -77,38 +159,117 @@ def get_pipeline(owner, pipeline_id):
 
 
 def create_pipeline(owner, payload):
+	"""Create a pipeline with an authoritative V2 application."""
+
 	if not isinstance(payload, dict):
 		raise PipelineError('Expected a JSON object')
-	if set(payload) - {'name', 'description', 'metadata'}:
+
+	if set(payload) - {'app', 'name', 'description', 'metadata'}:
 		raise PipelineError('Unsupported pipeline field')
+
+	app = validate_identifier(payload.get('app'), 'app')
+
+	from flask import current_app
+
+	policies = current_app.config.get('PIPELINE_V2_APPLICATIONS', {})
+
+	if not isinstance(policies, dict):
+		raise PipelineError('Invalid V2 application configuration', 503)
+
+	if app not in policies or not isinstance(policies[app], dict):
+		raise PipelineError('Application is not enabled for V2', 409)
+
 	name = payload.get('name', '')
 	description = payload.get('description', '')
 	metadata = payload.get('metadata', {})
+
 	if not isinstance(name, str) or len(name) > 200:
 		raise PipelineError('Invalid pipeline name')
+
 	if not isinstance(description, str) or len(description) > 2000:
 		raise PipelineError('Invalid pipeline description')
+
 	if not isinstance(metadata, dict):
 		raise PipelineError('metadata must be an object')
+
+	if 'application' in metadata or 'app' in metadata:
+		raise PipelineError(
+			'Specify the application using the top-level app field'
+		)
+
 	pipelines, _, _ = collections()
+
 	doc = {
 		'pipeline_id': uuid.uuid4().hex,
 		'owner': owner,
+		'app': app,
 		'name': name,
 		'description': description,
 		'metadata': metadata,
+		'node_stages': {},
 		'created_at': utcnow(),
 		'status': 'ACTIVE',
 		'selections': {}
 	}
+
 	pipelines.insert_one(doc)
+
 	return public_doc(doc)
+	
 
 
 def list_pipelines(owner):
 	pipelines, _, _ = collections()
 	return [public_doc(doc) for doc in pipelines.find({'owner': owner}).sort('created_at', -1)]
 
+
+def establish_node_stage(owner, pipeline_id, node_id, stage):
+	"""Bind a logical node to exactly one scientific stage."""
+
+	validate_identifier(node_id, 'node_id')
+
+	if not isinstance(stage, str) or not stage:
+		raise PipelineError('Invalid scientific stage')
+
+	pipelines, runs, _ = collections()
+
+	# Existing nodes may predate persisted node-stage associations.
+	legacy = runs.find_one({
+		'owner': owner,
+		'pipeline_id': pipeline_id,
+		'node_id': node_id,
+		'parameters.stage': {'$ne': stage}
+	})
+
+	if legacy is not None:
+		raise PipelineError(
+			'Node already contains a different scientific stage',
+			409
+		)
+
+	field = 'node_stages.' + node_id
+
+	result = pipelines.update_one(
+		{
+			'owner': owner,
+			'pipeline_id': pipeline_id,
+			'$or': [
+				{field: {'$exists': False}},
+				{field: stage}
+			]
+		},
+		{
+			'$set': {
+				field: stage
+			}
+		}
+	)
+
+	if result.matched_count != 1:
+		raise PipelineError(
+			'Node is already associated with a different stage',
+			409
+		)
 
 def create_run(
 	owner, 
@@ -140,6 +301,14 @@ def create_run(
 	parameters = payload.get('parameters', {})
 	input_runs = payload.get('input_runs', [])
 	input_artifacts = payload.get('input_artifacts', [])
+	
+	if not isinstance(parameters, dict):
+		raise PipelineError('parameters must be an object')
+
+	stage = parameters.get('stage')
+
+	if not isinstance(stage, str) or not stage:
+		raise PipelineError('parameters.stage is required')	
 	
 	dataset_id = payload.get('dataset_id')
 
@@ -201,6 +370,13 @@ def create_run(
 			400
 		)
 	
+	establish_node_stage(
+		owner,
+		pipeline_id,
+		node_id,
+		stage
+	)	
+	
 	t_database = time.perf_counter()
 	
 	counter = counters.find_one_and_update(
@@ -250,6 +426,101 @@ def create_run(
 
 	return public_doc(doc)
 
+
+def create_run_simple(
+	owner,
+	pipeline_id,
+	payload,
+	retention_root='',
+	max_directory_bytes=1024 * 1024 * 1024 * 1024,
+	max_directory_entries=100000,
+	max_directory_depth=16
+):
+	"""Register a V2 run using stage and optional experiment-group ID."""
+
+	if not isinstance(payload, dict):
+		raise PipelineError('Expected a JSON object')
+
+	allowed = {
+		'stage',
+		'node_id',
+		'parameters',
+		'dataset_id',
+		'input_artifacts'
+	}
+
+	if set(payload) - allowed:
+		raise PipelineError('Unsupported run field')
+
+	pipeline = get_pipeline(owner, pipeline_id)
+
+	app = get_pipeline_app(pipeline)
+
+	stage = validate_pipeline_stage(
+		app,
+		payload.get('stage')
+	)
+
+	node_id = payload.get('node_id')
+
+	if node_id is None:
+		node_id = default_node_id(stage)
+	else:
+		validate_identifier(node_id, 'node_id')
+
+	parameters = payload.get('parameters', {})
+
+	if not isinstance(parameters, dict):
+		raise PipelineError('parameters must be an object')
+
+	if 'stage' in parameters:
+		raise PipelineError(
+			'stage must not be repeated inside parameters'
+		)
+
+	# Preserve the existing V2 submission/configurator interface.
+	execution_parameters = dict(parameters)
+	execution_parameters['stage'] = stage
+
+	input_artifacts = payload.get('input_artifacts', [])
+
+	if not isinstance(input_artifacts, list):
+		raise PipelineError('input_artifacts must be a list')
+
+	input_runs = set()
+
+	for item in input_artifacts:
+		if not isinstance(item, dict):
+			raise PipelineError('Invalid input artifact reference')
+
+		source_run_id = item.get('source_run_id')
+
+		if not isinstance(source_run_id, str) or not source_run_id:
+			raise PipelineError('Invalid source_run_id')
+
+		input_runs.add(source_run_id)
+
+	legacy_payload = {
+		'application': app,
+		'operation': default_node_id(stage),
+		'parameters': execution_parameters,
+		'input_runs': sorted(input_runs),
+		'input_artifacts': input_artifacts
+	}
+
+	if 'dataset_id' in payload:
+		legacy_payload['dataset_id'] = payload['dataset_id']
+
+	return create_run(
+		owner,
+		pipeline_id,
+		node_id,
+		legacy_payload,
+		retention_root=retention_root,
+		max_directory_bytes=max_directory_bytes,
+		max_directory_entries=max_directory_entries,
+		max_directory_depth=max_directory_depth
+	)
 
 def list_runs(owner, pipeline_id, node_id=None):
 	get_pipeline(owner, pipeline_id)
@@ -302,8 +573,15 @@ def get_pipeline_tree(owner, pipeline_id):
 
 		if node_id not in nodes:
 			selection = selections.get(node_id) or {}
+			node_stages = pipeline.get('node_stages') or {}
+			stage = node_stages.get(node_id)
+
+			if stage is None:
+				stage = (run.get('parameters') or {}).get('stage')
+
 			nodes[node_id] = {
 				'node_id': node_id,
+				'stage': stage,
 				'selected_run_id': selection.get('run_id'),
 				'runs': []
 			}

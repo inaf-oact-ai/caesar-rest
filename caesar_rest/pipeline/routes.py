@@ -94,12 +94,160 @@ def get_pipeline(pipeline_id):
 	return invoke(lambda owner: jsonify(manager.public_doc(manager.get_pipeline(owner, pipeline_id))))
 
 
-@pipeline_bp.route('/pipelines/<pipeline_id>/runs', methods=['GET'])
+#@pipeline_bp.route('/pipelines/<pipeline_id>/runs', methods=['GET'])
+#@custom_require_login
+#def list_runs(pipeline_id):
+#	return invoke(lambda owner: jsonify(manager.list_runs(owner, pipeline_id)))
+
+@pipeline_bp.route('/pipelines/<pipeline_id>/runs', methods=['GET', 'POST'])
 @custom_require_login
-def list_runs(pipeline_id):
-	return invoke(lambda owner: jsonify(manager.list_runs(owner, pipeline_id)))
+def pipeline_runs(pipeline_id):
+
+	if request.method == 'GET':
+		return invoke(
+			lambda owner: jsonify(manager.list_runs(owner, pipeline_id))
+		)
+
+	def action(owner):
+		doc = manager.create_run_simple(
+			owner,
+			pipeline_id,
+			request.get_json(silent=True),
+			retention_root=current_app.config.get(
+				'PIPELINE_ARTIFACT_RETENTION_ROOT'
+			) or '',
+			max_directory_bytes=current_app.config.get(
+				'PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_BYTES',
+				1024 * 1024 * 1024 * 1024
+			),
+			max_directory_entries=current_app.config.get(
+				'PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_ENTRIES',
+				100000
+			),
+			max_directory_depth=current_app.config.get(
+				'PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_DEPTH',
+				16
+			)
+		)
+
+		return jsonify(doc), 201
+
+	return invoke(action)
 
 
+
+@pipeline_bp.route(
+	'/pipelines/<pipeline_id>/runs/<run_id>',
+	methods=['GET']
+)
+@custom_require_login
+def get_pipeline_run(pipeline_id, run_id):
+	"""Return a run without requiring clients to know its node ID."""
+
+	def action(owner):
+		manager.get_pipeline(owner, pipeline_id)
+
+		run = mongo.db.pipeline_runs.find_one({
+			'owner': owner,
+			'pipeline_id': pipeline_id,
+			'run_id': run_id
+		})
+
+		if run is None:
+			raise manager.PipelineError('Run not found', 404)
+
+		doc = manager.public_doc(run)
+
+		doc['stage'] = (run.get('parameters') or {}).get('stage')
+
+		retained = run.get('retained_artifacts')
+
+		if isinstance(retained, list):
+			doc['artifacts_status'] = 'READY'
+		elif run.get('retention_status'):
+			doc['artifacts_status'] = run['retention_status']
+		elif run.get('artifacts_registered_at'):
+			doc['artifacts_status'] = 'REGISTERED'
+		else:
+			doc['artifacts_status'] = 'NOT_REGISTERED'
+
+		return jsonify(doc)
+
+	return invoke(action)
+
+
+@pipeline_bp.route(
+	'/pipelines/<pipeline_id>/runs/<run_id>/submit',
+	methods=['POST']
+)
+@custom_require_login
+def submit_pipeline_run(pipeline_id, run_id):
+	"""Submit a previously registered V2 run without repeated job options."""
+
+	def action(owner):
+		from caesar_rest.job_route import resolve_job_application
+		from caesar_rest.pipeline.submission.v2_rest_submission import submit_v2
+
+		payload = request.get_json(silent=True)
+
+		if payload is None:
+			payload = {}
+
+		if not isinstance(payload, dict) or payload:
+			raise manager.PipelineError(
+				'Submission accepts an empty JSON object only',
+				400
+			)
+
+		pipeline = manager.get_pipeline(owner, pipeline_id)
+
+		run = mongo.db.pipeline_runs.find_one({
+			'owner': owner,
+			'pipeline_id': pipeline_id,
+			'run_id': run_id
+		})
+
+		if run is None:
+			raise manager.PipelineError('Run not found', 404)
+
+		if run.get('status') != 'PLANNED':
+			raise manager.PipelineError(
+				'Only PLANNED runs can be submitted',
+				409
+			)
+
+		# The run is immutable with respect to its execution identity.
+		# Derive the complete legacy V2 request server-side.
+		request_data = {
+			'submission_version': 2,
+			'app': run['application'],
+			'pipeline_id': pipeline_id,
+			'node_id': run['node_id'],
+			'run_id': run_id,
+			'job_options': run['parameters']
+		}
+
+		if pipeline.get('app') is not None:
+			if run['application'] != pipeline['app']:
+				raise manager.PipelineError(
+					'Run application does not match pipeline',
+					409
+				)
+
+		result = submit_v2(
+			owner,
+			request_data,
+			resolve_job_application
+		)
+
+		result['pipeline_id'] = pipeline_id
+		result['run_id'] = run_id
+
+		return jsonify(result), 200
+
+	return invoke(action)
+	
+	
 @pipeline_bp.route('/pipelines/<pipeline_id>/nodes/<node_id>/runs', methods=['GET', 'POST'])
 @custom_require_login
 def node_runs(pipeline_id, node_id):
@@ -292,7 +440,7 @@ def resolve_selected_directory(pipeline_id, node_id, artifact_name):
 	'/pipelines/<pipeline_id>/nodes/<node_id>/runs/<run_id>/retain',
 	methods=['POST']
 )
-
+@custom_require_login
 def retain_run_artifacts(pipeline_id, node_id, run_id):
 	"""Queue retention of a completed run without copying in this request."""
 
