@@ -307,8 +307,9 @@ def create_run(
 
 	stage = parameters.get('stage')
 
-	if not isinstance(stage, str) or not stage:
-		raise PipelineError('parameters.stage is required')	
+	if stage is not None:
+		if not isinstance(stage, str) or not stage:
+			raise PipelineError('Invalid parameters.stage')
 	
 	dataset_id = payload.get('dataset_id')
 
@@ -370,12 +371,13 @@ def create_run(
 			400
 		)
 	
-	establish_node_stage(
-		owner,
-		pipeline_id,
-		node_id,
-		stage
-	)	
+	if stage is not None:
+		establish_node_stage(
+			owner,
+			pipeline_id,
+			node_id,
+			stage
+		)	
 	
 	t_database = time.perf_counter()
 	
