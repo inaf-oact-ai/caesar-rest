@@ -15,7 +15,120 @@ from caesar_rest import logger
 _INPUT = re.compile(r'^[A-Za-z][A-Za-z0-9_-]{0,63}$')
 _SHA = re.compile(r'^[0-9a-f]{64}$')
 
+def resolve_named_inputs(db, owner, pipeline_id, inputs):
+	"""Resolve explicit run/artifact names to legacy binding references.
 
+	This function resolves logical identities only. bind_inputs() remains
+	responsible for verifying retention, integrity and immutable bindings.
+	"""
+
+	if not isinstance(inputs, dict) or len(inputs) > 32:
+		raise manager.PipelineError(
+			'inputs must be an object containing at most 32 entries',
+			400
+		)
+
+	result = []
+	run_cache = {}
+
+	for input_name, reference in inputs.items():
+		if (
+			not isinstance(input_name, str)
+			or _INPUT.fullmatch(input_name) is None
+		):
+			raise manager.PipelineError(
+				'Invalid input name',
+				400
+			)
+
+		if not isinstance(reference, dict):
+			raise manager.PipelineError(
+				'Invalid named input reference',
+				400
+			)
+
+		if set(reference) != {'run_id', 'artifact'}:
+			raise manager.PipelineError(
+				'Named input requires run_id and artifact',
+				400
+			)
+
+		run_id = reference['run_id']
+		artifact_name = reference['artifact']
+
+		if not isinstance(run_id, str) or not run_id:
+			raise manager.PipelineError(
+				'Invalid source run ID',
+				400
+			)
+
+		if (
+			not isinstance(artifact_name, str)
+			or not artifact_name
+			or len(artifact_name) > 255
+		):
+			raise manager.PipelineError(
+				'Invalid artifact name',
+				400
+			)
+
+		if run_id not in run_cache:
+			run_cache[run_id] = db.pipeline_runs.find_one({
+				'owner': owner,
+				'pipeline_id': pipeline_id,
+				'run_id': run_id,
+				'status': 'COMPLETED'
+			})
+
+		run = run_cache[run_id]
+
+		if run is None:
+			raise manager.PipelineError(
+				'Source run not found or not completed',
+				409
+			)
+
+		if not run.get('artifacts_registered_at'):
+			raise manager.PipelineError(
+				'Source run artifacts are not registered',
+				409
+			)
+
+		artifacts = run.get('artifacts')
+
+		if not isinstance(artifacts, list):
+			raise manager.PipelineError(
+				'Invalid source artifact metadata',
+				409
+			)
+
+		matches = [
+			index
+			for index, artifact in enumerate(artifacts)
+			if isinstance(artifact, dict)
+			and artifact.get('name') == artifact_name
+		]
+
+		if not matches:
+			raise manager.PipelineError(
+				'Source artifact not found: %s' % artifact_name,
+				404
+			)
+
+		if len(matches) != 1:
+			raise manager.PipelineError(
+				'Source artifact name is ambiguous: %s' % artifact_name,
+				409
+			)
+
+		result.append({
+			'input_name': input_name,
+			'source_run_id': run_id,
+			'artifact_index': matches[0]
+		})
+
+	return result
+	
 def bind_inputs(db, owner, pipeline_id, requests, retention_root,
 		max_directory_bytes=1024 * 1024 * 1024 * 1024,
 		max_directory_entries=100000, max_directory_depth=16):

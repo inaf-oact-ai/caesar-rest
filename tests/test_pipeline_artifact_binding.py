@@ -88,3 +88,146 @@ def test_file_binding_uses_verified_retained_copy(monkeypatch):
 	result = binding.bind_inputs(db, 'alice', 'p1', request(), '/tmp/artifacts')
 	assert result[0]['artifact_kind'] == 'file'
 	assert result[0]['sha256'] == hashlib.sha256(b'{}').hexdigest()
+	
+	
+def test_named_input_resolves_artifact_index():
+	db, _ = make_db()
+
+	result = binding.resolve_named_inputs(
+		db,
+		'alice',
+		'p1',
+		{
+			'calibrated_ms': {
+				'run_id': 'r1',
+				'artifact': 'output'
+			}
+		}
+	)
+
+	assert result == [{
+		'input_name': 'calibrated_ms',
+		'source_run_id': 'r1',
+		'artifact_index': 0
+	}]
+
+
+def test_named_input_rejects_wrong_owner():
+	db, _ = make_db()
+
+	with pytest.raises(manager.PipelineError):
+		binding.resolve_named_inputs(
+			db,
+			'bob',
+			'p1',
+			{
+				'calibrated_ms': {
+					'run_id': 'r1',
+					'artifact': 'output'
+				}
+			}
+		)
+
+
+def test_named_input_rejects_missing_artifact():
+	db, _ = make_db()
+
+	with pytest.raises(manager.PipelineError) as exc:
+		binding.resolve_named_inputs(
+			db,
+			'alice',
+			'p1',
+			{
+				'calibrated_ms': {
+					'run_id': 'r1',
+					'artifact': 'missing'
+				}
+			}
+		)
+
+	assert exc.value.status == 404
+
+
+def test_named_input_rejects_duplicate_artifact_names():
+	db, run = make_db()
+
+	run['artifacts'].append(dict(run['artifacts'][0]))
+
+	with pytest.raises(manager.PipelineError) as exc:
+		binding.resolve_named_inputs(
+			db,
+			'alice',
+			'p1',
+			{
+				'calibrated_ms': {
+					'run_id': 'r1',
+					'artifact': 'output'
+				}
+			}
+		)
+
+	assert exc.value.status == 409
+
+
+def test_named_input_rejects_missing_registration():
+	db, run = make_db()
+
+	run.pop('artifacts_registered_at')
+
+	with pytest.raises(manager.PipelineError) as exc:
+		binding.resolve_named_inputs(
+			db,
+			'alice',
+			'p1',
+			{
+				'calibrated_ms': {
+					'run_id': 'r1',
+					'artifact': 'output'
+				}
+			}
+		)
+
+	assert exc.value.status == 409
+
+
+def test_named_input_requires_exact_reference_fields():
+	db, _ = make_db()
+
+	with pytest.raises(manager.PipelineError) as exc:
+		binding.resolve_named_inputs(
+			db,
+			'alice',
+			'p1',
+			{
+				'calibrated_ms': {
+					'run_id': 'r1',
+					'artifact': 'output',
+					'path': '/tmp/untrusted'
+				}
+			}
+		)
+
+	assert exc.value.status == 400
+
+
+def test_named_input_rejects_more_than_32_inputs():
+	db, _ = make_db()
+
+	inputs = {
+		'input_%d' % index: {
+			'run_id': 'r1',
+			'artifact': 'output'
+		}
+		for index in range(33)
+	}
+
+	with pytest.raises(manager.PipelineError) as exc:
+		binding.resolve_named_inputs(
+			db,
+			'alice',
+			'p1',
+			inputs
+		)
+
+	assert exc.value.status == 400
+

@@ -448,8 +448,9 @@ def create_run_simple(
 		'node_id',
 		'parameters',
 		'dataset_id',
+		'inputs',
 		'input_artifacts'
-	}
+	}	
 
 	if set(payload) - allowed:
 		raise PipelineError('Unsupported run field')
@@ -484,7 +485,23 @@ def create_run_simple(
 	execution_parameters = dict(parameters)
 	execution_parameters['stage'] = stage
 
-	input_artifacts = payload.get('input_artifacts', [])
+	if 'inputs' in payload and 'input_artifacts' in payload:
+		raise PipelineError(
+			'Use either inputs or input_artifacts, not both',
+			400
+		)
+
+	if 'inputs' in payload:
+		from caesar_rest.pipeline.artifacts import binding as pipeline_binding
+
+		input_artifacts = pipeline_binding.resolve_named_inputs(
+			mongo.db,
+			owner,
+			pipeline_id,
+			payload['inputs']
+		)
+	else:
+		input_artifacts = payload.get('input_artifacts', [])
 
 	if not isinstance(input_artifacts, list):
 		raise PipelineError('input_artifacts must be a list')
@@ -501,6 +518,7 @@ def create_run_simple(
 			raise PipelineError('Invalid source_run_id')
 
 		input_runs.add(source_run_id)
+
 
 	legacy_payload = {
 		'application': app,
