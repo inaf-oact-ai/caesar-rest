@@ -1,13 +1,11 @@
 #! /usr/bin/env python
 
 __title__ = 'caesar_rest'
-__version__ = '1.0.0'
+__version__ = '1.8.0'
 __author__ = 'Simone Riggi'
 __license__ = 'GPL3'
 __date__ = '2020-04-17'
 __copyright__ = 'Copyright 2020 by Simone Riggi - INAF'
-
-
 
 
 # - Create the standard Logger
@@ -77,12 +75,22 @@ logger.setLevel("INFO")
 logger.info("This is caesar_rest {0}-({1})".format(__version__, __date__))
 
 
-# - Create celery
-from celery import Celery
-celery= Celery(
-	__name__,
-	config_source='caesar_rest.celery_config'
-)
+# - Create Celery only when its dependency is available.
+# - Slurm/Kubernetes installations do not require Celery.
+celery = None
+
+try:
+	from celery import Celery
+
+	celery = Celery(
+		__name__,
+		config_source='caesar_rest.celery_config'
+	)
+
+except ImportError:
+	logger.info(
+		"Celery is not installed; legacy Celery backend is unavailable"
+	)
 
 # - Create OIDC (without connecting to app)
 oidc= None

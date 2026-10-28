@@ -24,7 +24,7 @@ try:
 except ImportError:
 	from urllib2 import urlopen
 
-# Import flask modules
+# - Import flask modules
 from flask import current_app, Blueprint, render_template, request, redirect, url_for
 from flask import send_file, send_from_directory, abort, make_response, jsonify
 try:
@@ -34,28 +34,23 @@ except:
 	
 from werkzeug.utils import secure_filename
 
-# Import celery modules
-from celery import states
-from celery.exceptions import Ignore, SoftTimeLimitExceeded
 
-# Import Celery app
-from caesar_rest.app import celery as celery_app
+# - Import Celery app
+from caesar_rest import celery as celery_app
 from caesar_rest import utils
 from caesar_rest import jobmgr_kube
 from caesar_rest import jobmgr_slurm
 from caesar_rest.pipeline import status as pipeline_status_sync
 
-# Import mongo
+# - Import mongo
 from pymongo import MongoClient
 
-
-# Get logger
+# - Get logger
 from caesar_rest import logger
 
 ##############################
 #   WORKERS
 ##############################
-@celery_app.task(bind=True)
 def jobmonitor_task(self):
 	""" job monitoring task """
 
@@ -160,6 +155,10 @@ def jobmonitor_task(self):
 			if job_moni_status<0:
 				logger.warn("Failed to monitor %s job %s, skip to next..." % (job_scheduler, job_id), action="jobmonitor")
 				continue
+
+# - Register the legacy periodic monitoring task only if Celery is available.
+if celery_app is not None:
+	jobmonitor_task = celery_app.task(bind=True)(jobmonitor_task)
 
 ####################################
 ##   MONITOR JOBS

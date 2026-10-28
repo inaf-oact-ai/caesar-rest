@@ -845,18 +845,17 @@ config.PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_DEPTH = pipeline_artifact_reten
 config.PIPELINE_ARTIFACT_RETENTION_ROOT_CLUSTER = pipeline_artifact_retention_root_cluster
 config.PIPELINE_V2_APPLICATIONS = pipeline_v2_applications
 
-# - Create data manager (DEPRECATED BY MONGO)
-##logger.info("Creating data manager ...")
-##datamgr= DataManager(rootdir=config.UPLOAD_FOLDER)
-##datamgr.register_data()
-
 # - Create job configurator
 logger.info("Creating job configurator ...")
 jobcfg= JobConfigurator()
 
-# - Update celery configs
-celery.conf.result_backend= result_backend
-celery.conf.broker_url= broker_url
+# - Configure the Celery broker and result backend only when selected.
+if job_scheduler == 'celery':
+	from caesar_rest.backend_dependencies import require_celery_app
+
+	celery_app = require_celery_app()
+	celery_app.conf.result_backend = result_backend
+	celery_app.conf.broker_url = broker_url
 
 # - Set legacy dataset configs
 config.DATASETS["smgps"]["path"]= dataset_smgps

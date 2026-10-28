@@ -82,8 +82,12 @@ def create_app(cfg,jc):
 	# - Add helper classes to app
 	app.config['jobcfg'] = jc
 
-	# - Configure Celery app
-	configure_celery_app(app)
+	# - Configure Celery only for the legacy Celery scheduler.
+	if app.config.get('JOB_SCHEDULER') == 'celery':
+		from caesar_rest.backend_dependencies import require_celery_app
+
+		require_celery_app()
+		configure_celery_app(app)	
 
 	# - Register routes as blueprints
 	from caesar_rest.index_route import index_bp

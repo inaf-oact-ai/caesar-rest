@@ -25,7 +25,7 @@ try:
 except ImportError:
 	from urllib2 import urlopen
 
-# Import flask modules
+# - Import flask modules
 from flask import current_app, Blueprint, render_template, request, redirect, url_for, flash, g
 from flask import send_file, send_from_directory, abort, make_response, jsonify
 try:
@@ -35,20 +35,13 @@ except:
 	
 from werkzeug.utils import secure_filename
 
-# Import celery modules
-from celery import states
-# - Celery task revocation compatibility.
-# - Modern Celery uses app.control.revoke().
-# - Older installations may require celery.task.control.revoke.
-try:
-	from celery.task.control import revoke as legacy_celery_revoke
-except ImportError:
-	legacy_celery_revoke = None
+# - Load legacy Celery functionality only when requested.
+from caesar_rest.backend_dependencies import (
+	require_celery_app,
+	require_background_task
+)
 
-# Import caesar modules
-from caesar_rest.app import celery as celery_app
-from caesar_rest import workers
-from caesar_rest.workers import background_task
+# - Import caesar modules
 from caesar_rest import oidc
 from caesar_rest import utils
 from caesar_rest.decorators import custom_require_login
@@ -84,6 +77,8 @@ dataset_names_bp = Blueprint('dataset_names', __name__, url_prefix='/caesar/api/
 ##################################
 def revoke_celery_task(task_id, terminate=True, signal='SIGTERM'):
 	"""Revoke a Celery task across supported Celery versions."""
+
+	celery_app = require_celery_app()
 	control = getattr(celery_app, 'control', None)
 
 	if control is not None and hasattr(control, 'revoke'):
@@ -92,6 +87,11 @@ def revoke_celery_task(task_id, terminate=True, signal='SIGTERM'):
 			terminate=terminate,
 			signal=signal
 		)
+
+	try:
+		from celery.task.control import revoke as legacy_celery_revoke
+	except ImportError:
+		legacy_celery_revoke = None
 
 	if legacy_celery_revoke is not None:
 		return legacy_celery_revoke(
@@ -744,7 +744,7 @@ def submit_job_celery(app_name, cmd, cmd_args, job_top_dir, username, mongo_dbho
 
 	# - Submit task to queue
 	logger.info("Submitting job %s async (cmd=%s, args=%s) ..." % (app_name,cmd,cmd_args), action="submitjob", user=username)
-	task = background_task.apply_async(
+	task = require_background_task().apply_async(
 		[app_name, cmd, cmd_args, job_top_dir, username, mongo_dbhost, mongo_dbport, mongo_dbname, job_monitoring_period],
 		queue= app_name # set queue name to app name
 	)
@@ -1224,7 +1224,7 @@ def cancel_celery_task(task_id):
 	res['status']= ''
 
 	# - Get task
-	task = background_task.AsyncResult(task_id)
+	task = require_background_task().AsyncResult(task_id)
 	if not task or task is None:
 		errmsg= 'No task found with id ' + task_id + '!'
 		res['status']= errmsg
@@ -1234,7 +1234,6 @@ def cancel_celery_task(task_id):
 	# - Revoke task
 	logger.info("Revoking task %s ..." % task_id, action="canceljob")
 	try:
-		#revoke(task_id, terminate=True, signal='SIGTERM')
 		revoke_celery_task(task_id, terminate=True, signal='SIGTERM')
 		
 	except Exception as e:
@@ -1364,7 +1363,7 @@ def compute_job_status(task_id):
 	# - Get task
 	task= None
 	try:
-		task = background_task.AsyncResult(task_id)
+		task = require_background_task().AsyncResult(task_id)
 	except:
 		errmsg= 'Failed to create instance of AsyncResult for task ' + task_id + '!'
 		logger.warn(errmsg, action="jobstatus")
