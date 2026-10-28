@@ -911,7 +911,7 @@ if use_db and mongo is not None:
 		mongo.init_app(app)
 		logger.info("Flask-PyMongo initialization completed successfully")
 
-		from caesar_rest.pipeline_manager import ensure_indexes
+		from caesar_rest.pipeline.manager import ensure_indexes
 
 		with app.app_context():
 			ensure_indexes()
