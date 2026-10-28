@@ -49,7 +49,7 @@ def get_args():
 	parser.add_argument('-datadir','--datadir', dest='datadir', default='/opt/caesar-rest/data', required=False, type=str, help='Directory where to store uploaded data') 
 	parser.add_argument('-jobdir','--jobdir', dest='jobdir', default='/opt/caesar-rest/jobs', required=False, type=str, help='Directory where to store jobs') 
 	parser.add_argument('-modeldir','--modeldir', dest='modeldir', default='/opt/caesar-rest/models', required=False, type=str, help='Directory where models are stored') 
-	parser.add_argument('-job_scheduler','--job_scheduler', dest='job_scheduler', default='celery', required=False, type=str, help='Job scheduler to be used. Options are: {celery,kubernetes,slurm} (default=celery)')
+	parser.add_argument('-job_scheduler','--job_scheduler', dest='job_scheduler', default='slurm', required=False, type=str, help='Job scheduler to be used. Options are: {celery, kubernetes, slurm} (default=slurm)')
 	parser.add_argument('-job_monitoring_period','--job_monitoring_period', dest='job_monitoring_period', default=5, required=False, type=int, help='Job monitoring poll period in seconds') 
 	parser.add_argument('--debug', dest='debug', action='store_true')	
 	parser.set_defaults(debug=True)

@@ -34,7 +34,7 @@ class Config(object):
 	UPLOAD_ALLOWED_FILE_FORMATS= set(['png', 'jpg', 'jpeg', 'gif', 'fits', 'json'])
 	JOB_MONITORING_PERIOD= 5 # in seconds
 
-	JOB_SCHEDULER= 'celery' # Options are: {'celery','kubernetes','slurm'}
+	JOB_SCHEDULER= 'slurm' # Options are: {'celery', 'kubernetes', 'slurm'}
 
 	# - VOLUME MOUNTS options
 	MOUNT_RCLONE_VOLUME= False

@@ -44,7 +44,7 @@ def get_args():
 	parser = argparse.ArgumentParser(description="Parse args.")
 
 	# - Specify cmd options
-	parser.add_argument('-job_scheduler','--job_scheduler', dest='job_scheduler', default='kubernetes', required=False, type=str, help='Job scheduler to be used. Options are: {kubernetes,slurm} (default=kubernetes)')
+	parser.add_argument('-job_scheduler','--job_scheduler', dest='job_scheduler', default='slurm', required=False, type=str, help='Job scheduler to be used. Options are: {kubernetes, slurm} (default=slurm)')
 	parser.add_argument('-job_monitoring_period','--job_monitoring_period', dest='job_monitoring_period', default=30, required=False, type=int, help='Job monitoring poll period in seconds') 
 	parser.add_argument('-dbhost','--dbhost', dest='dbhost', default='localhost', required=False, type=str, help='Host of MongoDB database (default=localhost)')
 	parser.add_argument('-dbname','--dbname', dest='dbname', default='caesardb', required=False, type=str, help='Name of MongoDB database (default=caesardb)')
