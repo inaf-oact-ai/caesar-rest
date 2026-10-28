@@ -100,6 +100,7 @@ To use package scripts:
 Apps are run as Docker (Kuberneter deploy) or Singularity (Slurm deploy) containers. Docker images are available in DockerHub:   
 
 * `caesar` source finder job: `docker://sriggi/caesar-job`   
+* `caesar-yolo` radio source finder based on YOLO object detector: `docker://sriggi/caesar-yolo-job`  
 * `aegean` source finder job: `docker://sriggi/aegean-job`
 * `cutex` source finder job: `docker://sriggi/cutex-job`
 * `mrcnn` object detector (TensorFlow 1.x): `docker://sriggi/mrcnn-detect`
@@ -108,7 +109,16 @@ Apps are run as Docker (Kuberneter deploy) or Singularity (Slurm deploy) contain
 * `umap` dimensionality reduction: `docker://sriggi/umap-job`  
 * `outlier-finder` with Isolation Forest: `docker://sriggi/outlier-finder-job`   
 * `hdbscan` cluster search: `docker://sriggi/hdbscan-job`
-* `similarity-search`: `docker://sriggi/similarity-search-job`   
+* `similarity-search`: image similarity search: `docker://sriggi/similarity-search-job`   
+* `sfforecaster`: solar flare forecasting with pre-trained foundation models: `sriggi/sfforecaster-job`  
+* `fextractor`: image/light-curve feature extractor with pre-trained foundation models: 
+      - TensorFlow ResNet image models: `sriggi/fextractor-tf`   
+      - PyTorch ResNet/ViT image models: `sriggi/fextractor-torch`   
+      - Google Chronos2 timeseries model: `sriggi/fextractor-chronos`   
+      - Moirai2 timeseries model: `sriggi/fextractor-moirai`  
+      - FATS timeseries library: `sriggi/fextractor-fats`  
+      - LiCU timeseries library & models: `sriggi/fextractor-licu`    
+      - Falcon timeseries model: `sriggi/fextractor-falcon`   
 
 Singularity containers can be created from docker images with:   
 
