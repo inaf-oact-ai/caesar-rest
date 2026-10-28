@@ -39,6 +39,6 @@ CAESAR-REST supports multiple job submission backends
 
 ## License and acknowledgement
 
-Distributed under GPLv3. If CAESAR-REST is used in research, please link to the repository (`https://github.com/inaf-oact-ai/caesar-rest`) and acknowledge/cite the following papers in your publications:
+Distributed under GPLv3. If CAESAR-REST is used in research, please link to the [repository](https://github.com/inaf-oact-ai/caesar-rest) and acknowledge/cite the following papers in your publications:
 
 - S. Riggi, *Astronomical source finding services for the CIRASA visual analytic platform*, Astronomy & Computing, 37, 100506 (2021), [doi](https://doi.org/10.1016/j.ascom.2021.100506) 
