@@ -906,14 +906,25 @@ else:
 #===============================
 if use_db and mongo is not None:
 	logger.info("Initializing MongoDB to app ...")
+
 	try:
 		mongo.init_app(app)
+		logger.info("Flask-PyMongo initialization completed successfully")
+
 		from caesar_rest.pipeline_manager import ensure_indexes
+
 		with app.app_context():
 			ensure_indexes()
-			
-	except:
-		logger.error("Failed to initialize MongoDB to app!")
+
+		logger.info("MongoDB pipeline indexes initialized successfully")
+
+	except Exception as e:
+		logger.exception(
+			"Failed to initialize MongoDB to app (err=%s)!",
+			str(e)
+		)
+		raise
+
 else:
 	logger.info("Starting app without mongo backend ...")
 
