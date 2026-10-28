@@ -111,14 +111,14 @@ Apps are run as Docker (Kuberneter deploy) or Singularity (Slurm deploy) contain
 * `hdbscan` cluster search: `docker://sriggi/hdbscan-job`
 * `similarity-search`: image similarity search: `docker://sriggi/similarity-search-job`   
 * `sfforecaster`: solar flare forecasting with pre-trained foundation models: `sriggi/sfforecaster-job`  
-* `fextractor`: image/light-curve feature extractor with pre-trained foundation models: 
-      - TensorFlow ResNet image models: `sriggi/fextractor-tf`   
-      - PyTorch ResNet/ViT image models: `sriggi/fextractor-torch`   
-      - Google Chronos2 timeseries model: `sriggi/fextractor-chronos`   
-      - Moirai2 timeseries model: `sriggi/fextractor-moirai`  
-      - FATS timeseries library: `sriggi/fextractor-fats`  
-      - LiCU timeseries library & models: `sriggi/fextractor-licu`    
-      - Falcon timeseries model: `sriggi/fextractor-falcon`   
+* `fextractor`: image/light-curve feature extractor with pre-trained foundation models:    
+			- TensorFlow ResNet image models: `sriggi/fextractor-tf`    
+			- PyTorch ResNet/ViT image models: `sriggi/fextractor-torch`   
+			- Google Chronos2 timeseries model: `sriggi/fextractor-chronos`   
+			- Moirai2 timeseries model: `sriggi/fextractor-moirai`  
+			- FATS timeseries library: `sriggi/fextractor-fats`  
+			- LiCU timeseries library & models: `sriggi/fextractor-licu`    
+			- Falcon timeseries model: `sriggi/fextractor-falcon`   
 
 Singularity containers can be created from docker images with:   
 
