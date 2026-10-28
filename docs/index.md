@@ -1,23 +1,24 @@
 # CAESAR-REST documentation
 
-This index organizes material from the previous 1,840-line README. **Stage 1 is an organizational migration, not a technical update.** Most pages retain original wording and examples. See [migration audit](../MIGRATION_AUDIT.md).
+This documentation covers installation, deployment, REST interfaces, scientific pipelines, and integrations. The initial reorganization preserved the technical material from the former long README; individual pages can now be updated and verified independently.
 
-## Start here
+## Getting started
 
 - [Installation](installation.md)
-- [Deployment](deployment/index.md)
+- [Deployment and services](deployment/index.md)
 - [REST API](api/index.md)
 - [Examples](examples/index.md)
-- [Reference](reference/index.md)
+- [CLI and container reference](reference/index.md)
 
-## Existing maintained guides
+## Scientific workflows and development
 
-These already exist on `devel`, are referenced without being overwritten, and are intentionally not duplicated in the ZIP:
+- [Scientific Pipeline V2 API](api/index.md#scientific-pipelines)
+- [Future developments and integrations](future-developments.md)
 
-- [Pipeline V2 API](pipeline_v2_api.md)
-- [MAASAI integration](maasai_integration.md)
+## Preserved documentation
 
-## Original documentation
-
-- [Full original README](archive/ORIGINAL_README.md)
+- [Original README, archived verbatim](archive/ORIGINAL_README.md)
 - [Original project overview](archive/ORIGINAL_OVERVIEW.md)
+- [Migration audit](../MIGRATION_AUDIT.md)
+
+The detailed [Pipeline V2 API reference](pipeline_v2_api.md) and [MAASAI integration guide](maasai_integration.md) remain available through the [REST API index](api/index.md).
