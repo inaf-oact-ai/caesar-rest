@@ -42,7 +42,7 @@ celery = [
 	"celery<5.0.0",
 ]
 auth = [
-	"flask-oidc-ex @ git+https://github.com/inaf-oact-ai/flask-oidc-ex.git@master",
+	"flask-oidc-ex @ git+https://github.com/inaf-oact-ai/flask-oidc-ex.git@ea8e8e06e71f481b5e8cec02790dd3ae30ed84e9",
 ]
 server = [
 	"uwsgi",
@@ -51,7 +51,7 @@ all = [
 	"jwt",
 	"kubernetes",
 	"celery<5.0.0",
-	"flask-oidc-ex @ git+https://github.com/inaf-oact-ai/flask-oidc-ex.git@master",
+	"flask-oidc-ex @ git+https://github.com/inaf-oact-ai/flask-oidc-ex.git@ea8e8e06e71f481b5e8cec02790dd3ae30ed84e9",
 	"uwsgi",
 ]
 
