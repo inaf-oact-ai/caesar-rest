@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "caesar_rest"
+dynamic = ["version"]
+description = "REST service for containerized scientific applications and pipelines"
+readme = "README.md"
+license = {text = "GPL-3.0-only"}
+authors = [{name = "Simone Riggi"}]
+urls = {Repository = "https://github.com/inaf-oact-ai/caesar-rest"}
+# Do not declare requires-python until the supported interpreter matrix is tested.
+dependencies = [
+	"numpy>=1.10",
+	"matplotlib",
+	"MarkupSafe>=1.1.1",
+	"jinja2>=2.10.1",
+	"werkzeug>=1.0",
+	"flask>=1.0.0",
+	"pyyaml",
+	"pymongo",
+	"flask-pymongo",
+	"extension-helpers",
+	"astropy",
+	"regions",
+	"structlog",
+	"requests",
+	"python-dateutil",
+]
+
+[project.optional-dependencies]
+slurm = [
+	# The code imports jwt.JWT, jwt.jwa, jwt.jwk: this is the 'jwt' distribution,
+	# not the unrelated 'PyJWT' API. Keep until a separate dependency migration.
+	"jwt",
+]
+kubernetes = [
+	"kubernetes",
+]
+celery = [
+	"celery<5.0.0",
+]
+auth = [
+	"flask-oidc-ex @ git+https://github.com/inaf-oact-ai/flask-oidc-ex.git@master",
+]
+server = [
+	"uwsgi",
+]
+all = [
+	"jwt",
+	"kubernetes",
+	"celery<5.0.0",
+	"flask-oidc-ex @ git+https://github.com/inaf-oact-ai/flask-oidc-ex.git@master",
+	"uwsgi",
+]
+
+[tool.setuptools]
+include-package-data = true
+zip-safe = false
+
+[tool.setuptools.packages.find]
+include = ["caesar_rest*"]
+
+[tool.setuptools.dynamic]
+version = {attr = "caesar_rest.__version__"}
