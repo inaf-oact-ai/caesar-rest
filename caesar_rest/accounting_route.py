@@ -1,7 +1,7 @@
 ##############################
 #   MODULE IMPORTS
 ##############################
-# Import standard modules
+# - Import standard modules
 import os
 import signal
 import sys
@@ -21,7 +21,7 @@ try:
 except ImportError:
 	from urllib2 import urlopen
 
-# Import flask modules
+# - Import flask modules
 from flask import current_app, Blueprint, render_template, request, redirect, url_for, flash, g
 from flask import send_file, send_from_directory, abort, make_response, jsonify
 try:
@@ -31,21 +31,13 @@ except:
 
 from werkzeug.utils import secure_filename
 
-# Import celery modules
-from celery import states
-from celery.task.control import revoke
-
-# Import Celery app
-from caesar_rest.app import celery as celery_app
-from caesar_rest import workers
-from caesar_rest.workers import background_task
+# - Import caesar-rest modules
 from caesar_rest import oidc
 from caesar_rest import utils
 from caesar_rest.decorators import custom_require_login
 from caesar_rest import mongo
 
-# Get logger
-#logger = logging.getLogger(__name__)
+# - Get logger
 from caesar_rest import logger
 
 ##############################
