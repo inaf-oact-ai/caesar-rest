@@ -2,7 +2,9 @@
 
 CAESAR-REST is an authenticated REST service for executing containerized scientific applications on compute infrastructure. Originally developed to provide a web interface for [CAESAR source finder](https://github.com/SKA-INAF/caesar), it now supports multiple astronomical and data-analysis applications, dataset management, independent jobs, and multi-stage scientific workflows.
 
-![CAESAR-REST architecture](share/CAESAR-REST_Architecture.png)
+<p align="left">
+  <img src="share/CAESAR-REST_Architecture.png" alt="CAESAR-REST architecture"/ width="500" height="500">
+</p>
 
 ## Capabilities
 
