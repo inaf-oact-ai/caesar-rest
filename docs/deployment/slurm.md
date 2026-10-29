@@ -260,8 +260,13 @@ mysql -u root -p
 ```
 
 ```mysql
-grant all on slurm_acct_db.* TO 'slurm'@'localhost' identified by 'some_pass' with grant option;
-create database slurm_acct_db;
+CREATE DATABASE IF NOT EXISTS slurm_acct_db;
+
+CREATE USER 'slurm'@'localhost'
+IDENTIFIED BY '<SET_A_STRONG_PASSWORD>';
+
+GRANT ALL PRIVILEGES ON slurm_acct_db.*
+TO 'slurm'@'localhost';
 ```
 
 * Set options in configuration file `/etc/slurm/slurmdbd.conf`:
