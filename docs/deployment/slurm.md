@@ -49,11 +49,13 @@ useradd  -m -c "Slurm workload manager" -d /var/lib/slurm -u $SlurmUSER -g slurm
 #### Install Munge for authentication
 
 CentOS
+
 ```bash
 yum install munge munge-libs munge-devel -y
 ```
 
 Ubuntu
+
 ```bash
 sudo apt install munge libmunge2 libmunge-dev
 ```
@@ -69,6 +71,7 @@ If you don't see a key at `/etc/munge/munge.key`, you should create one manually
 #### Set user rights  
 
 CentOS
+
 ```bash
 chown -R munge: /etc/munge/ /var/log/munge/ /var/lib/munge/ /run/munge/
 chmod 0700 /etc/munge/ /var/log/munge/ /var/lib/munge/ /run/munge/
@@ -77,6 +80,7 @@ cexec chmod 0700 /etc/munge/ /var/log/munge/ /var/lib/munge/ /run/munge/
 ```
 
 Ubuntu
+
 ```bash
 sudo chown -R munge: /etc/munge/ /var/log/munge/ /var/lib/munge/ /run/munge/
 sudo chmod 0700 /etc/munge/ /var/log/munge/ /var/lib/munge/
@@ -148,6 +152,8 @@ mv /var/lib/mysql/ib_logfile? /tmp/
 systemctl start mariadb
 ```
 
+> **Warning**: The InnoDB settings shown above are illustrative and should be adjusted to the installed MariaDB version and expected accounting workload. Consult the corresponding MariaDB documentation before changing redo-log parameters. Do not manually remove or relocate InnoDB redo-log files as part of routine configuration changes.
+
 ### Create JWT auth key
 
 Create a JWT HMAC key at `/var/spool/slurmctld/jwt_hs256.key`:   
@@ -159,7 +165,8 @@ sudo chmod 0600 /var/spool/slurmctld/jwt_hs256.key
 ```
 
 This will be used by both `slurmctld` and `slurmdbd` services. The `AuthAltParameters` configuration parameter (see below) is used to identify the key path. 
-Keep this key restricted. 
+
+> **Security warning**: The JWT HMAC signing key is highly sensitive. Anyone possessing it may be able to generate valid Slurm authentication tokens for different user identities. CAESAR-REST currently generates JWTs using key material supplied through --slurm_keyfile. Access to this key must therefore be restricted to explicitly trusted processes and administrators. Never commit the signing key to a repository or expose it in logs. For production deployments, consider a dedicated token-issuing service to avoid distributing the signing key.
 
 See the [official Slurm JWT guide](https://slurm.schedmd.com/jwt.html) for more details.
 
