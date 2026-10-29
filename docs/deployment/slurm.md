@@ -14,7 +14,7 @@ A working Slurm deployment needs:
 
 The Python application is installed separately using the [`slurm` optional dependency group](../installation.md), usually together with `auth` and `server`. MongoDB stores CAESAR-REST job and pipeline metadata; **it is not a substitute for SlurmDBD**.
 
-In this section we provide some guidance on how to setup a Slurm cluster, including creation of the `munge` and `slurm` users, installing Munge, creating a shared Munge key, provisioning MariaDB, creating Slurm's accounting database, and configuring the controller and compute nodes. Those steps are cluster-administration tasks and depend on OS and Slurm release, so double-check them against the official Slurm documentation.
+In this section we provide some guidance on how to set up a Slurm cluster, including creation of the `munge` and `slurm` users, installing Munge, creating a shared Munge key, provisioning MariaDB, creating Slurm's accounting database, and configuring the controller and compute nodes. Those steps are cluster-administration tasks and depend on OS and Slurm release, so double-check them against the official Slurm documentation.
 
 After completing the configuration, try these verification commands on appropriate cluster hosts:
 
@@ -33,7 +33,7 @@ Not every daemon runs on the same node. In particular, `slurmd` runs on compute 
 
 ### Install and configure Munge  
 
-* Create munge/slurm users
+#### Create munge/slurm users
 
 Slurm and Munge require consistent UID and GID across every node in the cluster. For all the nodes, before you install Slurm or Munge:
 
@@ -46,9 +46,9 @@ groupadd -g $SlurmUSER slurm
 useradd  -m -c "Slurm workload manager" -d /var/lib/slurm -u $SlurmUSER -g slurm  -s /bin/bash slurm
 ```
 
-* Install Munge for authentication
+#### Install Munge for authentication
 
-Centos
+CentOS
 ```bash
 yum install munge munge-libs munge-devel -y
 ```
@@ -58,7 +58,7 @@ Ubuntu
 sudo apt install munge libmunge2 libmunge-dev
 ```
 
-* Create Munge authentication key  
+#### Create Munge authentication key  
 
 If you don't see a key at `/etc/munge/munge.key`, you should create one manually by running the following command:
 
@@ -66,9 +66,9 @@ If you don't see a key at `/etc/munge/munge.key`, you should create one manually
 /usr/sbin/create-munge-key
 ```
 
-* Set user rights  
+#### Set user rights  
 
-Centos
+CentOS
 ```bash
 chown -R munge: /etc/munge/ /var/log/munge/ /var/lib/munge/ /run/munge/
 chmod 0700 /etc/munge/ /var/log/munge/ /var/lib/munge/ /run/munge/
@@ -85,7 +85,7 @@ sudo chmod 0700 /etc/munge/munge.key
 sudo chown -R munge: /etc/munge/munge.key
 ```
 
-* Enable and Start the munge service  
+#### Enable and Start the munge service  
 
 ```bash
 sudo systemctl daemon-reload
@@ -93,7 +93,7 @@ sudo systemctl enable munge
 sudo systemctl restart munge
 ```
 
-* Test the installation  
+#### Test the installation  
 
 ```bash
 munge -n | unmunge
@@ -103,9 +103,9 @@ You should see something like STATUS: SUCCESS.
 
 ### Install and configure MariaDB 
 
-* Install mariadb
+#### Install mariadb
 
-Centos
+CentOS
 ```bash
 yum install mariadb-server -y
 ```
@@ -115,23 +115,23 @@ Ubuntu
 apt install mariadb-server -y
 ```
 
-* Activate and start the mariadb service 
+#### Activate and start the mariadb service 
 
 ```bash
 systemctl enable mariadb
 systemctl start mariadb
 ```
 
-* Secure mariadb installation 
+#### Secure mariadb installation 
 
 ```bash
 mysql_secure_installation
 ```
 
-* Modify the innodb configuration 
+#### Modify the innodb configuration 
 
 Setting innodb_lock_wait_timeout,innodb_log_file_size and innodb_buffer_pool_size to larger values than the default is recommended.
-To do that, create a the file /etc/my.cnf.d/innodb.cnf (Ubuntu: /etc/mysql/conf.d/innodb.cnf) with the following lines:
+To do that, create the file /etc/my.cnf.d/innodb.cnf (Ubuntu: /etc/mysql/conf.d/innodb.cnf) with the following lines:
 
 ```ini
 [mysqld]
@@ -166,7 +166,7 @@ See the [official Slurm JWT guide](https://slurm.schedmd.com/jwt.html) for more 
 
 ## Slurm installation
 
-* Install slurm  
+#### Install slurm  
 
 Ubuntu: 
 
@@ -174,7 +174,7 @@ Ubuntu:
 sudo apt install slurm-wlm slurmctld slurmdbd slurmrestd
 ```
 
-* Configure slurm   
+#### Configure slurm   
 
 Set options in `/etc/slurm/slurm.conf` configuration file:  
 
@@ -238,7 +238,7 @@ To fill NodeName do:
 slurmd -C
 ```
 
-* Start the services   
+#### Start the services   
 
 ```bash
 sudo systemctl daemon-reload
@@ -253,7 +253,7 @@ sudo systemctl start slurmctld.service
 Slurm job accounting is handled by **SlurmDBD**, not by CAESAR-REST's `run_accounter.py` service. The latter is a separate application service for MongoDB-based usage statistics; see [CAESAR-REST accounting](accounting.md). The cluster must have a working SlurmDBD connection. 
 
 
-* Create and configure the slurm_acct_db database 
+#### Create and configure the slurm_acct_db database 
 
 ```bash
 mysql -u root -p
@@ -269,7 +269,7 @@ GRANT ALL PRIVILEGES ON slurm_acct_db.*
 TO 'slurm'@'localhost';
 ```
 
-* Set options in configuration file `/etc/slurm/slurmdbd.conf`:
+#### Set options in configuration file `/etc/slurm/slurmdbd.conf`:
 
 ```ini
 AuthType=auth/munge
@@ -290,14 +290,14 @@ StorageLoc=slurm_acct_db
 
 `localhost` is only correct if SlurmDBD runs on the same host as the component using that setting. 
 
-* Set file permissions   
+#### Set file permissions   
 
 ```bash
 sudo chown slurm:slurm /etc/slurm/slurmdbd.conf
 sudo chmod 600 /etc/slurm/slurmdbd.conf
 ```
 
-* Enable and start the slurmdbd service   
+#### Enable and start the slurmdbd service   
 
 ```bash
 sudo systemctl daemon-reload
@@ -306,7 +306,7 @@ sudo systemctl start slurmdbd.service
 sudo systemctl status slurmdbd.service
 ```
 
-* Verify that accounting records are available, for example:
+#### Verify that accounting records are available, for example:
 
 ```bash
 sacct -j JOB_ID --format=JobID,State,ExitCode
@@ -325,19 +325,19 @@ Use a real Slurm job ID. The command is an accounting-service check, not a CAESA
 
 The existing CAESAR-REST Slurm client constructs these exact versioned paths. **Do not substitute a newer API version without updating and testing the client.** The plugins must be available in the particular Slurm installation; check the installed daemon's supported plugins and endpoints before enabling the unit.
 
-* Create a slurmrestd user
+#### Create a slurmrestd user
 
 `caesar` is the service identity shown in the configuration files below, **not a universal recommendation**. Slurm recommends running `slurmrestd` under a dedicated unprivileged account, not as root or the Slurm service owner. Ensure the chosen account can access the required configuration and authentication facilities. 
 
 
-* Set slurmrestd config options inside `/etc/slurm/slurmrestd.conf`, including:
+#### Set slurmrestd config options inside `/etc/slurm/slurmrestd.conf`, including:
 
 ```ini
 include /etc/slurm/slurm.conf
 AuthType=auth/jwt
 ```
 
-* Set slurmrestd service file `slurmrestd.service` under `/etc/systemd/system/`:
+#### Set slurmrestd service file `slurmrestd.service` under `/etc/systemd/system/`:
 
 ```ini
 [Unit]
@@ -367,7 +367,7 @@ The `Environment=SLURM_JWT=daemon` setting follows Slurm's JWT listening-mode gu
 
 **Security:** The example listens on all interfaces over HTTP (`0.0.0.0:6820`) because that matches the historic deployment. Restrict the listener using the cluster firewall and trusted network, or bind to a private interface. For access beyond a trusted network, put a correctly configured TLS/authenticating proxy in front of `slurmrestd`; do not expose the raw HTTP listener publicly. [Slurm's REST security guidance](https://slurm.schedmd.com/rest.html) provides further details.
 
-* Enable and start the slurmdbd service   
+#### Enable and start the slurmrestd service   
 
 ```bash
 sudo systemctl daemon-reload
@@ -375,7 +375,7 @@ sudo systemctl enable slurmrestd.service
 sudo systemctl start slurmrestd.service
 sudo systemctl status slurmrestd.service
 sudo journalctl -u slurmrestd.service -n 100 --no-pager
-```    
+```
 
 ### Verify REST endpoints
 
