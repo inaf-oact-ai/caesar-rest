@@ -17,11 +17,13 @@ Uploaded files and managed datasets have separate registration mechanisms and AP
 
 A file UUID identifies an uploaded file belonging to the caller's storage identity. A managed dataset ID identifies a registered scientific dataset accessible according to the registry's authorization rules.
 
+Uploaded files are registered in user-specific MongoDB collections and stored in user-specific filesystem directories. Listing, downloading and deleting uploaded files operate within the current caller's storage identity. These uploaded-file operations are distinct from the managed dataset registry and its team-based access rules.
+
 For managed datasets, clients should use dataset IDs rather than supplying arbitrary filesystem paths.
 
 ## 2. Upload files
 
-<text weight="medium">Endpoint:</text>
+**Endpoint:**
 
 ```http
 POST /caesar/api/v1.0/upload
@@ -45,7 +47,7 @@ Do not manually set the multipart `Content-Type` header when using `curl -F`; cu
 
 The server validates the file extension against the configured `UPLOAD_ALLOWED_FILE_FORMATS`, stores the file in the caller's data directory and registers its metadata in the corresponding MongoDB file collection.
 
-A successful response has the following structure:
+A successful response has the following structure (illustrative values; timestamps and UUIDs vary for each upload):
 
 ```json
 {
@@ -69,7 +71,7 @@ The allowed file formats depend on server configuration. Clients should not assu
 
 ## 3. List uploaded files
 
-<text weight="medium">Endpoint:</text>
+**Endpoint:**
 
 ```http
 GET /caesar/api/v1.0/fileids
@@ -109,7 +111,7 @@ The results are restricted to the caller's file collection.
 
 ## 4. Download uploaded files
 
-<text weight="medium">Endpoint:</text>
+**Endpoint:**
 
 ```http
 GET /caesar/api/v1.0/download/{file_uuid}
@@ -134,7 +136,7 @@ The legacy API also supports `GET` or `POST` requests to `/download`, supplying 
 
 ## 5. Delete uploaded files
 
-<text weight="medium">Endpoint:</text>
+**Endpoint:**
 
 ```http
 DELETE /caesar/api/v1.0/delete/{file_uuid}
@@ -164,7 +166,7 @@ File deletion is destructive. Clients should verify the selected UUID before iss
 
 ## 6. List available scientific datasets
 
-<text weight="medium">Endpoint:</text>
+**Endpoint:**
 
 ```http
 GET /caesar/api/v1.0/datasets
@@ -197,9 +199,9 @@ The response structure depends on whether the managed dataset registry is enable
 
 ### Static dataset configuration
 
-When the managed registry is disabled, the endpoint returns the available datasets configured in the application.
+When the managed registry is disabled, the endpoint returns datasets configured statically in the application, provided they have a configured path.
 
-This preserves compatibility with historical deployment configurations.
+This preserves compatibility with historical deployment configurations. In this mode, dataset discovery does not use the managed registry's per-user visibility and team-access rules. Administrators should therefore review which datasets are exposed through static configuration.
 
 ### Managed dataset registry
 
@@ -215,7 +217,7 @@ Dataset filesystem paths are not exposed through the public metadata response.
 
 Managed dataset registration requires the dataset registry to be enabled and the caller to have dataset-administrator privileges.
 
-<text weight="medium">Endpoint:</text>
+**Endpoint:**
 
 ```http
 POST /caesar/api/v1.0/datasets
@@ -232,4 +234,122 @@ curl --fail-with-body -X POST \
 		"name": "Survey image collection",
 		"description": "Registered scientific image dataset",
 		"type": "directory",
-		"path": "/storage/caesar-rest/datasets/s
+		"path": "/storage/caesar-rest/datasets/survey-images",
+		"visibility": "restricted",
+		"allowed_teams": ["research-team"],
+		"enabled": true
+	}' \
+	"https://server.example.org:8444/caesar/api/v1.0/datasets"
+```
+
+The path must be accessible to the CAESAR-REST server, satisfy its configured managed-dataset-root restrictions, and refer to an existing file or directory consistent with the declared dataset type.
+
+The `allowed_teams` values must identify existing enabled teams. The example assumes that `research-team` has already been created.
+
+Registration supports the following fields:
+
+| Field | Description |
+| --- | --- |
+| `dataset_id` | Unique dataset identifier |
+| `name` | Human-readable name |
+| `description` | Optional description |
+| `path` | Server-side path within an allowed managed dataset root |
+| `type` | `file` or `directory`; defaults to `directory` |
+| `format` | Optional format description |
+| `visibility` | `public`, `restricted` or `admin`; defaults to `admin` |
+| `allowed_teams` | List of permitted team identifiers |
+| `enabled` | Whether the dataset is enabled |
+
+A successful registration returns HTTP `201`:
+
+```json
+{
+  "dataset_id": "survey-images"
+}
+```
+
+Registration may be rejected because of insufficient privileges, an invalid or inaccessible path, invalid metadata, unknown teams or a duplicate dataset ID.
+
+A registered dataset can subsequently be selected through its dataset ID, subject to authorization.
+
+## 8. Managed dataset metadata and lifecycle
+
+The managed registry provides additional operations.
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/datasets/me` | Return authenticated identity and registry status |
+| `GET` | `/datasets/{dataset_id}` | Retrieve accessible dataset metadata |
+| `PATCH` | `/datasets/{dataset_id}` | Update dataset metadata |
+| `DELETE` | `/datasets/{dataset_id}` | Disable a registered dataset |
+
+All endpoint paths in this table are relative to `/caesar/api/v1.0`.
+
+For example:
+
+```http
+GET /caesar/api/v1.0/datasets/survey-images
+```
+
+returns the accessible dataset's public metadata.
+
+The `PATCH` and `DELETE` operations require dataset-administrator privileges.
+
+Dataset deletion is implemented as **deactivation**, not removal of the underlying scientific files.
+
+A successful deactivation returns:
+
+```json
+{
+  "dataset_id": "survey-images",
+  "enabled": false
+}
+```
+
+Disabled datasets are no longer available for ordinary dataset selection.
+
+## 9. Dataset identities and team access
+
+**Endpoint:**
+
+```http
+GET /caesar/api/v1.0/datasets/me
+```
+
+This endpoint reports the authenticated identity used by the dataset registry.
+
+Its response includes the identity provider issuer, subject, derived storage-independent user ID, dataset-administrator status and whether the managed registry is enabled.
+
+Team-management endpoints are also available under:
+
+```text
+/caesar/api/v1.0/teams
+/caesar/api/v1.0/teams/{team_id}/members
+```
+
+These endpoints support team discovery and administrative team membership management according to the authorization checks implemented by the registry.
+
+Team identifiers can be used in the `allowed_teams` field of restricted datasets.
+
+The registry's access rules are authoritative. A valid bearer token alone does not grant access to restricted datasets.
+
+## 10. Dataset selection in scientific jobs
+
+Scientific applications may accept dataset IDs as inputs.
+
+When the managed registry is enabled, CAESAR-REST resolves dataset IDs through the registry and checks whether the caller has permission to use the selected dataset.
+
+Filesystem paths within managed dataset roots should not be submitted directly as substitutes for registered dataset IDs.
+
+This distinction is particularly important for multi-user deployments and scientific pipeline automation.
+
+See [Job submission](jobs.md), [Scientific Pipeline V2](scientific-pipelines.md) and the [detailed Pipeline V2 reference](../pipeline_v2_api.md) for the relevant job and pipeline submission contracts.
+
+## References
+
+- [REST API overview](overview.md)
+- [Job submission and monitoring](jobs.md)
+- [Scientific Pipeline V2](scientific-pipelines.md)
+- [Detailed Pipeline V2 API reference](../pipeline_v2_api.md)
+- [Keycloak and OpenID Connect authentication](../deployment/authentication.md)
+- [Archived original README](../archive/ORIGINAL_README.md)
