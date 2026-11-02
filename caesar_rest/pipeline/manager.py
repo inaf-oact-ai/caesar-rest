@@ -615,27 +615,6 @@ def create_run_simple(
 
 		input_runs.add(source_run_id)
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 	legacy_payload = {
 		'application': app,
 		'operation': default_node_id(stage),

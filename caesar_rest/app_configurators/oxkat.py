@@ -570,6 +570,16 @@ class OxkatAppConfigurator(AppConfigurator):
 				raise ValueError(
 					'2GC project_info comes from an unsupported stage'
 				)
+				
+			if project_binding.get('source_stage') == 'FLAG':
+				if (
+					project_binding.get('source_run_id')
+					!= target_binding.get('source_run_id')
+				):
+					raise ValueError(
+						'2GC project_info and target_ms must originate '
+						'from the same FLAG run'
+					)				
 
 		return None
 
