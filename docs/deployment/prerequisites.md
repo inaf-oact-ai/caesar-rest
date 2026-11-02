@@ -1,37 +1,192 @@
 # Deployment prerequisites and shared services
 
-> **Documentation migration (stage 1):** The section below is reproduced from the original `devel` README (lines 134–166). Its commands, versions, paths and examples have **not yet been modernized or revalidated**. See [archived original](../archive/ORIGINAL_README.md).
+This guide describes the shared infrastructure and filesystem preparation required before running CAESAR-REST services. It covers the application service account, working directories, persistent storage, MongoDB and optional log forwarding.
 
-## **How to run the service?**  
+The examples assume a Linux host with a dedicated application account and use `/storage/caesar-rest` as an illustrative persistent storage root. The CAESAR-REST Python environment, launcher scripts and runtime socket may reside elsewhere on the application host. Adapt paths, ownership, service names and storage configuration to your deployment.
 
-In the following we describe the steps done to deploy and run the application and the auxiliary services. Three possible options are described below for the deployment, depending of whether the job management is done with celery, Kubernetes, or with Slurm. To ease the deployment we provide Docker containers and configuration files for Docker Compose or Kubernetes.       
+Install the CAESAR-REST Python package according to the [installation guide](../installation.md). Configure the REST web service, job execution backend, job monitor and artifact retention worker using their respective [deployment guides](index.md).
 
-### **Preliminary setup**
-Before running the application you must do some preparatory stuff:   
+CAESAR-REST requires MongoDB and one configured execution backend. Slurm is the recommended backend; Kubernetes is an alternative, while Celery is retained as a legacy backend. The external scheduler infrastructure must be configured separately.
 
-* (OPTIONAL) Create a dedicated user & group (e.g. `caesar`) allowed to run the application and services and give it ownership to the directories created below    * Create the application working dir (by default `/opt/caesar-rest`)   
-* (OPTIONAL) Mount an external storage in the application working dir, for example using rclone: `/usr/bin/rclone mount --daemon [--uid=[UID] --gid=[UID]] --umask 000 --allow-other --file-perms 0777 --dir-cache-time 0m5s --vfs-cache-mode full [RCLONE_REMOTE_STORAGE]:[RCLONE_REMOTE_STORAGE_PATH] /opt/caesar-rest -vvv` where `UID` is the Linux user id of the user previously created.     
-* Create the top directory for data upload (by default `/opt/caesar-rest/data`). Place here also supported pre-configured datasets.       
-* Create the top directory for jobs (by default `/opt/caesar-rest/jobs`)    
-* Create the top directory for models (by default `/opt/caesar-rest/models`) and put TensorFlow/PyTorch model & weights files under this path.        
-* (OPTIONAL) Create the log directory for system services (see below), e.g. `/opt/caesar-rest/logs` 
-* (OPTIONAL) Create the run directory for system services (see below), e.g. `/opt/caesar-rest/run` 
-* Create a persistent directory for pipeline artifacts, e.g.
-  `/storage/caesar-rest/pipeline-artifacts`. This directory must be
-  accessible to the artifact retention worker, REST application
-  and downstream staging environment.
+## 1. Prepare the application host
 
-### **Run DB service**
-caesar-rest requires a MongoDB service where to store user data and job information. To start the DB service:    
+### Create a dedicated service account
 
-```systemctl start mongodb.service```   
+For a production deployment, use a dedicated operating-system account to run the CAESAR-REST application and related services.
 
-Alternatively you can use the Docker container ```sriggi/caesar-rest-db:latest``` (see https://hub.docker.com/r/sriggi/caesar-rest-db) and deploy it with DockerCompose or Kubernetes (see the configuration files under the repository ```config``` directory.   
+For example, on Ubuntu:
 
-### **Run Filebeat service (OPTIONAL)**   
-caesar-rest uses filebeat to forward file logs to an ElasticSearch service. To start the service:   
+```bash
+sudo useradd --system --create-home --shell /usr/sbin/nologin caesar
+```
 
-```systemctl start filebeat.service```    
+If the `caesar` account already exists, do not recreate or modify it unnecessarily. The account must have the permissions required by the selected scheduler and application services.
 
-Alternatively, you can use the Docker container for the application ```sriggi/caesar-rest:latest``` (see https://hub.docker.com/r/sriggi/caesar-rest) setting the container option ```FORWARD_LOGS=1```. This will start the filebeat service in the web application container.   
+The examples below assume that the service account and group are both named `caesar`.
 
+### Create the application directories
+
+CAESAR-REST uses separate directories for uploaded data, job outputs, scientific models, logs, runtime files and persistent pipeline artifacts. In deployments where the REST application and the Slurm execution nodes run on different machines, directories containing data required by scientific jobs must be available to both environments through a shared filesystem or an explicitly configured staging mechanism. Local runtime directories do not generally require shared storage.
+
+The following layout is illustrative:
+
+```text
+/storage/caesar-rest/
+    data/
+    jobs/
+    models/
+    logs/
+    run/
+    pipeline-artifacts/
+```
+
+Create the directories:
+
+```bash
+sudo install -d -o caesar -g caesar -m 0750 /storage/caesar-rest
+sudo install -d -o caesar -g caesar -m 0750 \
+    /storage/caesar-rest/data \
+    /storage/caesar-rest/jobs \
+    /storage/caesar-rest/models \
+    /storage/caesar-rest/logs \
+    /storage/caesar-rest/run \
+    /storage/caesar-rest/pipeline-artifacts
+```
+
+In distributed deployments, create shared directories on the mounted storage filesystem and local runtime directories on the appropriate service host. Do not assume that `/storage/caesar-rest` is automatically shared merely because of its path: it must refer to an actual shared filesystem mounted on the required machines. When using NFS or another shared filesystem, configure ownership and permissions according to the filesystem's identity-mapping and access-control policies.
+
+The directory roles are:
+
+| Directory | Purpose |
+| --- | --- |
+| `data/` | Uploaded application data and locally managed datasets |
+| `jobs/` | Job outputs and execution-related files |
+| `models/` | Scientific models and associated weights |
+| `logs/` | Optional application and service log files |
+| `run/` | Runtime files, including the uWSGI Unix socket |
+| `pipeline-artifacts/` | Persistent retained outputs of scientific pipeline stages |
+
+These paths are examples rather than mandatory defaults. Configure the application and worker services to use the actual directories selected for the deployment.
+
+The `data/`, `jobs/` and `models/` directories should be accessible to the REST application and to the Slurm execution nodes that consume or produce their contents. The `pipeline-artifacts/` directory must additionally be accessible to the artifact retention worker and the downstream pipeline staging environment. The `logs/` directory may remain local if centralized log collection is used, while `run/` should normally remain local to the web application host because it contains the uWSGI Unix socket.
+
+For the web application, the runtime socket directory must also be accessible to the Nginx worker as described in [Web application deployment](web-application.md).
+
+### Configure persistent storage
+
+Application data, job outputs and retained scientific pipeline artifacts should reside on persistent storage appropriate for the expected workload.
+
+For deployments where CAESAR-REST and the Slurm execution nodes run on different machines, the directories used by scientific jobs must be accessible from both environments. A shared filesystem, such as NFS or a distributed filesystem, is a common solution. Alternatively, an explicit data staging mechanism may be used, provided that all required files are transferred to the correct execution environment.
+
+For a shared-filesystem deployment, the following practices are recommended:
+
+- **Consistent mount paths:** Prefer mounting shared directories at the same absolute paths on the REST host and Slurm execution nodes. This simplifies job submission, container bind mounts and artifact staging.
+- **Appropriate permissions:** Ensure that the CAESAR-REST service account, Slurm job execution identities and retention worker have the required read, write and directory traversal permissions. For shared POSIX filesystems, coordinate numeric user/group IDs or use an appropriate ACL strategy.
+- **Persistent availability:** Shared storage must be mounted and available before services or scientific jobs that depend on it are started.
+- **Storage capacity:** Size storage for expected input datasets, job outputs, scientific models and retained artifacts, including potentially large radio-interferometric measurement sets.
+- **Container visibility:** When scientific applications execute inside Singularity/Apptainer containers, ensure that the required host directories are correctly exposed through container bind mounts.
+
+The `data/`, `jobs/` and `models/` directories should be accessible wherever the corresponding scientific jobs read or write files.
+
+For staged scientific pipelines, the artifact retention directory must be persistent and accessible to the REST application, artifact retention worker and downstream staging environment. All participating components must agree on the configured artifact locations.
+
+Artifact retention is required for multi-stage Pipeline V2 workflows because downstream stages consume retained outputs from preceding stages rather than arbitrary files from previous job working directories.
+
+See [Pipeline artifact retention](artifact-retention.md) for the complete lifecycle and worker configuration, and [Slurm deployment](slurm.md) for scheduler configuration.
+
+### Optional external storage mounts
+
+External storage can be mounted before starting CAESAR-REST. For example, some deployments use Rclone to expose remote storage through a local filesystem mount.
+
+Rclone configuration is deployment-specific and is not required for installations using ordinary local or shared filesystems.
+
+If using Rclone, configure the remote credentials securely, select appropriate filesystem permissions and ensure that the mount is available before the application or job services access it. Avoid globally writable mount configurations unless explicitly required and reviewed.
+
+The [application CLI reference](../reference/cli-options.md) documents the available application configuration options.
+
+## 2. Configure MongoDB
+
+CAESAR-REST requires MongoDB to persist application metadata, user and job information, dataset registry records and scientific pipeline execution state.
+
+Install and configure a supported MongoDB deployment using the official MongoDB documentation and your organization's database administration policies.
+
+For a local MongoDB installation managed by systemd, verify the actual service name. On installations using `mongod.service`, start and enable the service with:
+
+```bash
+sudo systemctl enable --now mongod.service
+sudo systemctl status mongod.service
+```
+
+The service name may differ depending on how MongoDB was installed.
+
+For a local database listening on the default MongoDB port, the corresponding CAESAR-REST application options are:
+
+```bash
+--db --dbhost=127.0.0.1 --dbport=27017 --dbname=caesardb
+```
+
+These options belong to the CAESAR-REST application configuration, not to the MongoDB server configuration.
+
+For the Bash launcher described in [Web application deployment](web-application.md), they are included in the application's `PYARGS` variable.
+
+### Database persistence and security
+
+MongoDB must retain its data across service restarts and host maintenance.
+
+For production deployments:
+
+- Use persistent database storage and maintain a tested backup and recovery procedure.
+- Restrict database network access to the CAESAR-REST components and authorized administrators.
+- Configure database authentication and transport encryption according to the site's security requirements.
+- Do not expose an unauthenticated MongoDB instance to untrusted networks.
+- Ensure that the REST application, job monitor and artifact retention worker use the intended MongoDB database.
+
+MongoDB can also be deployed using containers or an independently managed database service. Container volumes, authentication, network configuration and backup procedures must be configured for the selected deployment.
+
+Historical MongoDB container examples from the original README should not be assumed to represent a validated production configuration.
+
+## 3. Optional log forwarding with Filebeat
+
+CAESAR-REST can write application logs to files for local inspection or forwarding to a centralized logging system.
+
+Filebeat is an optional external service that can collect and forward log files to an Elasticsearch-compatible logging infrastructure. It is not required for CAESAR-REST operation.
+
+When Filebeat is installed and configured as a systemd service, start it with:
+
+```bash
+sudo systemctl enable --now filebeat.service
+sudo systemctl status filebeat.service
+```
+
+Configure Filebeat separately to read the appropriate CAESAR-REST log files and forward them to the intended destination.
+
+Ensure that the Filebeat process has sufficient permission to read the selected logs without unnecessarily granting access to application secrets or protected data.
+
+If centralized log forwarding is not required, CAESAR-REST can continue to use its normal application logging mechanisms.
+
+## 4. Verify the prerequisites
+
+Before starting the REST application and related workers, verify that:
+
+1. The dedicated application account exists and has appropriate filesystem permissions.
+2. The configured data, job, model and runtime directories exist.
+3. For distributed Slurm deployments, confirm that all required shared directories are mounted and accessible on the REST host and execution nodes, preferably using consistent absolute paths. Verify actual read/write permissions using the service and job execution identities.
+4. MongoDB is running and accessible from the application environment.
+5. The selected execution backend has been configured and its required services are available.
+6. Persistent artifact storage is available when running staged scientific pipelines.
+7. Optional external storage mounts and log-forwarding services are functioning if enabled.
+
+After completing these checks, proceed with [Web application deployment](web-application.md), [Job monitoring](job-monitoring.md) and, when required, [Pipeline artifact retention](artifact-retention.md).
+
+For Slurm-based execution, consult the dedicated [Slurm deployment guide](slurm.md).
+
+## References
+
+- [CAESAR-REST installation](../installation.md)
+- [Deployment overview](index.md)
+- [Web application deployment](web-application.md)
+- [Slurm deployment](slurm.md)
+- [Pipeline artifact retention](artifact-retention.md)
+- [MongoDB documentation](https://www.mongodb.com/docs/)
+- [Filebeat documentation](https://www.elastic.co/docs/reference/beats/filebeat/)
+- [Rclone documentation](https://rclone.org/docs/)
