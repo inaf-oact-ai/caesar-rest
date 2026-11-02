@@ -78,10 +78,36 @@ Application data, job outputs and retained scientific pipeline artifacts should 
 
 For deployments where CAESAR-REST and the Slurm execution nodes run on different machines, the directories used by scientific jobs must be accessible from both environments. A shared filesystem, such as NFS or a distributed filesystem, is a common solution. Alternatively, an explicit data staging mechanism may be used, provided that all required files are transferred to the correct execution environment.
 
+The shared filesystem does not have to be mounted at the same absolute path on the REST host and Slurm cluster. CAESAR-REST supports separate application-side and cluster-side storage paths.
+
+For example, the same NFS export may be mounted as `/storage/caesar-rest` on the REST server and `/cluster-storage/caesar-rest` on the Slurm execution nodes. Both locations must refer to the same underlying directory contents.
+
+Configure the corresponding path mappings in CAESAR-REST:
+
+```bash
+# REST host paths
+--datadir=/storage/caesar-rest/data
+--jobdir=/storage/caesar-rest/jobs
+--modeldir=/storage/caesar-rest/models
+
+# Slurm cluster paths
+--slurm_datadir=/cluster-storage/caesar-rest/data
+--slurm_jobdir=/cluster-storage/caesar-rest/jobs
+--slurm_modeldir=/cluster-storage/caesar-rest/models
+
+# Persistent pipeline artifacts
+--pipeline_artifact_retention_root=/storage/caesar-rest/pipeline-artifacts
+--pipeline_artifact_retention_root_cluster=/cluster-storage/caesar-rest/pipeline-artifacts
+```
+
+These are CAESAR-REST application arguments and must be supplied through its startup configuration. The cluster-side paths are resolved on the Slurm execution nodes; they need not exist on the REST application host.
+
+The REST application, job monitoring service and artifact retention worker must use their appropriate application-side paths. Slurm execution and downstream pipeline staging use the corresponding cluster-side paths.
+
 For a shared-filesystem deployment, the following practices are recommended:
 
-- **Consistent mount paths:** Prefer mounting shared directories at the same absolute paths on the REST host and Slurm execution nodes. This simplifies job submission, container bind mounts and artifact staging.
-- **Appropriate permissions:** Ensure that the CAESAR-REST service account, Slurm job execution identities and retention worker have the required read, write and directory traversal permissions. For shared POSIX filesystems, coordinate numeric user/group IDs or use an appropriate ACL strategy.
+- **Consistent path mappings**: Using identical absolute mount paths on the REST host and Slurm nodes simplifies deployment, but is not required. When mount paths differ, configure the application-side and Slurm-side storage roots explicitly. The corresponding paths must reference the same underlying filesystem contents, preserving their relative directory structure.
+- **Appropriate permissions**: Ensure that the CAESAR-REST service account, Slurm job execution identities and artifact retention worker have the required read, write and directory traversal permissions. A dedicated caesar user/group on the REST host and Slurm nodes is a convenient configuration when jobs run under that identity. For conventional NFS deployments, matching usernames alone is insufficient: numeric UIDs and GIDs must be coordinated, or a compatible centralized identity-mapping and ACL mechanism must be configured. Job execution identities may differ from the REST service identity, provided they have the necessary filesystem permissions.
 - **Persistent availability:** Shared storage must be mounted and available before services or scientific jobs that depend on it are started.
 - **Storage capacity:** Size storage for expected input datasets, job outputs, scientific models and retained artifacts, including potentially large radio-interferometric measurement sets.
 - **Container visibility:** When scientific applications execute inside Singularity/Apptainer containers, ensure that the required host directories are correctly exposed through container bind mounts.
@@ -170,7 +196,7 @@ Before starting the REST application and related workers, verify that:
 
 1. The dedicated application account exists and has appropriate filesystem permissions.
 2. The configured data, job, model and runtime directories exist.
-3. For distributed Slurm deployments, confirm that all required shared directories are mounted and accessible on the REST host and execution nodes, preferably using consistent absolute paths. Verify actual read/write permissions using the service and job execution identities.
+3. For distributed Slurm deployments, confirm that all required shared directories are mounted and accessible on the REST host and execution nodes. When mount paths differ, verify that the configured application-side and cluster-side roots resolve to the same underlying files. Test actual read/write permissions using the service and job execution identities.
 4. MongoDB is running and accessible from the application environment.
 5. The selected execution backend has been configured and its required services are available.
 6. Persistent artifact storage is available when running staged scientific pipelines.
