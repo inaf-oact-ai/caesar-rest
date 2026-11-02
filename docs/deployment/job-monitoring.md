@@ -91,7 +91,7 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
-Adapt the installation paths and command-line arguments to your environment. The example assumes a local MongoDB instance and access to a separately configured Slurm REST service.
+Adapt the installation paths and command-line arguments to your environment. The example uses `/opt/caesar-rest` for the application installation and working directory; persistent scientific data and pipeline artifacts may reside separately under `/storage/caesar-rest`, as described in Deployment [prerequisites](prerequisites.md). The example assumes a local MongoDB instance and access to a separately configured Slurm REST service.
 
 After creating the service:
 
@@ -153,7 +153,7 @@ The monitor accepts the following additional options:
 | `--pipeline_artifact_retention_max_directory_entries` | Maximum directory entries | `100000` |
 | `--pipeline_artifact_retention_max_directory_depth` | Maximum directory nesting depth | `16` |
 
-When the retention root is configured, the monitor attempts to retain eligible completed pipeline artifacts using the supplied storage limits.
+When the retention root is configured, the job monitor attempts to retain eligible completed pipeline artifacts as part of its monitoring and pipeline status synchronization activities, using the supplied storage limits. This does not start a separate retention worker. For larger artifacts or workloads requiring independent retention processing, the dedicated artifact retention service is generally preferable.
 
 The retention root must be an absolute, normalized path and must be accessible and writable by the monitoring service account.
 
@@ -166,7 +166,7 @@ For example:
 
 The two locations must refer to the same underlying persistent storage.
 
-For a new deployment, select a clear retention operating model. If using the standalone worker, automatic retention in the job monitor can remain disabled. Avoid configuring overlapping retention services without understanding their coordination and recovery behavior.
+For a new deployment, select one primary retention operating model. When using the dedicated artifact retention worker, leave `--pipeline_artifact_retention_root` unset in the job monitor so that automatic retention remains disabled. Avoid running both retention mechanisms against the same workload unless their concurrency and recovery behavior has been explicitly validated.
 
 Artifact retention failures must be investigated independently of the scientific job's execution status.
 
