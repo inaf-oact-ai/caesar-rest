@@ -234,6 +234,14 @@ class AppConfigurator(object):
 		return scalar_validator(parameters, allowed)
 
 	
+	def validate_pipeline_bindings(self, parameters, input_artifacts, source_artifacts):
+		"""Validate application-specific consistency of frozen pipeline inputs.
+
+		Default behavior is intentionally application-independent.
+		Implementations must raise ValueError for invalid combinations.
+		"""
+		return None	
+	
 	def validate(self, job_options, data_inputs):
 		""" Validate job input """
 

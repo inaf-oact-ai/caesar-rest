@@ -45,6 +45,7 @@ OXKAT_STAGES = [
 IMPLEMENTED_STAGES = {"GET_INFO", "1GC", "FLAG", "2GC"}
 
 _FIELD_SELECTION = re.compile(r'^(?:auto|[0-9]+(?:,[0-9]+)*)$')
+_TARGET_NAME = re.compile(r'^[A-Za-z0-9_][A-Za-z0-9_-]{0,63}$')
 
 ##################################################
 ###     APP CONFIG CLASS
@@ -355,14 +356,28 @@ class OxkatAppConfigurator(AppConfigurator):
 		if stage not in IMPLEMENTED_STAGES:
 			raise ValueError('OXKAT stage is not implemented: %s' % stage)
 
-		unknown = set(job_options) - {'stage', 'oxkat_config'}
+		unknown = set(job_options) - {'stage', 'target', 'oxkat_config'}
 
 		if unknown:
 			raise ValueError(
 				'Unsupported OXKAT job options: %s' %
 				', '.join(sorted(unknown))
 			)
+			
+		if 'target' in job_options:
+			target = job_options['target']
 
+			if stage not in ('FLAG', '2GC'):
+				raise ValueError(
+					'target is supported only for FLAG and 2GC'
+				)
+
+			if (
+				not isinstance(target, str)
+				or not _TARGET_NAME.fullmatch(target)
+			):
+				raise ValueError('Invalid OXKAT target name')			
+			
 		if 'oxkat_config' not in job_options:
 			return None
 
@@ -391,36 +406,172 @@ class OxkatAppConfigurator(AppConfigurator):
 
 		overrides = self.validate_pipeline_options(parameters)
 
-		# - Preserve existing generic validation for scalar V2 arguments.
 		scalar_parameters = dict(parameters)
 		scalar_parameters.pop('oxkat_config', None)
+		target = scalar_parameters.pop('target', None)
 
 		args = scalar_validator(scalar_parameters, allowed)
 
-		if overrides is None:
-			return args
+		if target is not None:
+			args.append('--target-name=%s' % target)
 
-		document = {
-			'stage': scalar_parameters['stage'],
-			'overrides': overrides,
+		if overrides is not None:
+			document = {
+				'stage': scalar_parameters['stage'],
+				'overrides': overrides,
+			}
+
+			serialized = json.dumps(
+				document,
+				sort_keys=True,
+				separators=(',', ':'),
+				allow_nan=False
+			).encode('utf-8')
+
+			token = base64.urlsafe_b64encode(serialized).decode('ascii')
+			token = token.rstrip('=')
+
+			if len(token) > 3000:
+				raise ValueError('Encoded OXKAT configuration is too large')
+
+			args.append('--oxkat-config=%s' % token)
+
+		return args	
+
+	def validate_pipeline_bindings(self, parameters, bindings):
+		"""Validate target-specific OXKAT V2 artifact bindings.
+
+		FLAG and 2GC must consume the Measurement Set corresponding
+		to the explicitly requested science target.
+
+		The binding metadata comes from owner-scoped pipeline records,
+		not from client-supplied filesystem paths.
+		"""
+
+		if not isinstance(parameters, dict):
+			raise ValueError('Invalid OXKAT pipeline parameters')
+
+		if not isinstance(bindings, dict):
+			raise ValueError('Invalid OXKAT pipeline bindings')
+
+		stage = parameters.get('stage')
+
+		if stage not in ('FLAG', '2GC'):
+			return None
+
+		target = parameters.get('target')
+
+		# Preserve backward compatibility with existing single-target
+		# runs that do not specify an explicit target.
+		if target is None:
+			return None
+
+		if (
+			not isinstance(target, str)
+			or not _TARGET_NAME.fullmatch(target)
+		):
+			raise ValueError('Invalid OXKAT target name')
+
+		target_binding = bindings.get('target_ms')
+		project_binding = bindings.get('project_info')
+
+		if not isinstance(target_binding, dict):
+			raise ValueError(
+				'OXKAT requires a retained target_ms artifact'
+			)
+
+		if not isinstance(project_binding, dict):
+			raise ValueError(
+				'OXKAT requires a retained project_info artifact'
+			)
+
+		if target_binding.get('artifact_kind') != 'directory':
+			raise ValueError(
+				'OXKAT target_ms must be a directory artifact'
+			)
+
+		if target_binding.get('source_stage') not in (
+			'1GC',
+			'FLAG'
+		):
+			raise ValueError(
+				'OXKAT target_ms comes from an unsupported stage'
+			)
+
+		if (
+			stage == 'FLAG'
+			and target_binding.get('source_stage') != '1GC'
+		):
+			raise ValueError(
+				'FLAG target_ms must originate from 1GC'
+			)
+
+		if (
+			stage == '2GC'
+			and target_binding.get('source_stage') != 'FLAG'
+		):
+			raise ValueError(
+				'2GC target_ms must originate from FLAG'
+			)
+
+		expected_artifact_names = {
+			'1GC': 'working_measurement_sets',
+			'FLAG': 'flagged_target_measurement_sets'
 		}
 
-		serialized = json.dumps(
-			document,
-			sort_keys=True,
-			separators=(',', ':'),
-			allow_nan=False
-		).encode('utf-8')
+		source_stage = target_binding['source_stage']
 
-		token = base64.urlsafe_b64encode(serialized).decode('ascii')
-		token = token.rstrip('=')
+		if target_binding.get('artifact_name') != (
+			expected_artifact_names[source_stage]
+		):
+			raise ValueError(
+				'Unexpected OXKAT target Measurement Set artifact'
+			)
 
-		if len(token) > 3000:
-			raise ValueError('Encoded OXKAT configuration is too large')
+		relative_path = target_binding.get('relative_path')
 
-		args.append('--oxkat-config=%s' % token)
+		if not isinstance(relative_path, str):
+			raise ValueError(
+				'Invalid OXKAT target artifact path'
+			)
 
-		return args
+		ms_name = relative_path.rsplit('/', 1)[-1]
+
+		if not ms_name.endswith('_' + target + '.ms'):
+			raise ValueError(
+				'Selected Measurement Set does not match '
+				'the requested OXKAT target: %s' % target
+			)
+
+		if (
+			project_binding.get('artifact_name') != 'project_info'
+			or project_binding.get('artifact_kind') != 'file'
+		):
+			raise ValueError(
+				'Invalid OXKAT project_info binding'
+			)
+
+		if stage == 'FLAG':
+			if project_binding.get('source_stage') not in (
+				'GET_INFO',
+				'1GC'
+			):
+				raise ValueError(
+					'FLAG project_info must originate from '
+					'GET_INFO or 1GC'
+				)
+
+		if stage == '2GC':
+			if project_binding.get('source_stage') not in (
+				'GET_INFO',
+				'1GC',
+				'FLAG'
+			):
+				raise ValueError(
+					'2GC project_info comes from an unsupported stage'
+				)
+
+		return None
 
 
 	def set_data_input_option_value(self):

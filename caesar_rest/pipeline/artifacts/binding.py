@@ -78,15 +78,31 @@ def resolve_named_inputs(db, owner, pipeline_id, inputs, pipeline=None):
 
 		keys = set(reference)
 
-		explicit = keys == {'run_id', 'artifact'}
-		selected = keys == {'node_id', 'selected', 'artifact'}
+		explicit = keys in (
+			{'run_id', 'artifact'},
+			{'run_id', 'artifact', 'artifact_index'}
+		)
+		selected = keys in (
+			{'node_id', 'selected', 'artifact'},
+			{'node_id', 'selected', 'artifact', 'artifact_index'}
+		)
 
 		if not explicit and not selected:
 			raise manager.PipelineError(
-				'Input must specify either run_id and artifact, '
-				'or node_id, selected=true and artifact',
+				'Input must specify run_id and artifact, or '
+				'node_id, selected=true and artifact; '
+				'optional artifact_index disambiguates matching outputs',
 				400
 			)
+
+		requested_index = reference.get('artifact_index')
+
+		if 'artifact_index' in reference:
+			if type(requested_index) is not int or requested_index < 0:
+				raise manager.PipelineError(
+					'artifact_index must be a non-negative integer',
+					400
+				)
 
 		artifact_name = reference['artifact']
 
@@ -190,16 +206,25 @@ def resolve_named_inputs(db, owner, pipeline_id, inputs, pipeline=None):
 				404
 			)
 
-		if len(matches) != 1:
-			raise manager.PipelineError(
-				'Source artifact name is ambiguous: %s' % artifact_name,
-				409
-			)
+		if requested_index is None:
+			if len(matches) != 1:
+				raise manager.PipelineError(
+					'Source artifact name is ambiguous: %s' % artifact_name,
+					409
+				)
+			resolved_index = matches[0]
+		else:
+			if requested_index not in matches:
+				raise manager.PipelineError(
+					'artifact_index does not identify the requested artifact',
+					409
+				)
+			resolved_index = requested_index
 
 		result.append({
 			'input_name': input_name,
 			'source_run_id': run_id,
-			'artifact_index': matches[0]
+			'artifact_index': resolved_index
 		})
 
 	return result
