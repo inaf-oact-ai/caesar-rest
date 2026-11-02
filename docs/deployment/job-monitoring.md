@@ -6,7 +6,7 @@ The service runs independently of the REST web application and periodically quer
 
 For multi-stage Pipeline V2 workflows, registered artifacts must subsequently be retained in persistent storage before downstream stages can consume them.
 
-Artifact retention can be performed by a separate retention worker or, when explicitly configured, automatically by the job monitoring service. See [Pipeline artifact retention](artifact-retention.md) for the retention lifecycle and storage requirements.
+Artifact retention is handled by a dedicated worker running independently of the job monitoring service. This separation prevents potentially long-running artifact copying and integrity verification operations from blocking the monitoring loop. See [Pipeline artifact retention](artifact-retention.md) for the retention lifecycle, worker configuration and storage requirements.
 
 The monitor currently supports Slurm and Kubernetes. **Slurm is the default and recommended backend.** Celery jobs use a different, legacy monitoring mechanism and are not processed by this standalone monitoring service.
 
@@ -61,7 +61,7 @@ The following options are supported by `apps/run_jobmonitor.py`.
 | `--logfile` | Log filename | `app_logs.json` |
 | `--logfile_maxsize` | Rotating log size in MB | `5` |
 
-The monitor also accepts artifact retention options, documented in Section 3.
+Artifact retention is configured separately through the dedicated [artifact retention worker](artifact-retention.md).
 
 For Kubernetes deployments, select `--job_scheduler=kubernetes` and supply the appropriate Kubernetes connection and certificate options. The required Python integration and external Kubernetes infrastructure must be installed and configured separately.
 
@@ -125,50 +125,28 @@ Artifact registration records the outputs needed for subsequent processing, incl
 
 Artifact registration and artifact retention are distinct operations. Registration does not by itself guarantee that artifacts have been copied into persistent retention storage.
 
-### Retention using the standalone worker
+### Artifact retention architecture
 
-A dedicated artifact retention worker can independently process completed pipeline runs whose outputs have been registered.
+Artifact registration and retention are intentionally separated from job-status monitoring.
 
-This separates job-status monitoring from artifact promotion and is suitable for deployments that manage retention as a separate system service.
+The job monitor is responsible for tracking scientific execution, updating job and pipeline states, and registering output artifacts. Once artifacts have been registered, a dedicated artifact retention worker independently copies and verifies them in persistent storage.
 
-See [Pipeline artifact retention](artifact-retention.md).
+This separation was adopted because artifact retention can involve long-running, blocking filesystem operations, including copying large scientific datasets, computing integrity checksums and promoting directory-based artifacts such as radio-interferometric measurement sets.
 
-### Automatic retention in the job monitor
+Performing these operations synchronously inside the job monitoring loop could delay status updates for other jobs and reduce the responsiveness of the monitoring service.
 
-The current job monitoring implementation also supports automatic retention of completed pipeline outputs.
+The architecture therefore separates the two responsibilities:
 
-To enable this mode, configure an application-side retention root:
+- **Job monitoring service:** Polls the scheduler, updates MongoDB job and pipeline states, and registers scientific output artifacts.
+- **Artifact retention worker:** Processes completed, registered pipeline runs independently, performs artifact copying and integrity verification, and publishes retained outputs for downstream pipeline stages.
 
-```bash
---pipeline_artifact_retention_root=/storage/caesar-rest/pipeline-artifacts
-```
+The application retains some legacy configuration options and helper functions for automatic retention within the job monitor. However, the current monitoring synchronization path does not invoke synchronous artifact promotion. These options should not be used to configure artifact retention in new deployments.
 
-The monitor accepts the following additional options:
+For production deployments, configure and run the standalone artifact retention worker as described in [Pipeline artifact retention](artifact-retention.md).
 
-| Option | Description | Default |
-| --- | --- | --- |
-| `--pipeline_artifact_retention_root` | Persistent artifact storage root | Empty; automatic retention disabled |
-| `--pipeline_artifact_retention_max_file_bytes` | Maximum size of an artifact file | 1 GiB |
-| `--pipeline_artifact_retention_max_directory_bytes` | Maximum retained directory size | 1 TiB |
-| `--pipeline_artifact_retention_max_directory_entries` | Maximum directory entries | `100000` |
-| `--pipeline_artifact_retention_max_directory_depth` | Maximum directory nesting depth | `16` |
+The dedicated worker supports persistent artifact storage, configurable retention limits, independent service supervision and explicit retention-state tracking.
 
-When the retention root is configured, the job monitor attempts to retain eligible completed pipeline artifacts as part of its monitoring and pipeline status synchronization activities, using the supplied storage limits. This does not start a separate retention worker. For larger artifacts or workloads requiring independent retention processing, the dedicated artifact retention service is generally preferable.
-
-The retention root must be an absolute, normalized path and must be accessible and writable by the monitoring service account.
-
-When the REST server and Slurm execution nodes have different mount paths, the monitor uses the **application-side** retention root. Slurm execution and downstream pipeline staging use the corresponding cluster-side path configured in the REST application.
-
-For example:
-
-- Application-side retention root: `/storage/caesar-rest/pipeline-artifacts`
-- Cluster-side retention root: `/cluster-storage/caesar-rest/pipeline-artifacts`
-
-The two locations must refer to the same underlying persistent storage.
-
-For a new deployment, select one primary retention operating model. When using the dedicated artifact retention worker, leave `--pipeline_artifact_retention_root` unset in the job monitor so that automatic retention remains disabled. Avoid running both retention mechanisms against the same workload unless their concurrency and recovery behavior has been explicitly validated.
-
-Artifact retention failures must be investigated independently of the scientific job's execution status.
+Artifact retention failures are handled independently of scientific job execution status. A scientifically completed job can remain completed even when its artifacts are not yet ready for downstream consumption.
 
 ## 4. Verify job monitoring
 
@@ -179,7 +157,7 @@ After starting the service, perform the following checks:
 3. Submit a small test job through CAESAR-REST and verify that its state progresses through the expected scheduler states.
 4. Confirm that the job's final state is updated in MongoDB after scheduler completion.
 5. For scientific pipelines, verify that the corresponding pipeline run reaches its expected terminal state and that successful output artifacts are registered.
-6. If automatic retention or a standalone retention worker is enabled, verify that retained artifacts reach the expected ready state and remain available for downstream processing.
+6. With the standalone artifact retention worker running, verify that registered artifacts are copied and verified successfully, reach the expected `READY` state, and become available for downstream pipeline stages.
 
 The monitor's polling interval affects how quickly completed jobs are reflected in MongoDB.
 
