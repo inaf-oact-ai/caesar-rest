@@ -155,7 +155,15 @@ server {
 }
 ```
 
-The HTTPS-related uWSGI parameters were used in the working reverse-proxy configuration to expose the correct external scheme and host to Flask/OIDC. Ensure that the Nginx worker can access the socket without granting unnecessary filesystem permissions. The TLS certificate and private key are installed on the Nginx host; client systems must trust the issuing CA as applicable.
+The `uwsgi_param` directives preserve the external HTTPS scheme, hostname and port when forwarding requests from Nginx to Flask through the local uWSGI socket. This is particularly important when using OpenID Connect authentication, because the application must generate externally valid URLs, including the browser authentication callback:
+
+```text
+https://server.example.org:8444/oidc_callback
+```
+
+The callback URL must match the redirect URI configured for the confidential `caesar-rest` client in Keycloak. See [Keycloak and OpenID Connect authentication](authentication.md) for the corresponding client configuration.
+
+Ensure that the Nginx worker can access the Unix socket without granting unnecessary filesystem permissions. The TLS certificate and private key are installed on the Nginx host; client systems must trust the issuing CA as applicable.
 
 On Ubuntu with `sites-available` / `sites-enabled`:
 

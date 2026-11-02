@@ -12,7 +12,6 @@ The original deployment material has been separated into service-oriented pages 
 
 - [Preparatory setup, MongoDB and Filebeat](prerequisites.md)
 - [Web application and NGINX/uWSGI](web-application.md)
-- [HTTPS reverse proxy configuration](https-reverse-proxy.md)
 - [Keycloak / OIDC authentication and TLS](authentication.md)
 - [Job monitoring](job-monitoring.md)
 - [Pipeline artifact retention](artifact-retention.md)
