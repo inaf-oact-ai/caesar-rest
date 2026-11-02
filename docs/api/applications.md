@@ -194,7 +194,7 @@ These settings are processed by the OxKAT-specific configurator rather than bein
 
 The example above illustrates only the application-specific `job_options` object; it is not a complete Pipeline V2 job submission payload.
 
-For the complete submission contract, see the [Scientific Pipeline API reference](../scientific-pipelines.md).
+For the complete submission contract, see the [Scientific Pipeline API reference](scientific-pipelines.md).
 
 ## 6. Client integration recommendations
 

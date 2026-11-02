@@ -12,7 +12,7 @@ This documentation covers installation, deployment, REST interfaces, scientific 
 
 ## Scientific workflows and development
 
-- [Scientific Pipeline V2 API](api/index.md#scientific-pipelines)
+- [Scientific Pipeline V2 — architecture and API reference](api/scientific-pipelines.md)
 - [Future developments and integrations](future-developments.md)
 
 ## Preserved documentation
@@ -21,4 +21,4 @@ This documentation covers installation, deployment, REST interfaces, scientific 
 - [Original project overview](archive/ORIGINAL_OVERVIEW.md)
 - [Migration audit](../MIGRATION_AUDIT.md)
 
-The detailed [MAASAI integration guide](maasai_integration.md) remain available through the [REST API index](api/index.md).
+The [Scientific Pipeline V2 API](api/scientific-pipelines.md) and [MAASAI integration guide](maasai_integration.md) provide detailed documentation for scientific workflow orchestration.
