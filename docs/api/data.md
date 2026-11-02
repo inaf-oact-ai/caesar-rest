@@ -343,13 +343,12 @@ Filesystem paths within managed dataset roots should not be submitted directly a
 
 This distinction is particularly important for multi-user deployments and scientific pipeline automation.
 
-See [Job submission](jobs.md), [Scientific Pipeline V2](scientific-pipelines.md) and the [detailed Pipeline V2 reference](../pipeline_v2_api.md) for the relevant job and pipeline submission contracts.
+See [Job submission](jobs.md), [Scientific Pipeline V2](scientific-pipelines.md) for the relevant job and pipeline submission contracts.
 
 ## References
 
 - [REST API overview](overview.md)
 - [Job submission and monitoring](jobs.md)
 - [Scientific Pipeline V2](scientific-pipelines.md)
-- [Detailed Pipeline V2 API reference](../pipeline_v2_api.md)
 - [Keycloak and OpenID Connect authentication](../deployment/authentication.md)
 - [Archived original README](../archive/ORIGINAL_README.md)

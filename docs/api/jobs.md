@@ -163,7 +163,7 @@ submits an already reserved V2 run according to the dedicated Pipeline V2 contra
 
 **Do not confuse `job_id` with `run_id`.** A run reservation represents a registered scientific experiment, while the scheduler job is created during submission.
 
-The complete request contracts, run lifecycle and artifact-binding rules are documented in the [Scientific Pipeline V2 detailed API reference](../pipeline_v2_api.md).
+The complete request contracts, run lifecycle and artifact-binding rules are documented in the [Scientific Pipeline detailed API reference](../scientific-pipelines.md).
 
 ## 4. List submitted jobs
 
@@ -299,7 +299,7 @@ Pipeline V2 retained artifacts are managed separately from the historical job ou
 
 For pipelines, clients should use the corresponding artifact registration, retention and retrieval endpoints rather than assuming that `/job/{job_id}/output` represents the complete retained scientific output set.
 
-See [Pipeline artifact retention](../deployment/artifact-retention.md) and [Scientific Pipeline V2 API reference](../pipeline_v2_api.md).
+See [Pipeline artifact retention](../deployment/artifact-retention.md) and [Scientific Pipeline API reference](../scientific-pipelines.md).
 
 ## 7. Retrieve application-specific outputs
 
@@ -373,8 +373,7 @@ Clients should:
 - [REST API overview](overview.md)
 - [Application discovery](applications.md)
 - [Data and datasets API](data.md)
-- [Scientific Pipeline V2 concepts and examples](scientific-pipelines.md)
-- [Scientific Pipeline V2 detailed API reference](../pipeline_v2_api.md)
+- [Scientific Pipeline concepts, detailed API reference and examples](scientific-pipelines.md)
 - [Job monitoring deployment](../deployment/job-monitoring.md)
 - [Pipeline artifact retention](../deployment/artifact-retention.md)
 - [Archived original README](../archive/ORIGINAL_README.md)

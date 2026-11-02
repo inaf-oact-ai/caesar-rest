@@ -21,4 +21,4 @@ This documentation covers installation, deployment, REST interfaces, scientific 
 - [Original project overview](archive/ORIGINAL_OVERVIEW.md)
 - [Migration audit](../MIGRATION_AUDIT.md)
 
-The detailed [Pipeline V2 API reference](pipeline_v2_api.md) and [MAASAI integration guide](maasai_integration.md) remain available through the [REST API index](api/index.md).
+The detailed [MAASAI integration guide](maasai_integration.md) remain available through the [REST API index](api/index.md).

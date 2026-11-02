@@ -17,8 +17,7 @@ These endpoints provide the core operations used by interactive clients and exte
 
 Scientific Pipeline V2 extends CAESAR-REST with explicit pipeline definitions, runs, artifact registration, retention and controlled execution of downstream stages.
 
-- [Scientific Pipeline V2 — concepts and examples](scientific-pipelines.md): Pipeline lifecycle, registration and execution examples.
-- [Scientific Pipeline V2 — detailed API reference](../pipeline_v2_api.md): Endpoint contracts, validations, artifact bindings, retention and submission safeguards.
+- [Scientific Pipeline V2 — architecture and API reference](scientific-pipelines.md): pipeline concepts, lifecycle, registration, submission, preferred-run selection, artifact management, retention and safety guarantees.
 - [MAASAI integration guide](../maasai_integration.md): Agent-driven orchestration of scientific pipelines through the Pipeline V2 API.
 
 The detailed Pipeline V2 API reference provides the more specific contract for client implementations.

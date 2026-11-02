@@ -6,7 +6,7 @@ CAESAR-REST is under active development. This page distinguishes **capabilities 
 
 CAESAR-REST already provides independent containerized application jobs, authenticated dataset access, and Scientific Pipeline V2 functionality on Slurm-based deployments. The pipeline API supports experiment registration, immutable named artifact bindings, preferred-run selection, and retained artifacts for downstream execution.
 
-For implementation details, see the [Scientific Pipeline V2 overview](api/scientific-pipelines.md) and [detailed REST API reference](pipeline_v2_api.md).
+For implementation details, see the detailed [REST API reference](api/scientific-pipelines.md).
 
 ### Agent-driven scientific workflows: MAASAI
 
@@ -28,7 +28,7 @@ See the [Kubernetes deployment guide](deployment/kubernetes.md) for the existing
 
 The pipeline layer is designed to be application-independent, with application-specific scientific policies and execution configuration supplied by the server. Additional application integrations and stages may be introduced incrementally as their containers, configuration, inputs, and artifact contracts are implemented and validated.
 
-The OXKAT examples in the [Pipeline V2 API reference](pipeline_v2_api.md) demonstrate this architecture; they should not be interpreted as a guarantee that every proposed stage or option is operational in every deployment.
+The OXKAT examples in the [Pipeline API reference](api/scientific-pipelines.md) demonstrate this architecture; they should not be interpreted as a guarantee that every proposed stage or option is operational in every deployment.
 
 ### Operations, documentation, and reproducibility
 

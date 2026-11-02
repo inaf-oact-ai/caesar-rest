@@ -131,8 +131,7 @@ Pipeline clients can register scientific workflows, create runs, inspect executi
 
 The relevant documentation is available in:
 
-- [Scientific Pipeline V2 concepts and examples](scientific-pipelines.md)
-- [Scientific Pipeline V2 detailed API reference](../pipeline_v2_api.md)
+- [Scientific Pipeline concepts, detailed API reference and examples](scientific-pipelines.md)
 - [MAASAI integration guide](../maasai_integration.md)
 
 Scientific execution status and artifact readiness are distinct concepts. A successfully completed scientific run may still require artifact registration and retention before its outputs can be used by subsequent pipeline stages.
@@ -152,5 +151,4 @@ Historical examples remain available in the [archived original README](../archiv
 - [REST API index](index.md)
 - [Web application deployment](../deployment/web-application.md)
 - [Keycloak and OpenID Connect authentication](../deployment/authentication.md)
-- [Scientific Pipeline V2 API reference](../pipeline_v2_api.md)
 - [MAASAI integration guide](../maasai_integration.md)

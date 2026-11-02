@@ -194,7 +194,7 @@ These settings are processed by the OxKAT-specific configurator rather than bein
 
 The example above illustrates only the application-specific `job_options` object; it is not a complete Pipeline V2 job submission payload.
 
-For the complete submission contract, see the [Scientific Pipeline V2 detailed API reference](../pipeline_v2_api.md).
+For the complete submission contract, see the [Scientific Pipeline API reference](../scientific-pipelines.md).
 
 ## 6. Client integration recommendations
 
@@ -213,7 +213,6 @@ Application discovery does not replace pipeline registration, run reservation, j
 - [REST API overview](overview.md)
 - [Data and datasets API](data.md)
 - [Job submission and monitoring](jobs.md)
-- [Scientific Pipeline V2 concepts and examples](scientific-pipelines.md)
-- [Scientific Pipeline V2 detailed API reference](../pipeline_v2_api.md)
+- [Scientific Pipeline concepts, detailed API reference and examples](scientific-pipelines.md)
 - [MAASAI integration](../maasai_integration.md)
 - [Archived original README](../archive/ORIGINAL_README.md)

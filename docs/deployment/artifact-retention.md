@@ -200,7 +200,7 @@ registration should be attempted only when the required
 upstream artifacts are available. The artifact-binding layer
 performs the authoritative integrity verification.
 
-See the [Pipeline V2 API reference](../pipeline_v2_api.md)
+See the [Pipeline API reference](../api/scientific-pipelines.md)
 for further details.
 
    

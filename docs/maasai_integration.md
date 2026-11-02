@@ -2,7 +2,7 @@
 
 This guide explains the tested R1–R3B agent-oriented CAESAR-REST contract. It describes **client orchestration**, not a server-side auto-execution engine: MAASAI chooses experiments, evaluates their scientific quality and decides which completed runs to prefer. CAESAR-REST validates, executes, retains and records the individual runs and their immutable dependencies.
 
-For the full route reference, see [Pipeline V2 API](pipeline_v2_api.md).
+For the full route reference, see [Pipeline API](api/scientific-pipelines.md).
 
 ## Prerequisites
 
@@ -168,4 +168,4 @@ The public `submission.retry_allowed` field is a lifecycle indicator and cannot 
 
 On a test pipeline, create alternatives for one node and verify: registration without submission; one-shot submission; terminal-state reconciliation; registered and retained artifacts; selection with conditional `PUT`; stale `PUT` returning `409`; selected-node inputs frozen into a new downstream run; stable frozen inputs after changing the selected upstream run; and safe response to uncertain submission states. Heavy scientific stages need not be reexecuted solely to validate selection and binding semantics.
 
-See [Pipeline V2 API](pipeline_v2_api.md) for endpoint paths and request/response examples.
+See [Pipeline API](api/scientific-pipelines.md) for endpoint paths and request/response examples.
