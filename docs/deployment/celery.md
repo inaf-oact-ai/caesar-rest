@@ -187,7 +187,7 @@ Start the service with:
 sudo systemctl start caesar-workers.service
 ```
 
-The historical deployment also provided the Docker image [`sriggi/caesar-rest-worker:latest`](https://hub.docker.com/r/sriggi/caesar-rest-worker) , intended for Docker Compose or Kubernetes-based worker deployments. The corresponding historical configuration examples may be found under the repository's `config/` directory. The image and orchestration examples have not been validated against the current CAESAR-REST implementation and should be considered archival references.
+The historical deployment also provided the Docker image [`sriggi/caesar-rest-worker:latest`](https://hub.docker.com/r/sriggi/caesar-rest-worker), intended for Docker Compose or Kubernetes-based worker deployments. The corresponding historical configuration examples may be found under the repository's `config/` directory. The image and orchestration examples have not been validated against the current CAESAR-REST implementation and should be considered archival references.
 
 ## 6. Migration and maintenance considerations
 
