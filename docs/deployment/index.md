@@ -15,7 +15,7 @@ This section describes how to deploy CAESAR-REST and its supporting services. Sl
 - [Keycloak / OIDC authentication and TLS](authentication.md)
 - [Job monitoring](job-monitoring.md)
 - [Pipeline artifact retention](artifact-retention.md)
-- [Accounting](accounting.md)
+- [Accounting (legacy / limited support)](accounting.md)
 - [CLI options](../reference/cli-options.md)
 
 > **Deployment note**: The examples in these guides are intended as reference configurations, not universally applicable production settings. Adapt service accounts, filesystem paths, scheduler endpoints, TLS certificates and security controls to your infrastructure. Legacy deployment materials are identified explicitly in their respective guides.
