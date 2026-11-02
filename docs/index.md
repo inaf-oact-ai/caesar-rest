@@ -29,6 +29,5 @@ Scientific pipeline and MAASAI documentation may evolve as additional scientific
 
 - [Original README](archive/ORIGINAL_README.md) — Archived version of the original project README.
 - [Original project overview](archive/ORIGINAL_OVERVIEW.md) — Historical project description.
-- [Documentation migration audit](../MIGRATION_AUDIT.md) — Record of the documentation restructuring.
 
 For an overview of the software and its capabilities, return to the [project README](../README.md).
