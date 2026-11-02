@@ -5,7 +5,7 @@ This section describes how to deploy CAESAR-REST and its supporting services. Sl
 | Backend | Status | Documentation |
 | --- | --- | --- |
 | Slurm | Recommended and actively maintained | [Slurm deployment](slurm.md) |
-| Kubernetes | Supported as a secondary backend; existing manifests require review | [Kubernetes deployment](kubernetes.md) |
+| Kubernetes | Secondary backend; implementation available, deployment not fully validated | [Kubernetes deployment](kubernetes.md) |
 | Celery | Legacy, no longer actively maintained | [Celery legacy deployment](celery.md) |
 
 ## Shared services
