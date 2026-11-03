@@ -8,6 +8,7 @@ setup(
 		"apps/run_jobmonitor.py",
 		"apps/run_accounter.py",
 		"apps/run_artifact_retention.py",
+		"apps/run_dataset_inspector.py"
 	],
 	data_files=[
 		("config", ["config/nginx/nginx.conf", "config/uwsgi/uwsgi.ini"]),
