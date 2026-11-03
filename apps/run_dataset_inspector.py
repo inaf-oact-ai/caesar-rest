@@ -447,7 +447,20 @@ def main():
 		logging.info('One-shot complete; pending dataset found=%s', found)
 		return
 		
-	logging.info('Dataset inspection worker started')
+	logging.info(
+		'Dataset inspection worker started: '
+		'database=%s, poll=%ds, timeout=%ds, '
+		'lease=%ds, max_attempts=%d, freshness=%ds',
+		args.dbname,
+		args.poll_seconds,
+		args.timeout_seconds,
+		args.lease_seconds,
+		args.max_attempts,
+		args.freshness_check_seconds
+	)
+
+	heartbeat_interval = 300
+	last_heartbeat = time.monotonic()
 
 	while not STOP:
 		try:
@@ -474,6 +487,14 @@ def main():
 			logging.exception(
 				'Dataset inspection worker polling failure'
 			)
+
+		now = time.monotonic()
+
+		if now - last_heartbeat >= heartbeat_interval:
+			logging.info(
+				'Dataset inspection worker heartbeat: alive, polling MongoDB'
+			)
+			last_heartbeat = now
 
 		for _ in range(args.poll_seconds):
 			if STOP:
