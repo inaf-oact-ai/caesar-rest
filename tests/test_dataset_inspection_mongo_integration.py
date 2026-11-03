@@ -31,7 +31,14 @@ def main():
 	args = parser.parse_args()
 	if args.dbname == 'caesardb':
 		parser.error('Refusing production database caesardb; use a dedicated test database')
-	client = MongoClient(args.dbhost, args.dbport, serverSelectionTimeoutMS=5000)
+	
+	client = MongoClient(
+		args.dbhost,
+		args.dbport,
+		serverSelectionTimeoutMS=5000,
+		tz_aware=True,
+		tzinfo=timezone.utc
+	)
 	client.admin.command('ping')
 	db = client[args.dbname]
 	prefix = 'r4c2b4_' + uuid.uuid4().hex
