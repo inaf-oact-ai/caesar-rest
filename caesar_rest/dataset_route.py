@@ -53,12 +53,22 @@ def current_identity():
 
     return invoke(action)
 
+
 @registry_bp.route('/datasets', methods=['POST'])
 @custom_require_login
 def register():
 	def action():
-		doc = registry.register_dataset(request.get_json(silent=True))
-		return jsonify({'dataset_id': doc['dataset_id']}), 201
+		doc = registry.register_dataset(
+			request.get_json(silent=True)
+		)
+
+		return jsonify({
+			'dataset_id': doc['dataset_id'],
+			'inspection': {
+				'status': doc['inspection']['status']
+			}
+		}), 201
+
 	return invoke(action)
 
 

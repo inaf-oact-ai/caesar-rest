@@ -5,13 +5,32 @@ returned to regular users. Identifiers and membership are administrator-managed.
 """
 import os
 import re
+from uuid import uuid4
 from datetime import datetime, timezone
 from flask import current_app, g
 from caesar_rest import mongo
 
 ID_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$')
 
+INSPECTION_STATUSES = frozenset({
+	'PENDING',
+	'RUNNING',
+	'READY',
+	'FAILED',
+	'UNSUPPORTED'
+})
 
+
+def new_inspection_record():
+	"""Create a new, independently versioned inspection request."""
+
+	return {
+		'status': 'PENDING',
+		'generation': uuid4().hex,
+		'attempt': 0,
+		'requested_at': datetime.now(timezone.utc)
+	}
+	
 class DatasetError(Exception):
 	def __init__(self, message, status=400):
 		super().__init__(message)
@@ -128,6 +147,12 @@ def ensure_indexes():
 	db = database()
 
 	db.datasets.create_index('dataset_id', unique=True)
+	db.datasets.create_index([
+		('inspection.status', 1),
+		('enabled', 1),
+		('inspection.requested_at', 1)
+	])
+	
 	db.teams.create_index('team_id', unique=True)
 
 	db.team_memberships.create_index(
@@ -207,7 +232,28 @@ def guard_abspath(path):
 
 
 def public_metadata(doc):
-	return {k: v for k, v in doc.items() if k in ('name', 'description', 'type', 'format', 'visibility')}
+	"""Return authorized dataset metadata without filesystem paths."""
+
+	result = {
+		k: v
+		for k, v in doc.items()
+		if k in ('name', 'description', 'type', 'format', 'visibility')
+	}
+
+	inspection = doc.get('inspection')
+
+	if isinstance(inspection, dict):
+		result['inspection'] = {
+			'status': inspection.get('status', 'UNKNOWN'),
+			'requested_at': inspection.get('requested_at'),
+			'finished_at': inspection.get('finished_at')
+		}
+	else:
+		result['inspection'] = {
+			'status': 'NOT_REQUESTED'
+		}
+
+	return result
 
 def list_datasets():
 	user_id = identity()
@@ -256,10 +302,18 @@ def register_dataset(payload):
 	if (kind == 'directory' and not os.path.isdir(path)) or (kind == 'file' and not os.path.isfile(path)):
 		raise DatasetError('Dataset path type mismatch')
 	
-	doc = {'dataset_id': dataset_id, 'name': name.strip(), 'path': path,
-		'type': kind, 'visibility': visibility, 'allowed_teams': teams,
-		'enabled': payload.get('enabled', True), 'created_by': identity(),
-		'created_at': datetime.now(timezone.utc)}
+	doc = {
+		'dataset_id': dataset_id,
+		'name': name.strip(),
+		'path': path,
+		'type': kind,
+		'visibility': visibility,
+		'allowed_teams': teams,
+		'enabled': payload.get('enabled', True),
+		'created_by': identity(),
+		'created_at': datetime.now(timezone.utc),
+		'inspection': new_inspection_record()
+	}
 	
 	if not isinstance(doc['enabled'], bool):
 		raise DatasetError('enabled must be boolean')
@@ -318,9 +372,33 @@ def update_dataset(dataset_id, payload):
 			if database().teams.find_one({'team_id': team, 'enabled': True}) is None:
 				raise DatasetError('Unknown or disabled team: ' + team)
 	
-	res = database().datasets.update_one({'dataset_id': dataset_id}, {'$set': payload})
-	if not res.matched_count:
+	db = database()
+	existing = db.datasets.find_one({'dataset_id': dataset_id})
+
+	if existing is None:
 		raise DatasetError('Dataset not found', 404)
+
+	changes = dict(payload)
+
+	if (
+		'format' in changes
+		and changes['format'] != existing.get('format', '')
+	):
+		changes['inspection'] = new_inspection_record()
+
+	result = db.datasets.update_one(
+		{
+			'_id': existing['_id'],
+			'format': existing.get('format', '')
+		},
+		{'$set': changes}
+	)
+
+	if result.matched_count != 1:
+		raise DatasetError(
+			'Dataset changed concurrently; retry the update',
+			409
+		)
 
 
 def unregister_dataset(dataset_id):
