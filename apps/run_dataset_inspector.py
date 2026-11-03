@@ -20,12 +20,14 @@ import subprocess
 import tempfile
 import time
 import uuid
+import resource
 from datetime import datetime, timezone
 from pathlib import Path
 
 from pymongo import MongoClient, ReturnDocument
 
 from caesar_rest.dataset_inspection.registry import default_registry
+from caesar_rest.dataset_inspection import lifecycle
 
 STOP = False
 
@@ -33,7 +35,10 @@ STOP = False
 class InspectionError(RuntimeError):
 	pass
 
-
+class TransientInspectionError(InspectionError):
+	"""A temporary infrastructure failure eligible for bounded retry."""
+	pass
+	
 def stop_worker(signum, frame):
 	global STOP
 	STOP = True
@@ -103,40 +108,101 @@ def source_fingerprint(path, kind):
 
 
 def run_container(image, singularity, dataset_path, output_dir, timeout):
-	"""Execute only the server-selected image; never invoke a shell."""
+	"""Execute a trusted inspector and terminate its process group on failure."""
+
 	if os.path.islink(image):
 		raise InspectionError('Inspector image path is a symlink')
+
 	image = os.path.realpath(image)
+
 	if not os.path.isfile(image):
-		raise InspectionError('Configured inspector image unavailable or unsafe')
+		raise TransientInspectionError(
+			'Configured inspector image unavailable'
+		)
+
 	command = [
 		singularity, 'run', '--cleanenv', '--containall',
 		'--bind', dataset_path + ':/input.ms:ro',
 		'--bind', output_dir + ':/output:rw',
-		image, '--input-ms=/input.ms',
-		'--output-json=/output/inspection.json',
+		image,
+		'--input-ms=/input.ms',
+		'--output-json=/output/inspection.json'
 	]
-	# Redirect diagnostics to files, not PIPE, to bound worker memory.
+
 	stdout_path = os.path.join(output_dir, 'container.stdout')
 	stderr_path = os.path.join(output_dir, 'container.stderr')
-	try:
-		with open(stdout_path, 'wb') as stdout, open(stderr_path, 'wb') as stderr:
-			result = subprocess.run(
-				command, stdout=stdout, stderr=stderr,
-				timeout=timeout, check=False,
-			)
-	except subprocess.TimeoutExpired as exc:
-		raise InspectionError('Inspector execution timed out') from exc
-	except OSError as exc:
-		raise InspectionError('Inspector runtime could not be launched') from exc
-	if result.returncode != 0:
-		with open(stderr_path, 'rb') as stream:
-			stream.seek(max(0, os.path.getsize(stderr_path) - 1500))
-			tail = stream.read().decode('utf-8', errors='replace')
-		logging.error('Inspector failed (exit=%d, stderr_tail=%r)',
-			result.returncode, tail)
-		raise InspectionError('Inspector exited with status %d' % result.returncode)
 
+	process = None
+	deadline = time.monotonic() + timeout
+
+	def limit_output_files():
+		resource.setrlimit(
+			resource.RLIMIT_FSIZE,
+			(32 * 1024 * 1024, 32 * 1024 * 1024)
+		)
+
+	try:
+		with open(stdout_path, 'wb') as stdout, \
+				open(stderr_path, 'wb') as stderr:
+
+			process = subprocess.Popen(
+				command,
+				stdout=stdout,
+				stderr=stderr,
+				start_new_session=True,
+				preexec_fn=limit_output_files
+			)
+
+			while process.poll() is None:
+				if STOP:
+					raise TransientInspectionError(
+						'Inspection interrupted by worker shutdown'
+					)
+
+				if time.monotonic() >= deadline:
+					raise TransientInspectionError(
+						'Inspector execution timed out'
+					)
+
+				time.sleep(0.5)
+
+			if process.returncode != 0:
+				with open(stderr_path, 'rb') as stream:
+					stream.seek(
+						max(0, os.path.getsize(stderr_path) - 1500)
+					)
+					tail = stream.read().decode(
+						'utf-8', errors='replace'
+					)
+
+				logging.error(
+					'Inspector failed (exit=%d, stderr_tail=%r)',
+					process.returncode,
+					tail
+				)
+
+				raise InspectionError(
+					'Inspector exited with status %d'
+					% process.returncode
+				)
+
+	except OSError as exc:
+		raise TransientInspectionError(
+			'Inspector runtime could not be launched'
+		) from exc
+
+	finally:
+		if process is not None and process.poll() is None:
+			try:
+				os.killpg(process.pid, signal.SIGTERM)
+				process.wait(timeout=5)
+			except (ProcessLookupError, subprocess.TimeoutExpired):
+				try:
+					os.killpg(process.pid, signal.SIGKILL)
+				except ProcessLookupError:
+					pass
+
+				process.wait()
 
 def read_result(output_dir, spec, max_json_bytes):
 	path = os.path.join(output_dir, 'inspection.json')
@@ -166,33 +232,18 @@ def read_result(output_dir, spec, max_json_bytes):
 	return doc
 
 
-def claim_one(db, dataset_id=None):
-	query = {
-		'enabled': True,
-		'inspection.status': 'PENDING',
-		'inspection.generation': {'$type': 'string'},
-	}
-	if dataset_id is not None:
-		query['dataset_id'] = dataset_id
-	token = uuid.uuid4().hex
-	doc = db.datasets.find_one_and_update(
-		query,
-		{'$set': {
-			'inspection.status': 'RUNNING',
-			'inspection.claim_token': token,
-			'inspection.started_at': utcnow(),
-		}, '$inc': {'inspection.attempt': 1},
-		 '$unset': {'inspection.error': '', 'inspection.finished_at': ''}},
-		sort=[('inspection.requested_at', 1)],
-		return_document=ReturnDocument.AFTER,
-	)
-	return doc, token
-
-
 def process_one(db, factory, args, dataset_id=None):
-	doc, token = claim_one(db, dataset_id)
+	
+	doc, token = lifecycle.claim_one(
+		db,
+		dataset_id,
+		max_attempts=args.max_attempts,
+		lease_seconds=args.lease_seconds
+	)
+	
 	if doc is None:
 		return False
+		
 	id_ = doc['dataset_id']
 	generation = doc['inspection']['generation']
 	guard = {
@@ -212,29 +263,42 @@ def process_one(db, factory, args, dataset_id=None):
 			'declared_format': selection.declared_format,
 			'detection_evidence': selection.evidence,
 		}
+		
 		if selection.status == 'MISMATCH':
 			raise InspectionError('Declared dataset format conflicts with detected format')
+			
 		if selection.status == 'UNSUPPORTED':
 			update = {'inspection.status': 'UNSUPPORTED',
 				'inspection.finished_at': utcnow(), **{
 				'inspection.' + key: value for key, value in base.items()}}
 			result = db.datasets.update_one(guard, {
 				'$set': update,
-				'$unset': {'inspection.claim_token': ''},
+				'$unset': {
+					'inspection.claim_token': '',
+					'inspection.lease_until': '',
+					'inspection.next_attempt_at': ''
+				},
 			})
 			logging.info('Dataset=%s unsupported; published=%s', id_, result.modified_count == 1)
 			return True
+		
 		before = source_fingerprint(path, doc['type'])
 		spec = selection.inspector
 		if spec.execution_backend != 'local':
 			raise InspectionError('Unsupported inspector execution backend')
+		
 		with tempfile.TemporaryDirectory(prefix='caesar-inspection-', dir=args.work_root) as output:
 			os.chmod(output, 0o700)
 			run_container(spec.image, args.singularity, path, output, args.timeout_seconds)
 			metadata = read_result(output, spec, args.max_json_bytes)
+			
 		after = source_fingerprint(path, doc['type'])
+		
 		if after != before:
-			raise InspectionError('Dataset changed during inspection')
+			raise TransientInspectionError(
+				'Dataset changed during inspection'
+			)		
+		
 		update = {
 			'inspection.status': 'READY',
 			'inspection.finished_at': utcnow(),
@@ -246,20 +310,40 @@ def process_one(db, factory, args, dataset_id=None):
 			**{'inspection.' + key: value for key, value in base.items()},
 		}
 		result = db.datasets.update_one(guard, {
-			'$set': update, '$unset': {'inspection.claim_token': '', 'inspection.error': ''}
+			'$set': update,
+			'$unset': {
+				'inspection.claim_token': '',
+				'inspection.lease_until': '',
+				'inspection.next_attempt_at': '',
+				'inspection.error': ''
+			}
 		})
 		logging.info('Dataset=%s READY published=%s elapsed=%.1fs',
 			id_, result.modified_count == 1, time.monotonic() - start)
+			
 	except Exception as exc:
-		logging.exception('Dataset inspection failed: dataset=%s', id_)
-		result = db.datasets.update_one(guard, {
-			'$set': {
-				'inspection.status': 'FAILED',
-				'inspection.finished_at': utcnow(),
-				'inspection.error': str(exc)[:500],
-			}, '$unset': {'inspection.claim_token': ''}
-		})
-		logging.info('Dataset=%s FAILED published=%s', id_, result.modified_count == 1)
+		logging.exception(
+			'Dataset inspection failed: dataset=%s',
+			id_
+		)
+
+		state, published = lifecycle.fail_or_retry(
+			db,
+			guard,
+			doc['inspection']['attempt'],
+			str(exc),
+			transient=isinstance(exc, TransientInspectionError),
+			max_attempts=args.max_attempts,
+			base_seconds=args.retry_base_seconds
+		)
+
+		logging.info(
+			'Dataset=%s state=%s published=%s',
+			id_,
+			state,
+			published
+		)		
+		
 	return True
 
 
@@ -276,6 +360,33 @@ def parse_args():
 	parser.add_argument('--singularity', default='singularity')
 	parser.add_argument('--poll-seconds', type=int, default=30)
 	parser.add_argument('--timeout-seconds', type=int, default=900)
+	parser.add_argument(
+		'--lease-seconds',
+		type=int,
+		default=1200,
+		help='Duration of one inspection claim lease'
+	)
+
+	parser.add_argument(
+		'--max-attempts',
+		type=int,
+		default=3,
+		help='Maximum inspection attempts per generation'
+	)
+
+	parser.add_argument(
+		'--retry-base-seconds',
+		type=int,
+		default=30,
+		help='Initial transient failure retry delay'
+	)
+
+	parser.add_argument(
+		'--freshness-check-seconds',
+		type=int,
+		default=3600,
+		help='Minimum interval between READY fingerprint checks'
+	)	
 	parser.add_argument('--max-json-bytes', type=int, default=4 * 1024 * 1024)
 	parser.add_argument('--once', action='store_true',
 		help='Process at most one pending dataset and exit')
@@ -284,9 +395,25 @@ def parse_args():
 	args = parser.parse_args()
 	if args.dataset_id and not args.once:
 		parser.error('--dataset-id requires --once')
-	if any(x <= 0 for x in (args.dbport, args.poll_seconds,
-		args.timeout_seconds, args.max_json_bytes)):
+		
+	if any(x <= 0 for x in (
+		args.dbport,
+		args.poll_seconds,
+		args.timeout_seconds,
+		args.max_json_bytes,
+		args.lease_seconds,
+		args.max_attempts,
+		args.retry_base_seconds,
+		args.freshness_check_seconds
+	)):
 		parser.error('Numeric limits must be positive')
+
+	if args.lease_seconds <= args.timeout_seconds + 60:
+		parser.error(
+			'--lease-seconds must exceed '
+			'--timeout-seconds by more than 60 seconds'
+		)		
+		
 	if not os.path.isabs(args.msv2_image):
 		parser.error('--msv2-image must be an absolute path')
 	if not os.path.isabs(args.work_root) or not os.path.isdir(args.work_root):
@@ -303,30 +430,57 @@ def parse_args():
 
 
 def main():
+	
 	args = parse_args()
 	logging.basicConfig(level=logging.INFO,
 		format='%(asctime)s %(levelname)s %(message)s')
+	
 	client = MongoClient(args.dbhost, args.dbport, serverSelectionTimeoutMS=10000)
 	client.admin.command('ping')
 	db = client[args.dbname]
 	factory = default_registry(args.msv2_image)
 	for signum in (signal.SIGINT, signal.SIGTERM):
 		signal.signal(signum, stop_worker)
+	
 	if args.once:
 		found = process_one(db, factory, args, args.dataset_id)
 		logging.info('One-shot complete; pending dataset found=%s', found)
 		return
+		
 	logging.info('Dataset inspection worker started')
+
 	while not STOP:
 		try:
+			if lifecycle.recover_one_expired(
+				db,
+				max_attempts=args.max_attempts,
+				base_seconds=args.retry_base_seconds
+			):
+				continue
+
 			if process_one(db, factory, args):
 				continue
+
+			if lifecycle.check_one_ready(
+				db,
+				validate_dataset_path,
+				source_fingerprint,
+				args.allowed_roots,
+				check_interval_seconds=args.freshness_check_seconds
+			):
+				continue
+
 		except Exception:
-			logging.exception('Dataset worker polling failed')
+			logging.exception(
+				'Dataset inspection worker polling failure'
+			)
+
 		for _ in range(args.poll_seconds):
 			if STOP:
 				break
-			time.sleep(1)
+
+			time.sleep(1)	
+	
 	logging.info('Dataset inspection worker stopped')
 
 
