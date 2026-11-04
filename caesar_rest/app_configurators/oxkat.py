@@ -438,6 +438,19 @@ class OxkatAppConfigurator(AppConfigurator):
 
 		return args	
 
+
+	def build_scientific_readiness(self, pipeline, runs, dataset_doc):
+		"""Evaluate OXKAT readiness using persisted scientific metadata."""
+
+		from caesar_rest.app_configurators import oxkat_readiness
+
+		return oxkat_readiness.resolve_snapshot(
+			pipeline,
+			runs,
+			dataset_doc
+		)
+
+
 	def validate_pipeline_bindings(self, parameters, bindings):
 		"""Validate target-specific OXKAT V2 artifact bindings.
 
