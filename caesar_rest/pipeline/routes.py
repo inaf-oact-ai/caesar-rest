@@ -18,6 +18,7 @@ from caesar_rest.pipeline.artifacts import directory_resolver
 from caesar_rest.pipeline import readiness as pipeline_readiness
 from caesar_rest.pipeline import scientific_readiness as pipeline_scientific_readiness
 from caesar_rest.pipeline import bulk_planning
+from caesar_rest.pipeline import bulk_registration
 
 pipeline_bp = Blueprint('pipelines', __name__, url_prefix='/caesar/api/v1.0')
 
@@ -399,6 +400,40 @@ def plan_pipeline_bulk(pipeline_id):
 		)
 	)
 	
+############################################
+###      PIPELINE BULK REGISTRATION
+############################################
+@pipeline_bp.route('/pipelines/<pipeline_id>/bulk-register', methods=['POST'])
+@custom_require_login
+def register_pipeline_bulk(pipeline_id):
+	"""Register validated scientific proposals without submitting jobs."""
+
+	def action(owner):
+		result = bulk_registration.register(
+			owner,
+			pipeline_id,
+			request.get_json(silent=True),
+			retention_root=current_app.config.get(
+				'PIPELINE_ARTIFACT_RETENTION_ROOT'
+			) or '',
+			max_directory_bytes=current_app.config.get(
+				'PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_BYTES',
+				1024 * 1024 * 1024 * 1024
+			),
+			max_directory_entries=current_app.config.get(
+				'PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_ENTRIES',
+				100000
+			),
+			max_directory_depth=current_app.config.get(
+				'PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_DEPTH',
+				16
+			)
+		)
+
+		return jsonify(result), 200
+
+	return invoke(action)
+		
 ############################################
 ###      PIPELINE ARTIFACT LISTING
 ############################################

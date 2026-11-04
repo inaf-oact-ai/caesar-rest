@@ -10,6 +10,7 @@ import uuid
 import time
 
 from pymongo import ReturnDocument
+from pymongo.errors import DuplicateKeyError, PyMongoError
 
 from caesar_rest import mongo
 from caesar_rest import logger
@@ -432,12 +433,39 @@ def create_run(
 	retention_root='',
 	max_directory_bytes=1024 * 1024 * 1024 * 1024,
 	max_directory_entries=100000, 
-	max_directory_depth=16
+	max_directory_depth=16,
+	idempotency_key=None,
+	request_fingerprint=None
 ):
 	"""Reserve a distinct experiment. Does NOT submit anything to Slurm."""
 	
 	t_run = time.perf_counter()
 	
+	# Idempotency metadata is server-derived, never accepted in the
+	# legacy execution payload.
+	if (idempotency_key is None) != (request_fingerprint is None):
+		raise PipelineError(
+			'Incomplete registration idempotency metadata',
+			500
+		)
+
+	if idempotency_key is not None:
+		from caesar_rest.pipeline import idempotency
+
+		idempotency.validate_key(idempotency_key)
+
+		if (
+			not isinstance(request_fingerprint, str)
+			or re.fullmatch(
+				r'[0-9a-f]{64}',
+				request_fingerprint
+			) is None
+		):
+			raise PipelineError(
+				'Invalid registration fingerprint',
+				500
+			)
+				
 	validate_identifier(node_id, 'node_id')
 	pipeline = get_pipeline(owner, pipeline_id)
 	pipeline_dataset_id = pipeline.get('dataset_id')
@@ -652,7 +680,63 @@ def create_run(
 		'artifacts': [],
 		'created_at': utcnow()
 	}
-	runs.insert_one(doc)
+	
+	if idempotency_key is not None:
+		doc['idempotency_key'] = idempotency_key
+		doc['request_fingerprint'] = request_fingerprint	
+	
+	try:
+		runs.insert_one(doc)
+
+	except DuplicateKeyError as exc:
+		if idempotency_key is not None:
+			from caesar_rest.pipeline import idempotency
+
+			existing = idempotency.find_existing(
+				runs,
+				owner,
+				pipeline_id,
+				idempotency_key,
+				request_fingerprint
+			)
+
+			if existing is not None:
+				existing['idempotency_replayed'] = True
+				return existing
+
+		# Never treat unrelated unique-index collisions as replays.
+		raise PipelineError(
+			'Pipeline run registration uniqueness conflict',
+			409
+		) from exc
+
+	except PyMongoError as exc:
+		# An insert error can be ambiguous (e.g. connection lost
+		# after the primary committed). Check before reporting failure.
+		if idempotency_key is not None:
+			from caesar_rest.pipeline import idempotency
+
+			try:
+				existing = idempotency.find_existing(
+					runs,
+					owner,
+					pipeline_id,
+					idempotency_key,
+					request_fingerprint
+				)
+			except PyMongoError:
+				existing = None
+
+			if existing is not None:
+				existing['idempotency_replayed'] = True
+				return existing
+
+		# Do not automatically attempt another insertion.
+		raise PipelineError(
+			'Registration outcome uncertain; retry with the same '
+			'idempotency key',
+			503
+		) from exc
 	
 	logger.info(
 		'V2 run registration database finalization: '
@@ -670,7 +754,12 @@ def create_run(
 		time.perf_counter() - t_run
 	)
 
-	return public_doc(doc)
+	result = public_doc(doc)
+
+	if idempotency_key is not None:
+		result['idempotency_replayed'] = False
+
+	return result
 
 
 def create_run_simple(
@@ -693,13 +782,51 @@ def create_run_simple(
 		'parameters',
 		'dataset_id',
 		'inputs',
-		'input_artifacts'
+		'input_artifacts',
+		'idempotency_key'
 	}	
 
 	if set(payload) - allowed:
 		raise PipelineError('Unsupported run field')
 
 	pipeline = get_pipeline(owner, pipeline_id)
+
+	idempotency_key = None
+	request_fingerprint = None
+
+	if 'idempotency_key' in payload:
+		from caesar_rest.pipeline import idempotency
+
+		idempotency_key = idempotency.validate_key(
+			payload['idempotency_key']
+		)
+
+		# Fingerprint the original client request, not the resolved
+		# upstream bindings or server-derived dataset attachment.
+		request_payload = {
+			key: value
+			for key, value in payload.items()
+			if key != 'idempotency_key'
+		}
+
+		request_fingerprint = idempotency.fingerprint(
+			request_payload
+		)
+
+		_, existing_runs, _ = collections()
+
+		existing = idempotency.find_existing(
+			existing_runs,
+			owner,
+			pipeline_id,
+			idempotency_key,
+			request_fingerprint
+		)
+
+		if existing is not None:
+			existing['idempotency_replayed'] = True
+			return existing
+
 
 	app = get_pipeline_app(pipeline)
 
@@ -790,7 +917,9 @@ def create_run_simple(
 		retention_root=retention_root,
 		max_directory_bytes=max_directory_bytes,
 		max_directory_entries=max_directory_entries,
-		max_directory_depth=max_directory_depth
+		max_directory_depth=max_directory_depth,
+		idempotency_key=idempotency_key,
+		request_fingerprint=request_fingerprint
 	)
 
 def list_runs(owner, pipeline_id, node_id=None):
