@@ -30,6 +30,31 @@ def new_inspection_record():
 		'attempt': 0,
 		'requested_at': datetime.now(timezone.utc)
 	}
+
+
+def inspection_version_guard(doc):
+	"""Match the inspection version read before an atomic update."""
+
+	inspection = doc.get('inspection')
+
+	if not isinstance(inspection, dict):
+		return {
+			'inspection': {'$exists': False}
+		} if 'inspection' not in doc else {
+			'inspection': inspection
+		}
+
+	guard = {}
+
+	for key in ('status', 'generation'):
+		field = 'inspection.' + key
+
+		if key in inspection:
+			guard[field] = inspection[key]
+		else:
+			guard[field] = {'$exists': False}
+
+	return guard
 	
 class DatasetError(Exception):
 	def __init__(self, message, status=400):
@@ -203,7 +228,72 @@ def get_dataset(dataset_id, user_id=None):
 		raise DatasetError('Dataset not found or not accessible', 404)
 	return doc
 
+def refresh_dataset_inspection(dataset_id):
+	"""Atomically request a fresh dataset inspection.
 
+	Only administrators may refresh inspections. The operation never
+	executes scientific processing inside the HTTP request.
+	"""
+
+	require_admin()
+	checked_id(dataset_id, 'dataset ID')
+
+	doc = get_dataset(dataset_id)
+
+	inspection = doc.get('inspection')
+
+	if isinstance(inspection, dict):
+		status = inspection.get('status', 'UNKNOWN')
+	else:
+		status = 'NOT_REQUESTED'
+
+	if status in ('PENDING', 'RUNNING'):
+		raise DatasetError(
+			'Dataset inspection is already pending or running',
+			409
+		)
+
+	if status not in (
+		'READY',
+		'FAILED',
+		'UNSUPPORTED',
+		'NOT_REQUESTED'
+	):
+		raise DatasetError(
+			'Dataset inspection has an invalid state',
+			409
+		)
+
+	new_inspection = new_inspection_record()
+
+	guard = {
+		'_id': doc['_id'],
+		'enabled': True
+	}
+
+	guard.update(inspection_version_guard(doc))
+
+	result = database().datasets.update_one(
+		guard,
+		{
+			'$set': {
+				'inspection': new_inspection
+			}
+		}
+	)
+
+	if result.matched_count != 1:
+		raise DatasetError(
+			'Dataset inspection changed concurrently; retry the request',
+			409
+		)
+
+	return {
+		'dataset_id': dataset_id,
+		'status': new_inspection['status'],
+		'requested_at': new_inspection['requested_at']
+	}
+	
 def resolve_dataset(dataset_id):
 	"""Always recheck both access and actual physical path at submission time."""
 	doc = get_dataset(dataset_id)
@@ -588,13 +678,18 @@ def update_dataset(dataset_id, payload):
 	):
 		changes['inspection'] = new_inspection_record()
 
+	guard = {
+		'_id': existing['_id'],
+		'format': existing.get('format', '')
+	}
+
+	if 'inspection' in changes:
+		guard.update(inspection_version_guard(existing))
+
 	result = db.datasets.update_one(
-		{
-			'_id': existing['_id'],
-			'format': existing.get('format', '')
-		},
+		guard,
 		{'$set': changes}
-	)
+	)	
 
 	if result.matched_count != 1:
 		raise DatasetError(

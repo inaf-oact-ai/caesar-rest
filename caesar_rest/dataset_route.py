@@ -116,6 +116,21 @@ def describe_inspection(dataset_id):
 
 	return invoke(action)
 
+
+@registry_bp.route('/datasets/<dataset_id>/inspection/refresh', methods=['POST'])
+@custom_require_login
+def refresh_inspection(dataset_id):
+	"""Request a new inspection for a registered dataset."""
+
+	def action():
+		result = registry.refresh_dataset_inspection(
+			dataset_id
+		)
+
+		return jsonify(result), 202
+
+	return invoke(action)
+
 @registry_bp.route('/datasets/<dataset_id>/targets', methods=['GET'])
 @custom_require_login
 def describe_targets(dataset_id):
