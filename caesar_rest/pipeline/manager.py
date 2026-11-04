@@ -732,11 +732,18 @@ def create_run(
 				return existing
 
 		# Do not automatically attempt another insertion.
-		raise PipelineError(
-			'Registration outcome uncertain; retry with the same '
-			'idempotency key',
-			503
-		) from exc
+		if idempotency_key is not None:
+			message = (
+				'Registration outcome uncertain; retry with the same '
+				'idempotency key'
+			)
+		else:
+			message = (
+				'Registration outcome uncertain; inspect existing runs '
+				'before attempting another registration'
+			)
+
+		raise PipelineError(message, 503) from exc
 	
 	logger.info(
 		'V2 run registration database finalization: '
