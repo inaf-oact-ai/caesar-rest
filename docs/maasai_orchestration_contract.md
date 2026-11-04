@@ -1,7 +1,7 @@
 # MAASAI ↔ CAESAR-REST Pipeline V2 orchestration contract
 
-**Status:** proposed integration contract, checked against `devel` on 2026-11-04.  
-**Base URL:** `/caesar/api/v1.0`  
+**Status:** R4C.3.3 integration contract completed and locally validated on 2026-11-04; deployment and end-to-end scientific regression are covered by R4C.4.   
+**Base URL:** `/caesar/api/v1.0`   
 **Authentication:** `Authorization: Bearer <access-token>` (Keycloak/OIDC). All pipeline and run operations are owner-scoped.
 
 ## 1. Ownership and invariants
