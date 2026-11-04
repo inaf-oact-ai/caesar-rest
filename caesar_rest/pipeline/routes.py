@@ -17,6 +17,7 @@ from caesar_rest.pipeline.artifacts import retention
 from caesar_rest.pipeline.artifacts import directory_resolver
 from caesar_rest.pipeline import readiness as pipeline_readiness
 from caesar_rest.pipeline import scientific_readiness as pipeline_scientific_readiness
+from caesar_rest.pipeline import bulk_planning
 
 pipeline_bp = Blueprint('pipelines', __name__, url_prefix='/caesar/api/v1.0')
 
@@ -380,6 +381,24 @@ def get_pipeline_scientific_readiness(pipeline_id):
 		)
 	)
 
+############################################
+###      PIPELINE BULK PLANNING
+############################################
+@pipeline_bp.route('/pipelines/<pipeline_id>/bulk-plan', methods=['POST'])
+@custom_require_login
+def plan_pipeline_bulk(pipeline_id):
+	"""Preview scientific run registrations without creating runs."""
+
+	return invoke(
+		lambda owner: jsonify(
+			bulk_planning.plan(
+				owner,
+				pipeline_id,
+				request.get_json(silent=True)
+			)
+		)
+	)
+	
 ############################################
 ###      PIPELINE ARTIFACT LISTING
 ############################################

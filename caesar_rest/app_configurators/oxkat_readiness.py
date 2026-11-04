@@ -324,3 +324,178 @@ def resolve_snapshot(pipeline, runs, dataset_doc):
 		'targets': items
 	}
 
+
+
+def build_bulk_plan(scientific, stage, targets=None):
+	"""Convert OXKAT readiness into per-target registration proposals.
+
+	Proposals use explicit upstream run references so that changing
+	preferred selections later cannot silently change their meaning.
+	"""
+
+	if stage not in ('FLAG', '2GC'):
+		raise manager.PipelineError(
+			'OXKAT bulk planning supports FLAG and 2GC only',
+			400
+		)
+
+	if not isinstance(scientific, dict):
+		raise manager.PipelineError(
+			'Invalid OXKAT scientific readiness', 500
+		)
+
+	if scientific.get('status') != 'READY':
+		return {
+			'status': 'BLOCKED',
+			'items': [],
+			'blocking_reasons': [
+				scientific.get('status', 'SCIENTIFIC_READINESS_UNAVAILABLE')
+			]
+		}
+
+	discovered = scientific.get('targets')
+
+	if not isinstance(discovered, list):
+		raise manager.PipelineError(
+			'Invalid OXKAT target metadata', 500
+		)
+
+	by_name = {}
+
+	for item in discovered:
+		if (
+			not isinstance(item, dict)
+			or not isinstance(item.get('name'), str)
+			or type(item.get('field_id')) is not int
+		):
+			raise manager.PipelineError(
+				'Invalid OXKAT target identity', 500
+			)
+
+		name = item['name']
+
+		if name in by_name:
+			raise manager.PipelineError(
+				'Duplicate OXKAT target name', 409
+			)
+
+		by_name[name] = item
+
+	if targets is None:
+		selected = list(by_name)
+	else:
+		unknown = [
+			target for target in targets
+			if target not in by_name
+		]
+
+		if unknown:
+			raise manager.PipelineError(
+				'Unknown science target(s): %s' %
+				', '.join(unknown),
+				400
+			)
+
+		selected = targets
+
+	items = []
+
+	for name in selected:
+		target = by_name[name]
+		field_id = target['field_id']
+
+		next_steps = target.get('next_steps')
+
+		if not isinstance(next_steps, dict):
+			raise manager.PipelineError(
+				'Invalid target readiness metadata', 500
+			)
+
+		readiness = next_steps.get(stage)
+
+		if not isinstance(readiness, dict):
+			raise manager.PipelineError(
+				'Missing stage readiness metadata', 500
+			)
+
+		item = {
+			'field_id': field_id,
+			'target': name,
+			'can_register': False,
+			'blocking_reasons': [],
+			'registration': None
+		}
+
+		if readiness.get('can_plan') is not True:
+			item['blocking_reasons'] = (
+				readiness.get('blocking_reasons')
+				or ['UPSTREAM_INPUTS_NOT_READY']
+			)
+
+			items.append(item)
+			continue
+
+		input_refs = readiness.get('inputs')
+
+		if not isinstance(input_refs, dict) or not input_refs:
+			raise manager.PipelineError(
+				'Invalid target input references', 500
+			)
+
+		inputs = {}
+
+		for input_name, reference in input_refs.items():
+			if not isinstance(reference, dict):
+				raise manager.PipelineError(
+					'Invalid upstream artifact reference', 500
+				)
+
+			run_id = reference.get('run_id')
+			artifact = reference.get('artifact')
+			index = reference.get('artifact_index')
+
+			if (
+				not isinstance(run_id, str)
+				or not run_id
+				or not isinstance(artifact, str)
+				or not artifact
+				or type(index) is not int
+				or index < 0
+			):
+				raise manager.PipelineError(
+					'Invalid frozen artifact identity', 500
+				)
+
+			# Exact input shape accepted by create_run_simple().
+			inputs[input_name] = {
+				'run_id': run_id,
+				'artifact': artifact,
+				'artifact_index': index
+			}
+
+		# Stable per-target experiment group.
+		node_id = (
+			manager.default_node_id(stage)
+			+ '_f'
+			+ str(field_id)
+		)
+
+		manager.validate_identifier(node_id, 'node_id')
+
+		item['can_register'] = True
+		item['registration'] = {
+			'stage': stage,
+			'node_id': node_id,
+			'parameters': {
+				'target': name
+			},
+			'inputs': inputs
+		}
+
+		items.append(item)
+
+	return {
+		'status': 'READY',
+		'items': items
+	}
+

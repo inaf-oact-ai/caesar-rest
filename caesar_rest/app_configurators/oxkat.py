@@ -450,6 +450,16 @@ class OxkatAppConfigurator(AppConfigurator):
 			dataset_doc
 		)
 
+	def build_bulk_plan(self, scientific, stage, targets=None):
+		"""Translate scientific readiness into OXKAT run proposals."""
+
+		from caesar_rest.app_configurators import oxkat_readiness
+
+		return oxkat_readiness.build_bulk_plan(
+			scientific,
+			stage,
+			targets
+		)
 
 	def validate_pipeline_bindings(self, parameters, bindings):
 		"""Validate target-specific OXKAT V2 artifact bindings.
