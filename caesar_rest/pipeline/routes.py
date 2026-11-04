@@ -15,6 +15,7 @@ from caesar_rest.pipeline.artifacts import access as artifact_access
 from caesar_rest.pipeline.artifacts import resolver as artifact_resolver
 from caesar_rest.pipeline.artifacts import retention
 from caesar_rest.pipeline.artifacts import directory_resolver
+from caesar_rest.pipeline import readiness as pipeline_readiness
 
 pipeline_bp = Blueprint('pipelines', __name__, url_prefix='/caesar/api/v1.0')
 
@@ -347,6 +348,20 @@ def get_pipeline_tree(pipeline_id):
 		)
 	)
 	
+############################################
+###      PIPELINE READINESS
+############################################	
+@pipeline_bp.route('/pipelines/<pipeline_id>/readiness', methods=['GET'])
+@custom_require_login
+def get_pipeline_readiness(pipeline_id):
+	"""Return generic pipeline readiness from persisted metadata."""
+
+	return invoke(
+		lambda owner: jsonify(
+			pipeline_readiness.resolve(owner, pipeline_id)
+		)
+	)	
+
 ############################################
 ###      PIPELINE ARTIFACT LISTING
 ############################################
