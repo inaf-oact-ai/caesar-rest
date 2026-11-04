@@ -16,6 +16,7 @@ from caesar_rest.pipeline.artifacts import resolver as artifact_resolver
 from caesar_rest.pipeline.artifacts import retention
 from caesar_rest.pipeline.artifacts import directory_resolver
 from caesar_rest.pipeline import readiness as pipeline_readiness
+from caesar_rest.pipeline import scientific_readiness as pipeline_scientific_readiness
 
 pipeline_bp = Blueprint('pipelines', __name__, url_prefix='/caesar/api/v1.0')
 
@@ -361,6 +362,23 @@ def get_pipeline_readiness(pipeline_id):
 			pipeline_readiness.resolve(owner, pipeline_id)
 		)
 	)	
+
+############################################
+###      PIPELINE SCIENTIFIC READINESS
+############################################
+@pipeline_bp.route('/pipelines/<pipeline_id>/scientific-readiness', methods=['GET'])
+@custom_require_login
+def get_pipeline_scientific_readiness(pipeline_id):
+	"""Return application-specific scientific readiness."""
+
+	return invoke(
+		lambda owner: jsonify(
+			pipeline_scientific_readiness.resolve(
+				owner,
+				pipeline_id
+			)
+		)
+	)
 
 ############################################
 ###      PIPELINE ARTIFACT LISTING
