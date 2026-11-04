@@ -148,13 +148,53 @@ def run_submission_info(run):
 	}
 
 def ensure_indexes():
-	"""Call at deployment initialization, not during each request."""
-	pipelines, runs, counters = collections()
-	pipelines.create_index([('pipeline_id', 1)], unique=True)
-	runs.create_index([('run_id', 1)], unique=True)
-	runs.create_index([('pipeline_id', 1), ('node_id', 1), ('sequence', 1)], unique=True)
-	counters.create_index([('pipeline_id', 1), ('node_id', 1)], unique=True)
+	"""Create the required Pipeline V2 database indexes."""
 
+	pipelines, runs, counters = collections()
+
+	pipelines.create_index(
+		[('pipeline_id', 1)],
+		unique=True
+	)
+
+	runs.create_index(
+		[('run_id', 1)],
+		unique=True
+	)
+
+	runs.create_index(
+		[
+			('pipeline_id', 1),
+			('node_id', 1),
+			('sequence', 1)
+		],
+		unique=True
+	)
+
+	counters.create_index(
+		[
+			('pipeline_id', 1),
+			('node_id', 1)
+		],
+		unique=True
+	)
+
+	# Only idempotent registrations carry this field.
+	# Legacy runs and ordinary single-run registrations remain unaffected.
+	runs.create_index(
+		[
+			('owner', 1),
+			('pipeline_id', 1),
+			('idempotency_key', 1)
+		],
+		unique=True,
+		name='pipeline_run_idempotency_v1',
+		partialFilterExpression={
+			'idempotency_key': {
+				'$type': 'string'
+			}
+		}
+	)
 
 def validate_identifier(value, field):
 	if not isinstance(value, str) or IDENTIFIER_RE.fullmatch(value) is None:
