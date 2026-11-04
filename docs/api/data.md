@@ -1,6 +1,8 @@
 # Data and datasets REST API
 
-CAESAR-REST provides endpoints for uploading, listing, downloading and deleting user files, as well as discovering and managing scientific datasets.
+CAESAR-REST provides endpoints for uploading, listing, downloading and deleting user files; registering and managing scientific datasets; and asynchronously inspecting registered datasets to discover scientific metadata and processing targets.
+
+Dataset inspection is independent of scientific pipeline execution. Inspection metadata can be consumed by application-specific scientific readiness providers and target-aware pipeline planning without requiring the orchestrating client to access the underlying dataset filesystem.
 
 All endpoints use the base path `/caesar/api/v1.0`. When authentication is enabled, protected requests require a valid OAuth 2.0 bearer access token.
 
@@ -264,9 +266,18 @@ A successful registration returns HTTP `201`:
 
 ```json
 {
-  "dataset_id": "survey-images"
+  "dataset_id": "survey-images",
+  "inspection": {
+    "status": "PENDING"
+  }
 }
 ```
+
+A newly registered dataset receives an independent inspection record with status `PENDING`.
+
+Registration does not perform scientific inspection synchronously. The inspection is processed by the separately configured dataset-inspection worker.
+
+The availability of scientific inspection results depends on the detected dataset format and the inspectors supported by the deployment.
 
 Registration may be rejected because of insufficient privileges, an invalid or inaccessible path, invalid metadata, unknown teams or a duplicate dataset ID.
 
@@ -282,8 +293,17 @@ The managed registry provides additional operations.
 | `GET` | `/datasets/{dataset_id}` | Retrieve accessible dataset metadata |
 | `PATCH` | `/datasets/{dataset_id}` | Update dataset metadata |
 | `DELETE` | `/datasets/{dataset_id}` | Disable a registered dataset |
+| `GET` | `/datasets/{dataset_id}/inspection` | Retrieve persisted scientific inspection status and metadata |
+| `POST` | `/datasets/{dataset_id}/inspection/refresh` | Request a new asynchronous inspection; dataset-administrator access required |
+| `GET` | `/datasets/{dataset_id}/targets` | Retrieve scientific targets and calibrators discovered from supported inspection metadata |
 
 All endpoint paths in this table are relative to `/caesar/api/v1.0`.
+
+The inspection and target-discovery endpoints require access to the registered dataset.
+
+Reading inspection results and discovered targets does not trigger scientific processing or access the underlying dataset files. These endpoints return information already persisted by the inspection subsystem.
+
+Inspection refresh is an administrative operation and does not perform the inspection synchronously.
 
 For example:
 
@@ -345,10 +365,292 @@ This distinction is particularly important for multi-user deployments and scient
 
 See [Job submission](jobs.md), [Scientific Pipeline V2](scientific-pipelines.md) for the relevant job and pipeline submission contracts.
 
+### Dataset association in Pipeline V2
+
+For dataset-bound Pipeline V2 workflows, the managed dataset is specified when creating the pipeline:
+
+```http
+POST /caesar/api/v1.0/pipelines
+```
+
+Example request:
+
+```json
+{
+  "app": "oxkat",
+  "dataset_id": "oxkat-test-dataset-v5",
+  "name": "MeerKAT calibration experiments"
+}
+```
+
+The pipeline stores the authorized dataset association.
+
+Subsequent run registrations within that dataset-bound pipeline must not repeat `dataset_id`.
+
+The application-specific stage policy determines whether a run consumes the original dataset or retained upstream pipeline artifacts.
+
+For OXKAT, GET_INFO and 1GC consume the registered Measurement Set according to their stage input policies, while FLAG and 2GC consume target-specific retained artifacts.
+
+Dataset inspection, target discovery and bulk planning use this pipeline-level dataset association.
+
+For details, see [Scientific Pipeline V2](scientific-pipelines.md).
+
+## 11. Scientific dataset inspection
+
+CAESAR-REST supports asynchronous scientific inspection of registered datasets.
+
+Dataset inspection identifies supported scientific data formats and extracts metadata that can be used by downstream scientific applications and Pipeline V2 readiness providers.
+
+Inspection is separate from dataset registration, pipeline run execution and Slurm job submission.
+
+The inspection subsystem consists of:
+
+- A persisted MongoDB inspection record associated with each managed dataset.
+- An independent dataset-inspection worker.
+- A trusted format-detection and inspector-selection mechanism.
+- Container-based scientific inspectors.
+- REST endpoints for inspection status, metadata retrieval, refresh and target discovery.
+
+### 11.1 Inspection lifecycle
+
+Newly registered datasets receive an inspection request with initial status `PENDING`.
+
+The inspection worker claims eligible requests and processes them asynchronously.
+
+The inspection lifecycle includes:
+
+| Status | Description |
+| --- | --- |
+| `NOT_REQUESTED` | No inspection record exists, primarily for older datasets |
+| `PENDING` | Inspection is awaiting processing or a scheduled retry |
+| `RUNNING` | An inspection worker has claimed the request |
+| `READY` | Inspection completed and scientific metadata is available |
+| `FAILED` | Inspection failed and no further automatic retry is scheduled |
+| `UNSUPPORTED` | No compatible inspector is available or the detected format is unsupported |
+
+A declared format that conflicts with positively detected data is also treated as a format-selection failure.
+
+Inspection status is independent of dataset availability and scientific pipeline execution state.
+
+A dataset can exist and be accessible while its inspection is still pending or unsuccessful.
+
+The worker uses atomic MongoDB claims, generation identifiers and leases to protect against concurrent processing and stale updates.
+
+Transient infrastructure failures can be retried with bounded backoff. Expired worker claims can be recovered without reclaiming active, unexpired leases.
+
+### 11.2 Retrieve inspection status and metadata
+
+**Endpoint:**
+
+```http
+GET /caesar/api/v1.0/datasets/{dataset_id}/inspection
+```
+
+The request requires authentication and access to the managed dataset.
+
+Example:
+
+```bash
+curl --fail-with-body \
+    -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+    "https://server.example.org:8444/caesar/api/v1.0/datasets/oxkat-test-dataset-v5/inspection"
+```
+
+The response contains persisted inspection information.
+
+Common fields include:
+
+| Field | Description |
+| --- | --- |
+| `dataset_id` | Inspected dataset |
+| `status` | Current inspection lifecycle status |
+| `attempt` | Number of worker processing attempts |
+| `requested_at` | Inspection request timestamp |
+| `started_at` | Worker processing start timestamp |
+| `finished_at` | Completion timestamp, when available |
+| `last_checked_at` | Last recorded source-freshness check |
+| `detected_format` | Detected scientific data format |
+| `declared_format` | Normalized declared format |
+| `detection_evidence` | Evidence used for format detection |
+| `inspector` | Selected scientific inspector |
+| `schema` | Inspection metadata schema identifier |
+
+When status is `READY`, the response additionally includes:
+
+- `metadata`: scientific metadata extracted by the inspector.
+- `source_fingerprint`: source identity information used by the inspection lifecycle.
+
+When status is `FAILED`, the detailed error is included only for dataset administrators.
+
+Internal worker claim tokens, leases and registered filesystem paths are not exposed.
+
+Retrieving inspection status is read-only and does not execute the scientific inspector.
+
+### 11.3 Request inspection refresh
+
+**Endpoint:**
+
+```http
+POST /caesar/api/v1.0/datasets/{dataset_id}/inspection/refresh
+```
+
+Only dataset administrators may request an inspection refresh.
+
+An inspection refresh creates a new inspection generation and resets the dataset inspection state to `PENDING`.
+
+Example:
+
+```bash
+curl --fail-with-body -X POST \
+    -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+    "https://server.example.org:8444/caesar/api/v1.0/datasets/oxkat-test-dataset-v5/inspection/refresh"
+```
+
+A successful request returns HTTP `202`.
+
+Example response:
+
+```json
+{
+  "dataset_id": "oxkat-test-dataset-v5",
+  "status": "PENDING",
+  "requested_at": "2026-11-04T10:00:00+00:00"
+}
+```
+
+The timestamp is illustrative.
+
+Refresh is accepted when the previous inspection is `READY`, `FAILED`, `UNSUPPORTED` or `NOT_REQUESTED`.
+
+A refresh request is rejected with HTTP `409` when inspection is already `PENDING` or `RUNNING`, or when a concurrent inspection-state change prevents the requested update.
+
+The endpoint does not execute inspection synchronously.
+
+Changing the registered dataset's declared `format` also creates a new pending inspection generation.
+
+### 11.4 Scientific format detection and inspectors
+
+The inspection subsystem selects inspectors using server-controlled configuration and detected scientific data format.
+
+A declared dataset format is not by itself sufficient to establish the actual scientific format.
+
+The current default inspector registry includes a local container-backed inspector for CASA Measurement Set V2 datasets.
+
+Its metadata schema is:
+
+```text
+caesar.dataset-inspection.msv2.v1
+```
+
+The configured inspector performs scientific metadata extraction using an isolated execution environment.
+
+Additional formats require corresponding trusted inspector implementations and deployment configuration.
+
+Unsupported formats are not silently interpreted as valid Measurement Sets.
+
+A mismatch between positively detected content and the declared dataset format is rejected rather than ignored.
+
+### 11.5 Discover scientific targets
+
+**Endpoint:**
+
+```http
+GET /caesar/api/v1.0/datasets/{dataset_id}/targets
+```
+
+The endpoint returns scientific field discovery information derived from persisted inspection metadata.
+
+It requires authentication and access to the dataset.
+
+Example:
+
+```bash
+curl --fail-with-body \
+    -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+    "https://server.example.org:8444/caesar/api/v1.0/datasets/oxkat-test-dataset-v5/targets"
+```
+
+For a dataset whose inspection is not `READY`, the response reports the dataset ID and current inspection status.
+
+For a completed supported Measurement Set inspection, the response includes:
+
+| Field | Description |
+| --- | --- |
+| `dataset_id` | Dataset identifier |
+| `status` | Inspection status |
+| `detected_format` | Detected scientific format |
+| `inspection_schema` | Inspection metadata schema |
+| `field_observations_available` | Whether field observation metadata is available |
+| `fields_truncated` | Whether field reporting was truncated |
+| `main_rows_scanned` | Number of main-table rows inspected |
+| `rows_with_unreported_field` | Rows referencing fields not included in the reported inventory |
+| `counts` | Counts of science targets, calibrators and unclassified fields |
+| `science_targets` | Discovered science target records |
+| `calibrators` | Discovered calibrator records |
+| `unclassified_fields` | Fields not classified as science targets or calibrators |
+
+Each returned field record includes:
+
+- `field_id`
+- `name`
+- `classification`
+- `observation_intents`
+- `scan_count`
+- `scan_count_truncated`
+- `visibility_row_count`
+
+Field records are ordered by numeric `field_id` within their respective categories.
+
+For supported Measurement Set inspections, the `classification` field distinguishes science targets, calibrators and unclassified fields.
+
+The endpoint validates the persisted inspection metadata before returning the target inventory.
+
+If a `READY` inspection has an unsupported schema, unavailable field observations or invalid stored metadata, the request fails rather than returning an invented target list.
+
+Target discovery does not reopen the Measurement Set or run the inspector.
+
+### 11.6 Dataset inspection and Pipeline V2
+
+Dataset inspection supports application-specific scientific readiness and target-aware pipeline planning.
+
+For OXKAT, inspection identifies the science fields associated with an original MeerKAT Measurement Set.
+
+An orchestration client can:
+
+1. Retrieve the registered dataset metadata.
+2. Check the dataset inspection status.
+3. Retrieve the scientific target inventory when inspection is `READY`.
+4. Create or inspect a dataset-bound OXKAT pipeline.
+5. Query pipeline scientific readiness.
+6. Plan eligible target-specific FLAG or 2GC registrations.
+7. Register and execute those runs independently.
+
+The relevant Pipeline V2 endpoints are:
+
+```http
+GET /caesar/api/v1.0/pipelines/{pipeline_id}/scientific-readiness
+POST /caesar/api/v1.0/pipelines/{pipeline_id}/bulk-plan
+POST /caesar/api/v1.0/pipelines/{pipeline_id}/bulk-register
+```
+
+A completed dataset inspection does not imply that scientific processing stages are ready.
+
+For example, OXKAT FLAG readiness also requires suitable selected and retained 1GC artifacts.
+
+Likewise, 2GC requires eligible upstream FLAG products.
+
+For target-aware OXKAT planning, incomplete field-observation metadata can prevent reliable scientific readiness even when the inspection status is `READY`.
+
+Inspection metadata is used for discovery and scientific planning; actual pipeline run registration performs authoritative input validation and immutable artifact binding.
+
+See [Scientific Pipeline V2](scientific-pipelines.md) and the [MAASAI orchestration contract](../maasai_orchestration_contract.md).
+
 ## References
 
 - [REST API overview](overview.md)
 - [Job submission and monitoring](jobs.md)
 - [Scientific Pipeline V2](scientific-pipelines.md)
 - [Keycloak and OpenID Connect authentication](../deployment/authentication.md)
+- [Application discovery and self-description](applications.md)
+- [MAASAI Pipeline V2 orchestration contract](../maasai_orchestration_contract.md)
 - [Archived original README](../archive/ORIGINAL_README.md)
