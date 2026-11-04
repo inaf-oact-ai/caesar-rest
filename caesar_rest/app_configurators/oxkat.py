@@ -1,19 +1,32 @@
+
 """CAESAR-REST configurator for the OXKAT Measurement Set pipeline.
 
-Supported stages:
-- GET_INFO: inspect a Measurement Set and generate observation metadata.
-- 1GC: prepare the first-generation calibration recipe using a Measurement
-  Set and the project_info.json artifact from a completed GET_INFO run.
+Implemented Pipeline V2 stages:
+- GET_INFO: inspect a registered MeerKAT Measurement Set and produce
+  observation, field and calibrator metadata.
+- 1GC: perform first-generation calibration and produce derived,
+  target-specific Measurement Sets and calibration diagnostics.
+- FLAG: process one calibrated science target per run, performing
+  flagging, initial imaging and mask generation.
+- 2GC: process one flagged science target per run, performing
+  second-generation calibration and associated imaging.
 
-The 1GC stage currently generates the calibration execution script but does
-not execute the scientific calibration steps.
+3GC_PEEL and 3GC_FACET are reserved but not implemented.
 
-For V2 pipeline submissions, inputs are resolved from registered datasets
-and retained upstream artifacts. The Measurement Set is staged as a
-read-only reference. Actual calibration will require a private writable
-copy of the Measurement Set.
+Pipeline V2 uses a dataset-bound pipeline and immutable upstream
+artifact bindings. GET_INFO and 1GC consume the registered original
+Measurement Set according to stage policy; FLAG and 2GC consume
+retained target-specific upstream artifacts.
 
-Later calibration and imaging stages remain unsupported.
+Scientific target discovery, readiness and bulk planning are
+provided through the Pipeline V2 APIs. Bulk registration creates
+independent runs but does not submit or execute them.
+
+MAASAI or another external client controls experiment selection,
+run submission, scientific evaluation and pipeline progression.
+
+Original datasets and retained upstream artifacts are not modified.
+Stages requiring writable Measurement Sets operate on private copies.
 """
 
 import os
@@ -64,63 +77,104 @@ class OxkatAppConfigurator(AppConfigurator):
 		
 		self.description = (
 			"Process MeerKAT radio-interferometric Measurement Sets "
-			"using OXKAT. GET_INFO extracts observation metadata; "
-			"1GC performs reference calibration and produces calibrated "
-			"target Measurement Sets; FLAG performs target flagging, "
-			"initial imaging and mask generation using retained "
-			"1GC outputs. Subsequent calibration and imaging stages "
-			"will be enabled incrementally."
-		)		
+			"using the OXKAT scientific pipeline. "
+			"GET_INFO extracts observation, field and calibrator metadata; "
+			"1GC performs first-generation calibration and produces "
+			"calibrated target Measurement Sets and diagnostics; "
+			"FLAG performs target-specific flagging, initial imaging "
+			"and mask generation; 2GC performs second-generation "
+			"calibration and associated imaging using retained FLAG "
+			"outputs. The application supports dataset-bound Pipeline "
+			"V2 workflows, scientific target readiness and per-target "
+			"bulk planning and registration. Each target run is "
+			"submitted and evaluated independently. Scientific "
+			"experiment selection and pipeline progression remain "
+			"the responsibility of an external orchestration client."
+		)
+		
+		
 		
 		self.tool_categories = ["measurement-set"]
 		
 		self.input_requirements = {
 			"supported_formats": ["ms"],
 			"expected_data": (
-				"GET_INFO requires one registered MeerKAT Measurement "
-				"Set directory (*.ms). "
-				"1GC requires the original registered Measurement Set "
-				"and retained project_info.json from GET_INFO. "
-				"FLAG requires a calibrated target Measurement Set "
-				"produced and retained by 1GC, together with "
-				"project_info.json describing the target. "
-				"FLAG currently supports one target MS per run."
+				"OXKAT processes registered MeerKAT Measurement Set "
+				"datasets through CAESAR-REST Pipeline V2. "
+				"GET_INFO requires the original Measurement Set. "
+				"1GC requires the original Measurement Set and "
+				"retained GET_INFO project_info metadata. "
+				"FLAG requires a retained calibrated target "
+				"Measurement Set from 1GC and project_info metadata. "
+				"2GC requires a retained flagged target Measurement "
+				"Set from FLAG and compatible project_info metadata. "
+				"FLAG and 2GC process one science target per run."
 			),
 			"notes": [
+				"Create a Pipeline V2 instance with app='oxkat' "
+				"and the accessible dataset_id in the pipeline "
+				"creation payload.",
+				"Do not repeat dataset_id in run registrations "
+				"for a dataset-bound pipeline.",
 				"Measurement Sets are registered server-side; "
 				"large scientific datasets are not uploaded.",
-				"GET_INFO references the original dataset using "
-				"dataset_id and does not modify it.",
-				"1GC uses the registered original Measurement Set "
-				"and the retained GET_INFO project_info artifact.",
-				"1GC performs calibration in a private workspace "
-				"and publishes derived Measurement Sets.",
-				"FLAG uses two retained upstream artifact bindings: "
-				"target_ms and project_info.",
-				"FLAG requires a private writable copy of the "
-				"calibrated target MS; retained upstream data "
-				"must remain unchanged.",
-				"FLAG does not require dataset_id because its "
-				"Measurement Set is an upstream pipeline artifact.",
-				"V2 inputs are resolved from authorized dataset IDs "
-				"and frozen artifact bindings; clients do not "
-				"supply filesystem paths.",
-			],
+				"GET_INFO reads the original registered Measurement "
+				"Set without modifying it.",
+				"1GC consumes the original Measurement Set and "
+				"retained project_info from GET_INFO.",
+				"1GC produces derived target Measurement Sets "
+				"and calibration diagnostics in a private workspace.",
+				"FLAG consumes retained target_ms from 1GC and "
+				"compatible project_info metadata.",
+				"2GC consumes retained target_ms from FLAG and "
+				"compatible project_info metadata.",
+				"FLAG and 2GC support the target parameter to "
+				"identify the science target being processed.",
+				"FLAG and 2GC require private writable copies "
+				"of their input target Measurement Sets.",
+				"Scientific target readiness and bulk planning "
+				"are available through Pipeline V2 endpoints.",
+				"Bulk planning proposes eligible target runs; "
+				"bulk registration creates runs without submitting "
+				"them for execution.",
+				"Individual run registration supports alternative "
+				"scientific configurations through oxkat_config.",
+				"Clients must use server-resolved dataset identities "
+				"and upstream artifact references, not filesystem "
+				"paths or arbitrary artifact indices.",
+				"Upstream runs must have suitable completed and "
+				"retained outputs before downstream binding."
+			]
 		}
-		
+
 		
 		self.limitations = [
-			"GET_INFO, 1GC and FLAG are supported through V2 pipelines.",
-			"1GC requires a registered original Measurement Set and "
-			"the retained project_info artifact from GET_INFO.",
-			"FLAG requires a retained calibrated target Measurement Set "
-			"from 1GC and validated project_info metadata.",
-			"FLAG initially supports one target Measurement Set per run.",
-			"Derived Measurement Sets are processed in private writable "
-			"workspaces; original datasets and retained upstream artifacts "
-			"must not be modified.",
-			"2GC, 3GC_PEEL and 3GC_FACET are not yet supported."
+			"GET_INFO, 1GC, FLAG and 2GC are supported through "
+			"Pipeline V2; 3GC_PEEL and 3GC_FACET are not implemented.",
+			"1GC requires the original registered Measurement Set "
+			"and retained project_info from GET_INFO.",
+			"FLAG requires a retained calibrated target Measurement "
+			"Set from 1GC and compatible project_info metadata.",
+			"2GC requires a retained flagged target Measurement Set "
+			"from FLAG and compatible project_info metadata.",
+			"FLAG and 2GC process one science target per run.",
+			"Derived Measurement Sets are processed using private "
+			"writable copies; original datasets and retained "
+			"upstream artifacts must remain unchanged.",
+			"Scientific target discovery and planning depend on "
+			"available dataset inspection metadata and selected "
+			"upstream results.",
+			"Bulk registration creates independent pipeline runs "
+			"but does not submit or execute them.",
+			"No automatic scientific quality assessment, "
+			"experiment optimization or downstream stage "
+			"advancement is performed by CAESAR-REST.",
+			"Run completion alone does not guarantee that "
+			"outputs are retained and consumable.",
+			"Registered directory artifacts cannot be downloaded "
+			"through the regular-file artifact endpoint."
 		]
+
 
 		
 		# - Set valid options
@@ -130,13 +184,17 @@ class OxkatAppConfigurator(AppConfigurator):
 				value="",
 				value_type=str,
 				description=(
-					"OXKAT processing stage. GET_INFO extracts observation "
-					"metadata; 1GC executes reference calibration and "
-					"produces calibrated target Measurement Sets; "
-					"FLAG performs target flagging, initial imaging "
-					"and cleaning-mask generation using retained "
-					"1GC products. 2GC and 3GC stages are reserved "
-					"for future implementation."
+					"OXKAT scientific processing stage. "
+					"GET_INFO extracts observation metadata; "
+					"1GC performs first-generation calibration "
+					"and produces calibrated target Measurement Sets; "
+					"FLAG performs target-specific flagging, initial "
+					"imaging and mask generation using retained "
+					"1GC products; 2GC performs second-generation "
+					"calibration and imaging using retained FLAG "
+					"products. 3GC_PEEL and 3GC_FACET are reserved "
+					"but not implemented. FLAG and 2GC support "
+					"one explicitly selected science target per run."
 				),
 				category="RUN",
 				default_value="GET_INFO",
@@ -180,8 +238,8 @@ class OxkatAppConfigurator(AppConfigurator):
 				"type": "text/x-shellscript",
 				"role": "diagnostic",
 				"description": (
-					"Generated first-generation calibration script. "
-					"Produced during 1GC preparation but not executed."
+					"Generated first-generation calibration execution "
+					"script used by the OXKAT 1GC workflow."
 				),
 				"format": "",
 				"parser": "",
