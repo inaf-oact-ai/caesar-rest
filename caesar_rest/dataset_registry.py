@@ -307,6 +307,156 @@ def public_inspection(doc, include_error=False):
 
 	return result
 
+def public_dataset_targets(doc):
+	"""Return scientific field discovery from persisted MSv2 metadata.
+
+	The caller must authorize the dataset through get_dataset().
+	No filesystem or scientific inspector access occurs here.
+	"""
+
+	inspection = doc.get('inspection')
+
+	if not isinstance(inspection, dict):
+		return {
+			'dataset_id': doc['dataset_id'],
+			'status': 'NOT_REQUESTED'
+		}
+
+	status = inspection.get('status', 'UNKNOWN')
+
+	result = {
+		'dataset_id': doc['dataset_id'],
+		'status': status
+	}
+
+	if status != 'READY':
+		return result
+
+	schema = 'caesar.dataset-inspection.msv2.v1'
+
+	if inspection.get('schema') != schema:
+		raise DatasetError(
+			'Target discovery is not supported for this inspection schema',
+			409
+		)
+
+	metadata = inspection.get('metadata')
+
+	if not isinstance(metadata, dict):
+		raise DatasetError(
+			'Stored inspection metadata is unavailable',
+			409
+		)
+
+	observations = metadata.get('field_observations')
+
+	if not isinstance(observations, dict):
+		raise DatasetError(
+			'Stored field observations are unavailable',
+			409
+		)
+
+	if observations.get('available') is not True:
+		raise DatasetError(
+			'Field observations are not available',
+			409
+		)
+
+	fields = observations.get('fields')
+
+	if not isinstance(fields, list):
+		raise DatasetError(
+			'Stored field observations are invalid',
+			409
+		)
+
+	science_targets = []
+	calibrators = []
+	unclassified_fields = []
+	seen_ids = set()
+
+	for field in fields:
+		if not isinstance(field, dict):
+			raise DatasetError(
+				'Invalid field entry in inspection metadata',
+				409
+			)
+
+		field_id = field.get('field_id')
+		field_name = field.get('field_name')
+		classification = field.get('classification')
+
+		if (
+			type(field_id) is not int
+			or field_id < 0
+			or field_id in seen_ids
+			or not isinstance(field_name, str)
+			or not field_name
+		):
+			raise DatasetError(
+				'Invalid field identity in inspection metadata',
+				409
+			)
+
+		seen_ids.add(field_id)
+
+		item = {
+			'field_id': field_id,
+			'name': field_name,
+			'classification': classification,
+			'observation_intents': field.get(
+				'observation_intents', []
+			),
+			'scan_count': field.get('scan_count'),
+			'scan_count_truncated': field.get(
+				'scan_count_truncated', False
+			),
+			'visibility_row_count': field.get(
+				'visibility_row_count'
+			)
+		}
+
+		if classification == 'science_target':
+			science_targets.append(item)
+
+		elif classification == 'calibrator':
+			calibrators.append(item)
+
+		else:
+			unclassified_fields.append(item)
+
+	for collection in (
+		science_targets,
+		calibrators,
+		unclassified_fields
+	):
+		collection.sort(key=lambda item: item['field_id'])
+
+	result.update({
+		'detected_format': inspection.get('detected_format'),
+		'inspection_schema': schema,
+		'field_observations_available': True,
+		'fields_truncated': observations.get(
+			'fields_truncated', False
+		),
+		'main_rows_scanned': observations.get(
+			'main_rows_scanned'
+		),
+		'rows_with_unreported_field': observations.get(
+			'rows_with_unreported_field'
+		),
+		'counts': {
+			'science_targets': len(science_targets),
+			'calibrators': len(calibrators),
+			'unclassified_fields': len(unclassified_fields)
+		},
+		'science_targets': science_targets,
+		'calibrators': calibrators,
+		'unclassified_fields': unclassified_fields
+	})
+
+	return result
+
 def list_datasets():
 	user_id = identity()
 	return {d['dataset_id']: public_metadata(d) for d in database().datasets.find({'enabled': True}) if access_allowed(d, user_id)}
