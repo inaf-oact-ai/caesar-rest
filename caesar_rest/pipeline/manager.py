@@ -258,7 +258,9 @@ def create_pipeline(owner, payload):
 	if not isinstance(payload, dict):
 		raise PipelineError('Expected a JSON object')
 
-	if set(payload) - {'app', 'name', 'description', 'metadata'}:
+	if set(payload) - {
+		'app', 'name', 'description', 'metadata', 'dataset_id'
+	}:
 		raise PipelineError('Unsupported pipeline field')
 
 	app = validate_identifier(payload.get('app'), 'app')
@@ -291,12 +293,29 @@ def create_pipeline(owner, payload):
 			'Specify the application using the top-level app field'
 		)
 
+	dataset_id = payload.get('dataset_id')
+
+	if 'dataset_id' in payload:
+		from caesar_rest import dataset_registry
+
+		if not isinstance(dataset_id, str):
+			raise PipelineError(
+				'dataset_id must be a string',
+				400
+			)
+
+		try:
+			dataset_registry.get_dataset(dataset_id)
+		except dataset_registry.DatasetError as exc:
+			raise PipelineError(str(exc), exc.status)
+
 	pipelines, _, _ = collections()
 
 	doc = {
 		'pipeline_id': uuid.uuid4().hex,
 		'owner': owner,
 		'app': app,
+		'dataset_id': dataset_id,
 		'name': name,
 		'description': description,
 		'metadata': metadata,
@@ -380,7 +399,8 @@ def create_run(
 	t_run = time.perf_counter()
 	
 	validate_identifier(node_id, 'node_id')
-	get_pipeline(owner, pipeline_id)
+	pipeline = get_pipeline(owner, pipeline_id)
+	pipeline_dataset_id = pipeline.get('dataset_id')
 	if not isinstance(payload, dict):
 		raise PipelineError('Expected a JSON object')
 	
@@ -405,18 +425,98 @@ def create_run(
 		if not isinstance(stage, str) or not stage:
 			raise PipelineError('Invalid parameters.stage')
 	
+	
 	dataset_id = payload.get('dataset_id')
+
+	if pipeline_dataset_id is not None:
+		if 'dataset_id' in payload:
+			raise PipelineError(
+				'Do not specify dataset_id for a dataset-bound pipeline',
+				400
+			)
+
+		if application != pipeline.get('app'):
+			raise PipelineError(
+				'Run application differs from pipeline application',
+				409
+			)
+
+		if stage is None:
+			raise PipelineError(
+				'Dataset-bound pipelines require a scientific stage',
+				400
+			)
+
+		from flask import current_app
+
+		policies = current_app.config.get(
+			'PIPELINE_V2_APPLICATIONS', {}
+		)
+
+		policy = policies.get(application) if isinstance(
+			policies, dict
+		) else None
+
+		if not isinstance(policy, dict):
+			raise PipelineError(
+				'Invalid V2 application policy',
+				503
+			)
+
+		stage_options = policy.get('input_options_by_stage')
+
+		if (
+			not isinstance(stage_options, dict)
+			or stage not in stage_options
+			or not isinstance(stage_options[stage], dict)
+		):
+			raise PipelineError(
+				'Missing V2 stage input policy',
+				503
+			)
+
+		dataset_input_name = policy.get(
+			'dataset_input_name',
+			'measurement_set'
+		)
+
+		if (
+			not isinstance(dataset_input_name, str)
+			or not dataset_input_name
+		):
+			raise PipelineError(
+				'Invalid V2 dataset input name',
+				503
+			)
+
+		input_names = list(stage_options[stage].values())
+
+		if input_names.count(dataset_input_name) > 1:
+			raise PipelineError(
+				'A stage cannot declare multiple dataset inputs',
+				503
+			)
+
+		dataset_id = (
+			pipeline_dataset_id
+			if dataset_input_name in input_names
+			else None
+		)
 
 	if dataset_id is not None:
 		from caesar_rest import dataset_registry
 
 		if not isinstance(dataset_id, str):
-			raise PipelineError('dataset_id must be a string')
+			raise PipelineError(
+				'dataset_id must be a string',
+				400
+			)
 
 		try:
 			dataset_registry.resolve_input_dataset(dataset_id)
 		except dataset_registry.DatasetError as exc:
-			raise PipelineError(str(exc), exc.status)
+			raise PipelineError(str(exc), exc.status)	
+	
 	
 	if not isinstance(parameters, dict) or not isinstance(input_runs, list):
 		raise PipelineError('parameters must be an object and input_runs a list')
@@ -431,6 +531,16 @@ def create_run(
 		parent = runs.find_one({'run_id': parent_id, 'pipeline_id': pipeline_id, 'owner': owner})
 		if parent is None or parent['status'] != 'COMPLETED':
 			raise PipelineError('Input run must exist and be completed: %s' % parent_id, 409)
+			
+		if (
+			pipeline_dataset_id is not None
+			and parent.get('dataset_id') is not None
+			and parent['dataset_id'] != pipeline_dataset_id
+		):
+			raise PipelineError(
+				'Upstream run dataset conflicts with pipeline dataset',
+				409
+			)			
 	
 	# Import lazily to avoid circular dependencies:
 	# artifacts.binding -> artifacts.access -> pipeline.manager.
@@ -624,6 +734,12 @@ def create_run_simple(
 	}
 
 	if 'dataset_id' in payload:
+		if pipeline.get('dataset_id') is not None:
+			raise PipelineError(
+				'Do not specify dataset_id for a dataset-bound pipeline',
+				400
+			)
+
 		legacy_payload['dataset_id'] = payload['dataset_id']
 
 	return create_run(
