@@ -255,6 +255,58 @@ def public_metadata(doc):
 
 	return result
 
+def public_inspection(doc, include_error=False):
+	"""Return a safe, read-only view of a dataset inspection.
+
+	The caller must have already authorized the dataset through
+	get_dataset(). Never expose internal worker claims or storage paths.
+	"""
+
+	inspection = doc.get('inspection')
+
+	if not isinstance(inspection, dict):
+		return {
+			'dataset_id': doc['dataset_id'],
+			'status': 'NOT_REQUESTED'
+		}
+
+	status = inspection.get('status', 'UNKNOWN')
+
+	result = {
+		'dataset_id': doc['dataset_id'],
+		'status': status,
+		'attempt': inspection.get('attempt', 0),
+		'requested_at': inspection.get('requested_at'),
+		'started_at': inspection.get('started_at'),
+		'finished_at': inspection.get('finished_at'),
+		'last_checked_at': inspection.get('last_checked_at'),
+		'detected_format': inspection.get('detected_format'),
+		'declared_format': inspection.get('declared_format'),
+		'detection_evidence': inspection.get('detection_evidence'),
+		'inspector': inspection.get('inspector'),
+		'schema': inspection.get('schema')
+	}
+
+	if status == 'READY':
+		metadata = inspection.get('metadata')
+
+		if not isinstance(metadata, dict):
+			raise DatasetError(
+				'Stored inspection metadata is unavailable',
+				409
+			)
+
+		result['metadata'] = metadata
+		result['source_fingerprint'] = inspection.get(
+			'source_fingerprint'
+		)
+
+	elif status == 'FAILED':
+		if include_error:
+			result['error'] = inspection.get('error')
+
+	return result
+
 def list_datasets():
 	user_id = identity()
 	return {d['dataset_id']: public_metadata(d) for d in database().datasets.find({'enabled': True}) if access_allowed(d, user_id)}

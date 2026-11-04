@@ -99,6 +99,24 @@ def deactivate(dataset_id):
 	return invoke(action)
 
 
+@registry_bp.route('/datasets/<dataset_id>/inspection', methods=['GET'])
+@custom_require_login
+def describe_inspection(dataset_id):
+	"""Retrieve authorized, persisted scientific inspection metadata."""
+
+	def action():
+		doc = registry.get_dataset(dataset_id)
+
+		result = registry.public_inspection(
+			doc,
+			include_error=registry.is_admin()
+		)
+
+		return jsonify(result), 200
+
+	return invoke(action)
+
+
 @registry_bp.route('/teams', methods=['GET'])
 @custom_require_login
 def teams():
