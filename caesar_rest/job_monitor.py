@@ -500,14 +500,38 @@ def monitor_slurm_jobs(job_objs, job_collection):
 
 	return 0
 	
-	
+
 def make_slurm_job_archive(job_obj, tar_file, job_dir):
-	"""Use input-excluding archives only for staged pipeline jobs."""
+	"""Archive a Slurm job using the appropriate execution contract."""
 
 	if job_obj.get('execution_mode') == 'staged_container':
-		utils.make_staged_pipeline_tar(tar_file, job_dir)
+		from caesar_rest.job_configurator import JobConfigurator
+
+		app_name = job_obj.get('app')
+		description = JobConfigurator().get_app_description(app_name)
+
+		if not isinstance(description, dict):
+			raise ValueError(
+				'Cannot resolve archive policy for application %s' %
+				app_name
+			)
+
+		archive_policy = description.get('archive_policy')
+
+		if not isinstance(archive_policy, dict):
+			raise ValueError(
+				'Missing staged archive policy for application %s' %
+				app_name
+			)
+
+		utils.make_staged_pipeline_tar(
+			tar_file,
+			job_dir,
+			archive_policy=archive_policy,
+		)
+
 	else:
-		utils.make_tar(tar_file, job_dir)	
+		utils.make_tar(tar_file, job_dir)
 
 
 def recover_missing_slurm_job(job_obj):

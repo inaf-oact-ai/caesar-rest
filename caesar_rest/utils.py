@@ -81,66 +81,21 @@ def make_tar(output_filename, source_dir):
 		tar.add(source_dir, arcname=os.path.basename(source_dir))
 
 
-def make_staged_pipeline_tar(output_filename, source_dir):
-	"""Archive a staged pipeline job without duplicating private input data.
 
-	Retain input/staging.json, execution metadata, and scientific outputs.
-	Do not follow symlinks or include existing job archives.
+def make_staged_pipeline_tar(output_filename, source_dir, archive_policy=None):
+	"""Create a staged Pipeline V2 diagnostic archive.
+
+	Archive selection is declared by the application configurator.
+	Scientific outputs remain available through artifact retention.
 	"""
-	import tempfile
+	from caesar_rest.pipeline.archive import make_diagnostic_archive
 
-	source_dir = os.path.abspath(source_dir)
-	output_filename = os.path.abspath(output_filename)
-	root_name = os.path.basename(source_dir)
-
-	if not os.path.isdir(source_dir) or os.path.islink(source_dir):
-		raise ValueError("Invalid staged pipeline workspace")
-
-	def archive_filter(member):
-		name = member.name
-		relative = os.path.relpath(name, root_name)
-
-		# Never archive symlinks, including links outside the workspace.
-		if member.issym() or member.islnk():
-			return None
-
-		# Exclude existing archives.
-		if relative.endswith('.tar.gz'):
-			return None
-
-		# Keep only the staging manifest from the private input directory.
-		if relative == 'input':
-			return member
-
-		if relative.startswith('input/'):
-			if relative != 'input/staging.json':
-				return None
-
-		return member
-
-	# Create outside the workspace to avoid including a partial archive.
-	parent_dir = os.path.dirname(source_dir)
-	fd, temporary_path = tempfile.mkstemp(
-		prefix='.pipeline-archive-',
-		suffix='.tmp',
-		dir=parent_dir
+	make_diagnostic_archive(
+		output_filename,
+		source_dir,
+		policy=archive_policy,
 	)
 
-	try:
-		with os.fdopen(fd, 'wb') as output:
-			with tarfile.open(fileobj=output, mode='w:gz') as tar:
-				tar.add(
-					source_dir,
-					arcname=root_name,
-					recursive=True,
-					filter=archive_filter
-				)
-
-		os.replace(temporary_path, output_filename)
-
-	finally:
-		if os.path.exists(temporary_path):
-			os.unlink(temporary_path)
 
 def sanitize_username(s):
 	""" Sanitize username removing @ and . and replacing with underscores """

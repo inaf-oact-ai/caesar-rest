@@ -471,6 +471,25 @@ class OxkatAppConfigurator(AppConfigurator):
 				"notes": "Diagnostic artifacts can disclose internal paths; restrict access.",
 			},
 		}
+		
+		# Diagnostic job archive selection.
+		# Large scientific products are available through retained
+		# Pipeline V2 artifacts, not duplicated in the job archive.
+		self.archive_policy = {
+			'include': [
+				'results/*.log',
+				'results/*.json',
+				'results/*.txt',
+				'results/*.sh',
+				'results/previews/image_qa.json',
+				'results/previews/selected/*.png',
+				'results/previews/catalog/*.dat',
+				'results/previews/catalog/*.tab',
+				'results/previews/catalog/*.reg',
+				'results/previews/logs/*.log',
+			],
+		}
+
 		self.option_value_transformer = {}
 
 

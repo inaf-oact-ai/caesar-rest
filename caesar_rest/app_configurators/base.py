@@ -158,6 +158,20 @@ class AppConfigurator(object):
 			"input_staging_mode": "copy"
 		}
 		self.job_outputs= {}
+		
+		# Inclusion-only archive contract for staged Pipeline V2 jobs.
+		# Patterns are relative to the job workspace and must select
+		# files beneath results/. Scientific directory artifacts are
+		# retrieved through the pipeline artifact API instead.
+		self.archive_policy = {
+			'include': [
+				'results/*.log',
+				'results/*.json',
+				'results/*.txt',
+				'results/*.sh',
+			],
+		}
+
 		self.description= ""
 		self.tool_categories= []
 		self.input_requirements= {}
@@ -190,7 +204,6 @@ class AppConfigurator(object):
 		""" Return a dictionary describing valid options """
 			
 		# - Init dictionary	
-		#d= {}
 		d= {
 			"name": self.app_name,
 			"description": self.description,
@@ -198,6 +211,7 @@ class AppConfigurator(object):
 			"input_requirements": self.input_requirements,
 			"job_options": {},
 			"job_outputs": self.job_outputs,
+			"archive_policy": self.archive_policy,
 			"limitations": self.limitations,
 			"option_schema": self.describe_option_schema()
 		}
@@ -205,7 +219,6 @@ class AppConfigurator(object):
 		# - Fill job options
 		for opt_name, option in self.valid_options.items():
 			option_dict= option.to_dict()
-			#d.update(option_dict)
 			d["job_options"].update(option_dict)
 
 		return d
