@@ -88,3 +88,22 @@ def test_no_policy_does_not_archive_results(tmp_path):
 			root.name + '/archive_policy.json',
 		}
 
+
+def test_archive_can_be_created_inside_job_workspace(tmp_path):
+	root = make_workspace(tmp_path)
+	archive = root / (root.name + '.tar.gz')
+
+	make_diagnostic_archive(
+		str(archive),
+		str(root),
+		{'include': ['results/*.log']},
+	)
+
+	assert archive.is_file()
+
+	with tarfile.open(archive, 'r:gz') as tar:
+		names = set(tar.getnames())
+		assert root.name + '/results/run.log' in names
+		assert root.name + '/archive_policy.json' in names
+		assert archive.name not in names
+

@@ -81,10 +81,12 @@ def make_diagnostic_archive(output_filename, source_dir, policy=None):
 
 	root = Path(os.path.abspath(source_dir))
 	output_filename = os.path.abspath(output_filename)
+
 	if not root.is_dir() or root.is_symlink():
 		raise ArchivePolicyError('Invalid staged pipeline workspace')
-	if os.path.commonpath((str(root), output_filename)) == str(root):
-		raise ArchivePolicyError('Archive must be created outside its source workspace')
+
+	if os.path.isdir(output_filename):
+		raise ArchivePolicyError('Archive destination is a directory')
 
 	selected = set()
 	for pattern in patterns:
@@ -100,6 +102,14 @@ def make_diagnostic_archive(output_filename, source_dir, policy=None):
 	if staging.exists() or staging.is_symlink():
 		_safe_file(root, 'input/staging.json')
 		selected.add('input/staging.json')
+		
+	# Do not permit the destination to be archived as an input,
+	# including when a caller selects a broad file pattern.
+	if output_filename in {
+		os.path.abspath(str(root / relative))
+		for relative in selected
+	}:
+		raise ArchivePolicyError('Archive destination selects itself')		
 
 	included = []
 	omitted = []
