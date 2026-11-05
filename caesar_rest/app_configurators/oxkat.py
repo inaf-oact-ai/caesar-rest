@@ -387,6 +387,74 @@ class OxkatAppConfigurator(AppConfigurator):
 				"stages": ["2GC"],
 				"required": False,
 			},
+			"image_qa": {
+				"path": "previews/image_qa.json",
+				"glob": None,
+				"type": "application/json",
+				"role": "diagnostic",
+				"description": (
+					"Complete OXKAT imaging QA, preview index, "
+					"imaging families and BANE/Aegean statistics."
+				),
+				"format": "",
+				"parser": "json",
+				"stages": ["FLAG", "2GC"],
+				"required": False,
+			},
+			"image_previews": {
+				"path": None,
+				"glob": "previews/selected/preview_*.png",
+				"type": "image/png",
+				"role": "diagnostic",
+				"description": (
+					"Curated imaging previews across OXKAT "
+					"imaging families."
+				),
+				"format": "png",
+				"parser": "",
+				"stages": ["FLAG", "2GC"],
+				"required": False,
+			},
+			"sourcefind_logs": {
+				"path": None,
+				"glob": "previews/logs/sourcefind_*.log",
+				"type": "text/plain",
+				"role": "diagnostic",
+				"description": "BANE and Aegean execution logs.",
+				"stages": ["FLAG", "2GC"],
+				"required": False,
+			},
+			"sourcefind_catalog_native": {
+				"path": None,
+				"glob": "previews/catalog/sourcefind_*.dat",
+				"type": "text/plain",
+				"role": "diagnostic",
+				"description": "Aegean native ASCII catalogs.",
+				"stages": ["FLAG", "2GC"],
+				"required": False,
+			},
+			"sourcefind_catalog_tables": {
+				"path": None,
+				"glob": "previews/catalog/sourcefind_*.tab",
+				"type": "text/tab-separated-values",
+				"role": "diagnostic",
+				"description": (
+					"Aegean component and island source tables."
+				),
+				"stages": ["FLAG", "2GC"],
+				"required": False,
+			},
+			"sourcefind_catalog_regions": {
+				"path": None,
+				"glob": "previews/catalog/sourcefind_*.reg",
+				"type": "text/plain",
+				"role": "diagnostic",
+				"description": (
+					"Aegean component and island DS9 regions."
+				),
+				"stages": ["FLAG", "2GC"],
+				"required": False,
+			},
 			"log": {
 				"path": None,
 				"glob": "*.log",
