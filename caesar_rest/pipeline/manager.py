@@ -571,6 +571,31 @@ def create_run(
 			else None
 		)
 
+		# Validate application-specific run parameters at registration.
+		# Submission validates them again against the persisted run.
+		from caesar_rest.job_configurator import JobConfigurator
+
+		configurator_class = (
+			JobConfigurator().app_configurators.get(application)
+		)
+
+		if configurator_class is None:
+			raise PipelineError(
+				'Unknown Pipeline V2 application configurator',
+				503
+			)
+
+		configurator = configurator_class(app_name=application)
+
+		try:
+			configurator.validate_pipeline_options(parameters)
+		except ValueError as exc:
+			raise PipelineError(
+				'Invalid application scientific options: %s' % exc,
+				409
+			) from exc
+
+
 	if dataset_id is not None:
 		from caesar_rest import dataset_registry
 

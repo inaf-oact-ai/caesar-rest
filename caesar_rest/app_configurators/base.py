@@ -163,6 +163,29 @@ class AppConfigurator(object):
 		self.input_requirements= {}
 		self.limitations= []
 
+	def describe_option_schema(self):
+		"""Describe options by name and supported execution interface.
+
+		The legacy option registry remains authoritative for V1.
+		Application subclasses can add V2 descriptions without
+		changing V1 argument validation.
+		"""
+		schema = {}
+
+		for name, option in self.valid_options.items():
+			schema[name] = {
+				'interfaces': {
+					'v1': option.to_dict()[name]
+				}
+			}
+
+		return schema
+
+	def validate_pipeline_options(self, job_options):
+		"""Optional application-specific Pipeline V2 validation hook."""
+		return None
+
+
 	def describe_dict(self):
 		""" Return a dictionary describing valid options """
 			
@@ -175,7 +198,8 @@ class AppConfigurator(object):
 			"input_requirements": self.input_requirements,
 			"job_options": {},
 			"job_outputs": self.job_outputs,
-			"limitations": self.limitations
+			"limitations": self.limitations,
+			"option_schema": self.describe_option_schema()
 		}
 		
 		# - Fill job options

@@ -57,6 +57,10 @@ OXKAT_STAGES = [
 # reach Slurm: they require distinct inputs, output contracts and permissions.
 IMPLEMENTED_STAGES = {"GET_INFO", "1GC", "FLAG", "2GC"}
 
+PREVIEW_RETENTION_PROFILES = ('none', 'selected', 'all')
+PREVIEW_RETENTION_STAGES = ('FLAG', '2GC')
+DEFAULT_PREVIEW_RETENTION = 'selected'
+
 _FIELD_SELECTION = re.compile(r'^(?:auto|[0-9]+(?:,[0-9]+)*)$')
 _TARGET_NAME = re.compile(r'^[A-Za-z0-9_][A-Za-z0-9_-]{0,63}$')
 
@@ -470,6 +474,104 @@ class OxkatAppConfigurator(AppConfigurator):
 		self.option_value_transformer = {}
 
 
+	def describe_option_schema(self):
+		"""Publish V1 and V2 options under one discoverable registry."""
+
+		schema = super().describe_option_schema()
+
+		active_stages = [
+			stage for stage in OXKAT_STAGES
+			if stage in IMPLEMENTED_STAGES
+		]
+
+		schema['stage']['interfaces']['pipeline_v2'] = {
+			'type': 'string',
+			'required': True,
+			'allowed_values': active_stages,
+		}
+
+		schema['target'] = {
+			'interfaces': {
+				'pipeline_v2': {
+					'type': 'string',
+					'required': False,
+					'stages': list(PREVIEW_RETENTION_STAGES),
+					'pattern': _TARGET_NAME.pattern,
+					'description': (
+						'Science target selected for FLAG or 2GC.'
+					),
+				}
+			}
+		}
+
+		schema['preview_retention'] = {
+			'interfaces': {
+				'pipeline_v2': {
+					'type': 'string',
+					'required': False,
+					'stages': list(PREVIEW_RETENTION_STAGES),
+					'allowed_values': list(PREVIEW_RETENTION_PROFILES),
+					'default': DEFAULT_PREVIEW_RETENTION,
+					'description': (
+						'Generate all preview images and register '
+						'none, a curated selection, or all PNGs '
+						'for artifact retention.'
+					),
+				}
+			}
+		}
+
+		properties = {}
+
+		for name, spec in sorted(
+			oxkat_scientific_config.SCHEMA.items()
+		):
+			stages = [
+				stage for stage in active_stages
+				if stage in spec['stages']
+			]
+
+			if not stages:
+				continue
+
+			entry = {
+				'kind': spec['kind'],
+				'stages': stages,
+			}
+
+			for field in ('minimum', 'maximum', 'choices'):
+				if field in spec:
+					entry[field] = spec[field]
+
+			properties[name] = entry
+
+		schema['oxkat_config'] = {
+			'interfaces': {
+				'pipeline_v2': {
+					'type': 'object',
+					'required': False,
+					'min_properties': 1,
+					'max_properties': 128,
+					'additional_properties': False,
+					'stages': active_stages,
+					'schema_version': (
+						oxkat_scientific_config.SCHEMA_VERSION
+					),
+					'schema_digest': (
+						oxkat_scientific_config.schema_digest()
+					),
+					'properties': properties,
+					'description': (
+						'Validated OXKAT scientific overrides. '
+						'Each property is restricted to its '
+						'declared processing stages.'
+					),
+				}
+			}
+		}
+
+		return schema
+
 
 	def validate_pipeline_options(self, job_options):
 		"""Validate optional stage-specific upstream OXKAT settings."""
@@ -482,14 +584,20 @@ class OxkatAppConfigurator(AppConfigurator):
 		if stage not in IMPLEMENTED_STAGES:
 			raise ValueError('OXKAT stage is not implemented: %s' % stage)
 
-		unknown = set(job_options) - {'stage', 'target', 'oxkat_config'}
-
+		unknown = set(job_options) - {
+			'stage',
+			'target',
+			'oxkat_config',
+			'preview_retention',
+		}
+		
 		if unknown:
 			raise ValueError(
 				'Unsupported OXKAT job options: %s' %
 				', '.join(sorted(unknown))
 			)
 			
+		# - Validate target	
 		if 'target' in job_options:
 			target = job_options['target']
 
@@ -504,6 +612,27 @@ class OxkatAppConfigurator(AppConfigurator):
 			):
 				raise ValueError('Invalid OXKAT target name')			
 			
+		# - Validate preview retention
+		if 'preview_retention' in job_options:
+			profile = job_options['preview_retention']
+
+			if stage not in PREVIEW_RETENTION_STAGES:
+				raise ValueError(
+					'preview_retention is supported only '
+					'for FLAG and 2GC'
+				)
+
+			if (
+				not isinstance(profile, str)
+				or profile not in PREVIEW_RETENTION_PROFILES
+			):
+				raise ValueError(
+					'preview_retention must be one of: '
+					+ ', '.join(PREVIEW_RETENTION_PROFILES)
+				)
+		
+			
+		# - Validate config	
 		if 'oxkat_config' not in job_options:
 			return None
 
@@ -535,11 +664,17 @@ class OxkatAppConfigurator(AppConfigurator):
 		scalar_parameters = dict(parameters)
 		scalar_parameters.pop('oxkat_config', None)
 		target = scalar_parameters.pop('target', None)
+		preview_retention = scalar_parameters.pop('preview_retention', None)
 
 		args = scalar_validator(scalar_parameters, allowed)
 
 		if target is not None:
 			args.append('--target-name=%s' % target)
+
+		if preview_retention is not None:
+			args.append(
+				'--preview-retention=%s' % preview_retention
+			)
 
 		if overrides is not None:
 			document = {

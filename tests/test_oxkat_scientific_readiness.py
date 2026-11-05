@@ -227,3 +227,60 @@ def test_generic_dispatcher_uses_provider_interface():
 	assert result['application'] == 'other_application'
 	assert result['scientific']['provider'] == 'fake'
 
+
+import pytest
+
+from caesar_rest.app_configurators.oxkat import OxkatAppConfigurator
+
+
+@pytest.mark.parametrize('profile', ['none', 'selected', 'all'])
+@pytest.mark.parametrize('stage', ['FLAG', '2GC'])
+def test_preview_retention_valid(stage, profile):
+	configurator = OxkatAppConfigurator()
+
+	assert configurator.validate_pipeline_options({
+		'stage': stage,
+		'preview_retention': profile,
+	}) is None
+
+
+@pytest.mark.parametrize('profile', ['invalid', '', None, 1])
+def test_preview_retention_invalid(profile):
+	configurator = OxkatAppConfigurator()
+
+	with pytest.raises(ValueError, match='preview_retention'):
+		configurator.validate_pipeline_options({
+			'stage': 'FLAG',
+			'preview_retention': profile,
+		})
+
+
+@pytest.mark.parametrize('stage', ['GET_INFO', '1GC'])
+def test_preview_retention_rejects_non_imaging_stages(stage):
+	configurator = OxkatAppConfigurator()
+
+	with pytest.raises(ValueError, match='preview_retention'):
+		configurator.validate_pipeline_options({
+			'stage': stage,
+			'preview_retention': 'all',
+		})
+
+
+@pytest.mark.parametrize('profile', ['none', 'selected', 'all'])
+def test_preview_retention_argument_translation(profile):
+	configurator = OxkatAppConfigurator()
+
+	def scalar_validator(parameters, allowed):
+		assert parameters == {'stage': '2GC'}
+		return ['--stage=2GC']
+
+	args = configurator.build_pipeline_arguments(
+		{
+			'stage': '2GC',
+			'preview_retention': profile,
+		},
+		{'stage': ['2GC']},
+		scalar_validator,
+	)
+
+	assert '--preview-retention=%s' % profile in args
