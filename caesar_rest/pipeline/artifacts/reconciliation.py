@@ -42,10 +42,16 @@ def _check_existing(db, owner, run, base, root, max_directory_bytes,
 					max_entries=max_directory_entries, max_depth=max_directory_depth)
 			except directory_integrity.DirectoryIntegrityError as exc:
 				raise ArtifactReconciliationError('Existing directory retention invalid: %s' % exc) from exc
+
 		else:
-			# Existing file is read from retained storage, not the job workspace.
-			with retention.open_retained_artifact(owner, run, index, root) as stream:
+			# Existing file is read and checksum-verified from retained
+			# storage, not from the original job workspace.
+			stream, _, _ = retention.open_retained_artifact(
+				owner, run, index, root
+			)
+			with stream:
 				pass
+
 	return paths
 
 
