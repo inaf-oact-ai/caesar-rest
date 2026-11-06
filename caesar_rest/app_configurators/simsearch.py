@@ -48,24 +48,54 @@ class SimilaritySearchAppConfigurator(AppConfigurator):
 		self.batch_processing_support= True
 		
 		# - Describe app
+		
+		# - Describe app
 		self.description = (
-			""
+			"Search for similar images using nearest-neighbor retrieval "
+			"on numerical feature vectors and the Faiss library. "
+			"Two workflows are supported: nearest-neighbor retrieval "
+			"within a feature dataset, and retrieval of dataset images "
+			"most similar to an input query image. "
+			"The query-image workflow uses a compatible pretrained "
+			"feature extraction model to compute the query embedding."
 		)
-		
-		self.tool_categories= ["image"]
-		
+
+		self.tool_categories = ["image", "tabular"]
+
 		self.input_requirements = {
-			"supported_formats": ["uid", "abspath", "dataset"],
-			"expected_data": "TBD",
+			"supported_formats": ["json", "ascii", "fits", "png"],
+			"expected_data": (
+				"A feature dataset containing numerical embedding "
+				"vectors for the indexed observations. JSON input "
+				"contains a data array with observation metadata "
+				"and a feats array of numerical feature values. "
+				"For query-image search, provide a second input "
+				"containing the image to compare against the dataset."
+			),
 			"notes": [
-				"TBD",
-				"TBD"
+				"One input executes nearest-neighbor retrieval within "
+				"the supplied feature dataset.",
+				"Two inputs execute query-image retrieval. The first "
+				"input is the feature dataset and the second is the "
+				"query image.",
+				"Feature vectors must be compatible with the selected "
+				"feature extraction model and preprocessing.",
+				"CAESAR-REST data reference types such as uid and "
+				"dataset are distinct from scientific file formats."
 			]
 		}
-		
+
 		self.limitations = [
-			"TBD",
-			"TBD"
+			"Similarity depends on the feature representation, "
+			"preprocessing and training data of the selected model.",
+			"High similarity does not necessarily imply identical "
+			"scientific properties or morphological classifications.",
+			"Query-image and indexed feature vectors must have "
+			"compatible dimensions and representation semantics.",
+			"Approximate nearest-neighbor search may trade retrieval "
+			"accuracy for computational performance.",
+			"Model availability depends on the installed scientific "
+			"container."
 		]
 		
 		# - Define dictionary with allowed options
@@ -101,23 +131,6 @@ class SimilaritySearchAppConfigurator(AppConfigurator):
 				allowed_values=['simclr-smgps']
 			),
 			
-			#'model' : ValueOption(
-			#	name='model',
-			#	value='',
-			#	value_type=str, 
-			#	description='Path to model architecture (.h5)',
-			#	category='MODEL',
-			#	default_value=''
-			#),
-			#'model-weights' : ValueOption(
-			#	name='model-weights',
-			#	value='',
-			#	value_type=str, 
-			#	description='Path to model weights (.h5)',
-			#	category='MODEL',
-			#	default_value=''
-			#),
-			
 			# == SIMILARITY SCAN OPTIONS ==
 			'k' : ValueOption(
 				name='k',
@@ -125,7 +138,7 @@ class SimilaritySearchAppConfigurator(AppConfigurator):
 				value_type=int, 
 				description='Number of neighbors in similarity search (default=10)',
 				category='PROCESSING',
-				default_value=1,
+				default_value=10,
 				min_value=1,
 				max_value=100000
 			),
@@ -145,9 +158,9 @@ class SimilaritySearchAppConfigurator(AppConfigurator):
 				value_type=int, 
 				description='Number of data entries above which an approximate search algorithm is used (default=1000000)',
 				category='PROCESSING',
-				default_value=1,
+				default_value=1000000,
 				min_value=1,
-				max_value=100000
+				max_value=1000000
 			),
 			'nlist' : ValueOption(
 				name='nlist',
@@ -194,7 +207,8 @@ class SimilaritySearchAppConfigurator(AppConfigurator):
 			'zscale' : Option(
 				name='zscale', 
 				description='Apply zscale transform', 
-				category='PREPROCESSING'
+				category='PREPROCESSING',
+				default_value=False
 			),
 			'zscale-contrast' : ValueOption(
 				name='zscale-contrast',
@@ -212,16 +226,17 @@ class SimilaritySearchAppConfigurator(AppConfigurator):
 				name='outfile',
 				value='',
 				value_type=str, 
-				description='Name of output file in ascii format (default=outlier_data)',
+				description='Output filename (.json) of feature data with similarity search info (default=featdata_simsearch.json)',
 				category='OUTPUT',
-				default_value='outlier_data'
+				default_value='featdata_simsearch.json'
 			),
 			
 			# == RUN OPTIONS ==
 			'no-logredir' : Option(
 				name='no-logredir', 
 				description='Do not redirect logs to output file in script',
-				category='RUN'
+				category='RUN',
+				default_value=False
 			),
 			
 		} ## close valid options
