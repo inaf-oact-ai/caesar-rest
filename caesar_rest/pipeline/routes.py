@@ -15,6 +15,10 @@ from caesar_rest.pipeline.artifacts import access as artifact_access
 from caesar_rest.pipeline.artifacts import resolver as artifact_resolver
 from caesar_rest.pipeline.artifacts import retention
 from caesar_rest.pipeline.artifacts import directory_resolver
+from caesar_rest.pipeline import readiness as pipeline_readiness
+from caesar_rest.pipeline import scientific_readiness as pipeline_scientific_readiness
+from caesar_rest.pipeline import bulk_planning
+from caesar_rest.pipeline import bulk_registration
 
 pipeline_bp = Blueprint('pipelines', __name__, url_prefix='/caesar/api/v1.0')
 
@@ -348,6 +352,89 @@ def get_pipeline_tree(pipeline_id):
 	)
 	
 ############################################
+###      PIPELINE READINESS
+############################################	
+@pipeline_bp.route('/pipelines/<pipeline_id>/readiness', methods=['GET'])
+@custom_require_login
+def get_pipeline_readiness(pipeline_id):
+	"""Return generic pipeline readiness from persisted metadata."""
+
+	return invoke(
+		lambda owner: jsonify(
+			pipeline_readiness.resolve(owner, pipeline_id)
+		)
+	)	
+
+############################################
+###      PIPELINE SCIENTIFIC READINESS
+############################################
+@pipeline_bp.route('/pipelines/<pipeline_id>/scientific-readiness', methods=['GET'])
+@custom_require_login
+def get_pipeline_scientific_readiness(pipeline_id):
+	"""Return application-specific scientific readiness."""
+
+	return invoke(
+		lambda owner: jsonify(
+			pipeline_scientific_readiness.resolve(
+				owner,
+				pipeline_id
+			)
+		)
+	)
+
+############################################
+###      PIPELINE BULK PLANNING
+############################################
+@pipeline_bp.route('/pipelines/<pipeline_id>/bulk-plan', methods=['POST'])
+@custom_require_login
+def plan_pipeline_bulk(pipeline_id):
+	"""Preview scientific run registrations without creating runs."""
+
+	return invoke(
+		lambda owner: jsonify(
+			bulk_planning.plan(
+				owner,
+				pipeline_id,
+				request.get_json(silent=True)
+			)
+		)
+	)
+	
+############################################
+###      PIPELINE BULK REGISTRATION
+############################################
+@pipeline_bp.route('/pipelines/<pipeline_id>/bulk-register', methods=['POST'])
+@custom_require_login
+def register_pipeline_bulk(pipeline_id):
+	"""Register validated scientific proposals without submitting jobs."""
+
+	def action(owner):
+		result = bulk_registration.register(
+			owner,
+			pipeline_id,
+			request.get_json(silent=True),
+			retention_root=current_app.config.get(
+				'PIPELINE_ARTIFACT_RETENTION_ROOT'
+			) or '',
+			max_directory_bytes=current_app.config.get(
+				'PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_BYTES',
+				1024 * 1024 * 1024 * 1024
+			),
+			max_directory_entries=current_app.config.get(
+				'PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_ENTRIES',
+				100000
+			),
+			max_directory_depth=current_app.config.get(
+				'PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_DEPTH',
+				16
+			)
+		)
+
+		return jsonify(result), 200
+
+	return invoke(action)
+		
+############################################
 ###      PIPELINE ARTIFACT LISTING
 ############################################
 @pipeline_bp.route(
@@ -412,6 +499,95 @@ def download_run_artifact(pipeline_id, node_id, run_id, index):
 			raise
 
 	return invoke(action)
+	
+
+############################################
+###      PIPELINE ARTIFACT DOWNLOAD BY NAME / PATH
+############################################
+def _download_named_run_artifact(
+	owner, 
+	pipeline_id, 
+	node_id, 
+	run_ref,
+	artifact_name=None, 
+	relative_path=None
+):
+	"""Download a registered file using the shared artifact resolver."""
+
+	fileobj, filename, mime = artifact_resolver.open_run_artifact(
+		mongo.db,
+		owner,
+		pipeline_id,
+		node_id,
+		run_ref,
+		artifact_name=artifact_name,
+		relative_path=relative_path,
+		retention_root=current_app.config.get(
+			'PIPELINE_ARTIFACT_RETENTION_ROOT'
+		)
+	)
+
+	try:
+		return send_artifact_file(fileobj, filename, mime)
+	except Exception:
+		fileobj.close()
+		raise
+
+
+@pipeline_bp.route(
+	'/pipelines/<pipeline_id>/nodes/<node_id>/runs/selected/artifacts/by-name/<artifact_name>',
+	defaults={'run_id': 'selected'},
+	methods=['GET']
+)
+@pipeline_bp.route(
+	'/pipelines/<pipeline_id>/nodes/<node_id>/runs/<run_id>/artifacts/by-name/<artifact_name>',
+	methods=['GET']
+)
+@custom_require_login
+def download_run_artifact_by_name(pipeline_id, node_id, run_id, artifact_name):
+	"""Download a unique artifact name from an explicit or selected run."""
+
+	return invoke(
+		lambda owner: _download_named_run_artifact(
+			owner,
+			pipeline_id,
+			node_id,
+			run_id,
+			artifact_name=artifact_name
+		)
+	)
+
+
+@pipeline_bp.route(
+	'/pipelines/<pipeline_id>/nodes/<node_id>/runs/selected/artifacts/by-path',
+	defaults={'run_id': 'selected'},
+	methods=['GET']
+)
+@pipeline_bp.route(
+	'/pipelines/<pipeline_id>/nodes/<node_id>/runs/<run_id>/artifacts/by-path',
+	methods=['GET']
+)
+@custom_require_login
+def download_run_artifact_by_path(pipeline_id, node_id, run_id):
+	"""Download a registered file identified by its exact relative path."""
+
+	relative_path = request.args.get('relative_path')
+
+	if relative_path is None:
+		return jsonify({
+			'error': 'relative_path query parameter is required'
+		}), 400
+
+	return invoke(
+		lambda owner: _download_named_run_artifact(
+			owner,
+			pipeline_id,
+			node_id,
+			run_id,
+			relative_path=relative_path
+		)
+	)
+	
 	
 ############################################
 ###      PIPELINE ARTIFACT RESOLVE

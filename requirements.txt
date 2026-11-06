@@ -1,21 +1,3 @@
-wheel
-numpy
-matplotlib
-MarkupSafe
-jinja2
-werkzeug
-flask
-uwsgi
-pyyaml
-pymongo
-flask-pymongo
-flask-oidc-ex @ git+https://github.com/inaf-oact-ai/flask-oidc-ex.git@master
-extension-helpers
-astropy
-regions
-structlog
-jwt
-requests
-celery<5.0.0
-kubernetes
-
+# Recommended development/deployment profile: Slurm + OIDC + uWSGI.
+# For Kubernetes or legacy Celery use the extras documented in docs/installation.md.
+-e .[slurm,auth,server]

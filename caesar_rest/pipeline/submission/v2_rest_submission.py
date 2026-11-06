@@ -42,6 +42,99 @@ def _validated_arguments(parameters, allowed):
 	return args
 
 
+def _trusted_binding_context(db, owner, pipeline_id, frozen_bindings):
+	"""Resolve frozen input identities to owner-scoped artifact metadata.
+
+	The client cannot supply relative paths, artifact kinds, or source
+	metadata. All such fields are read from persisted source runs.
+	"""
+
+	if not isinstance(frozen_bindings, list):
+		raise manager.PipelineError('Invalid frozen bindings', 409)
+
+	context = {}
+	source_cache = {}
+
+	for binding in frozen_bindings:
+		if not isinstance(binding, dict):
+			raise manager.PipelineError('Invalid frozen binding', 409)
+
+		input_name = binding.get('input_name')
+		source_run_id = binding.get('source_run_id')
+		index = binding.get('artifact_index')
+
+		if (
+			not isinstance(input_name, str)
+			or not _OPTION.fullmatch(input_name)
+			or input_name in context
+			or not isinstance(source_run_id, str)
+			or not source_run_id
+			or type(index) is not int
+			or index < 0
+		):
+			raise manager.PipelineError(
+				'Invalid frozen input identity',
+				409
+			)
+
+		if source_run_id not in source_cache:
+			source_cache[source_run_id] = db.pipeline_runs.find_one({
+				'owner': owner,
+				'pipeline_id': pipeline_id,
+				'run_id': source_run_id,
+				'status': 'COMPLETED'
+			})
+
+		source_run = source_cache[source_run_id]
+
+		if source_run is None:
+			raise manager.PipelineError(
+				'Frozen source run unavailable',
+				409
+			)
+
+		artifacts = source_run.get('artifacts')
+
+		if (
+			not isinstance(artifacts, list)
+			or index >= len(artifacts)
+			or not isinstance(artifacts[index], dict)
+		):
+			raise manager.PipelineError(
+				'Frozen source artifact unavailable',
+				409
+			)
+
+		artifact = artifacts[index]
+		kind = artifact.get('kind', 'file')
+
+		if (
+			binding.get('source_pipeline_id') != pipeline_id
+			or binding.get('source_node_id') != source_run.get('node_id')
+			or binding.get('artifact_name') != artifact.get('name')
+			or binding.get('artifact_kind') != kind
+			or binding.get('size_bytes') != artifact.get('size_bytes')
+		):
+			raise manager.PipelineError(
+				'Frozen artifact metadata mismatch',
+				409
+			)
+
+		context[input_name] = {
+			'source_run_id': source_run_id,
+			'source_node_id': source_run['node_id'],
+			'source_stage': (
+				source_run.get('parameters') or {}
+			).get('stage'),
+			'artifact_index': index,
+			'artifact_name': artifact['name'],
+			'artifact_kind': kind,
+			'relative_path': artifact.get('relative_path'),
+			'size_bytes': artifact['size_bytes']
+		}
+
+	return context
+
 def submit_v2(owner, request_data, resolve_application):
 	"""Claim, prepare, and submit an artifact-only V2 run.
 
@@ -138,24 +231,44 @@ def submit_v2(owner, request_data, resolve_application):
 	#   configurator. The V2 submission layer remains application-agnostic.
 	allowed_parameters = policy.get('parameters', {})
 
+
 	configurator_class = JobConfigurator().app_configurators.get(app)
 
 	try:
 		if configurator_class is not None:
 			configurator = configurator_class(app_name=app)
+
+			binding_context = _trusted_binding_context(
+				mongo.db,
+				owner,
+				pipeline_id,
+				run['input_artifacts']
+			)
+
+			configurator.validate_pipeline_bindings(
+				options,
+				binding_context
+			)
+
 			args = configurator.build_pipeline_arguments(
 				options,
 				allowed_parameters,
 				_validated_arguments
 			)
 		else:
-			# - Preserve the existing behavior for V2 applications
-			#   without an application configurator.
-			args = _validated_arguments(options, allowed_parameters)
+			# Preserve existing behavior for applications without
+			# a registered application configurator.
+			args = _validated_arguments(
+				options,
+				allowed_parameters
+			)
+
 	except ValueError as exc:
 		raise manager.PipelineError(
-			'Invalid application scientific options: %s' % exc, 409
+			'Invalid application scientific options: %s' % exc,
+			409
 		) from exc
+
 
 	if not args:
 		raise manager.PipelineError(

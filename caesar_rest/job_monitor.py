@@ -24,7 +24,7 @@ try:
 except ImportError:
 	from urllib2 import urlopen
 
-# Import flask modules
+# - Import flask modules
 from flask import current_app, Blueprint, render_template, request, redirect, url_for
 from flask import send_file, send_from_directory, abort, make_response, jsonify
 try:
@@ -34,28 +34,23 @@ except:
 	
 from werkzeug.utils import secure_filename
 
-# Import celery modules
-from celery import states
-from celery.exceptions import Ignore, SoftTimeLimitExceeded
 
-# Import Celery app
-from caesar_rest.app import celery as celery_app
+# - Import Celery app
+from caesar_rest import celery as celery_app
 from caesar_rest import utils
 from caesar_rest import jobmgr_kube
 from caesar_rest import jobmgr_slurm
 from caesar_rest.pipeline import status as pipeline_status_sync
 
-# Import mongo
+# - Import mongo
 from pymongo import MongoClient
 
-
-# Get logger
+# - Get logger
 from caesar_rest import logger
 
 ##############################
 #   WORKERS
 ##############################
-@celery_app.task(bind=True)
 def jobmonitor_task(self):
 	""" job monitoring task """
 
@@ -160,6 +155,10 @@ def jobmonitor_task(self):
 			if job_moni_status<0:
 				logger.warn("Failed to monitor %s job %s, skip to next..." % (job_scheduler, job_id), action="jobmonitor")
 				continue
+
+# - Register the legacy periodic monitoring task only if Celery is available.
+if celery_app is not None:
+	jobmonitor_task = celery_app.task(bind=True)(jobmonitor_task)
 
 ####################################
 ##   MONITOR JOBS
@@ -501,14 +500,38 @@ def monitor_slurm_jobs(job_objs, job_collection):
 
 	return 0
 	
-	
+
 def make_slurm_job_archive(job_obj, tar_file, job_dir):
-	"""Use input-excluding archives only for staged pipeline jobs."""
+	"""Archive a Slurm job using the appropriate execution contract."""
 
 	if job_obj.get('execution_mode') == 'staged_container':
-		utils.make_staged_pipeline_tar(tar_file, job_dir)
+		from caesar_rest.job_configurator import JobConfigurator
+
+		app_name = job_obj.get('app')
+		description = JobConfigurator().get_app_description(app_name)
+
+		if not isinstance(description, dict):
+			raise ValueError(
+				'Cannot resolve archive policy for application %s' %
+				app_name
+			)
+
+		archive_policy = description.get('archive_policy')
+
+		if not isinstance(archive_policy, dict):
+			raise ValueError(
+				'Missing staged archive policy for application %s' %
+				app_name
+			)
+
+		utils.make_staged_pipeline_tar(
+			tar_file,
+			job_dir,
+			archive_policy=archive_policy,
+		)
+
 	else:
-		utils.make_tar(tar_file, job_dir)	
+		utils.make_tar(tar_file, job_dir)
 
 
 def recover_missing_slurm_job(job_obj):

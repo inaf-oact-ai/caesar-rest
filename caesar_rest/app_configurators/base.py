@@ -158,16 +158,52 @@ class AppConfigurator(object):
 			"input_staging_mode": "copy"
 		}
 		self.job_outputs= {}
+		
+		# Inclusion-only archive contract for staged Pipeline V2 jobs.
+		# Patterns are relative to the job workspace and must select
+		# files beneath results/. Scientific directory artifacts are
+		# retrieved through the pipeline artifact API instead.
+		self.archive_policy = {
+			'include': [
+				'results/*.log',
+				'results/*.json',
+				'results/*.txt',
+				'results/*.sh',
+			],
+		}
+
 		self.description= ""
 		self.tool_categories= []
 		self.input_requirements= {}
 		self.limitations= []
 
+	def describe_option_schema(self):
+		"""Describe options by name and supported execution interface.
+
+		The legacy option registry remains authoritative for V1.
+		Application subclasses can add V2 descriptions without
+		changing V1 argument validation.
+		"""
+		schema = {}
+
+		for name, option in self.valid_options.items():
+			schema[name] = {
+				'interfaces': {
+					'v1': option.to_dict()[name]
+				}
+			}
+
+		return schema
+
+	def validate_pipeline_options(self, job_options):
+		"""Optional application-specific Pipeline V2 validation hook."""
+		return None
+
+
 	def describe_dict(self):
 		""" Return a dictionary describing valid options """
 			
 		# - Init dictionary	
-		#d= {}
 		d= {
 			"name": self.app_name,
 			"description": self.description,
@@ -175,13 +211,14 @@ class AppConfigurator(object):
 			"input_requirements": self.input_requirements,
 			"job_options": {},
 			"job_outputs": self.job_outputs,
-			"limitations": self.limitations
+			"archive_policy": self.archive_policy,
+			"limitations": self.limitations,
+			"option_schema": self.describe_option_schema()
 		}
 		
 		# - Fill job options
 		for opt_name, option in self.valid_options.items():
 			option_dict= option.to_dict()
-			#d.update(option_dict)
 			d["job_options"].update(option_dict)
 
 		return d
@@ -233,6 +270,18 @@ class AppConfigurator(object):
 		"""
 		return scalar_validator(parameters, allowed)
 
+	
+	def validate_pipeline_bindings(self, parameters, bindings):
+		"""Validate application-specific V2 artifact bindings.
+
+		parameters contains persisted run parameters.
+
+		bindings maps each input_name to trusted metadata resolved
+		from the corresponding owner-scoped upstream run.
+
+		Applications may override this hook and raise ValueError.
+		"""
+		return None
 	
 	def validate(self, job_options, data_inputs):
 		""" Validate job input """

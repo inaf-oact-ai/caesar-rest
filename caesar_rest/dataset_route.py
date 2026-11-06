@@ -53,12 +53,22 @@ def current_identity():
 
     return invoke(action)
 
+
 @registry_bp.route('/datasets', methods=['POST'])
 @custom_require_login
 def register():
 	def action():
-		doc = registry.register_dataset(request.get_json(silent=True))
-		return jsonify({'dataset_id': doc['dataset_id']}), 201
+		doc = registry.register_dataset(
+			request.get_json(silent=True)
+		)
+
+		return jsonify({
+			'dataset_id': doc['dataset_id'],
+			'inspection': {
+				'status': doc['inspection']['status']
+			}
+		}), 201
+
 	return invoke(action)
 
 
@@ -89,6 +99,52 @@ def deactivate(dataset_id):
 	return invoke(action)
 
 
+@registry_bp.route('/datasets/<dataset_id>/inspection', methods=['GET'])
+@custom_require_login
+def describe_inspection(dataset_id):
+	"""Retrieve authorized, persisted scientific inspection metadata."""
+
+	def action():
+		doc = registry.get_dataset(dataset_id)
+
+		result = registry.public_inspection(
+			doc,
+			include_error=registry.is_admin()
+		)
+
+		return jsonify(result), 200
+
+	return invoke(action)
+
+
+@registry_bp.route('/datasets/<dataset_id>/inspection/refresh', methods=['POST'])
+@custom_require_login
+def refresh_inspection(dataset_id):
+	"""Request a new inspection for a registered dataset."""
+
+	def action():
+		result = registry.refresh_dataset_inspection(
+			dataset_id
+		)
+
+		return jsonify(result), 202
+
+	return invoke(action)
+
+@registry_bp.route('/datasets/<dataset_id>/targets', methods=['GET'])
+@custom_require_login
+def describe_targets(dataset_id):
+	"""Return discovered science targets and calibrators."""
+
+	def action():
+		doc = registry.get_dataset(dataset_id)
+
+		result = registry.public_dataset_targets(doc)
+
+		return jsonify(result), 200
+
+	return invoke(action)
+	
 @registry_bp.route('/teams', methods=['GET'])
 @custom_require_login
 def teams():

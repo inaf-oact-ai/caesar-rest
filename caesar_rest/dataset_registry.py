@@ -5,13 +5,57 @@ returned to regular users. Identifiers and membership are administrator-managed.
 """
 import os
 import re
+from uuid import uuid4
 from datetime import datetime, timezone
 from flask import current_app, g
 from caesar_rest import mongo
 
 ID_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$')
 
+INSPECTION_STATUSES = frozenset({
+	'PENDING',
+	'RUNNING',
+	'READY',
+	'FAILED',
+	'UNSUPPORTED'
+})
 
+
+def new_inspection_record():
+	"""Create a new, independently versioned inspection request."""
+
+	return {
+		'status': 'PENDING',
+		'generation': uuid4().hex,
+		'attempt': 0,
+		'requested_at': datetime.now(timezone.utc)
+	}
+
+
+def inspection_version_guard(doc):
+	"""Match the inspection version read before an atomic update."""
+
+	inspection = doc.get('inspection')
+
+	if not isinstance(inspection, dict):
+		return {
+			'inspection': {'$exists': False}
+		} if 'inspection' not in doc else {
+			'inspection': inspection
+		}
+
+	guard = {}
+
+	for key in ('status', 'generation'):
+		field = 'inspection.' + key
+
+		if key in inspection:
+			guard[field] = inspection[key]
+		else:
+			guard[field] = {'$exists': False}
+
+	return guard
+	
 class DatasetError(Exception):
 	def __init__(self, message, status=400):
 		super().__init__(message)
@@ -128,6 +172,12 @@ def ensure_indexes():
 	db = database()
 
 	db.datasets.create_index('dataset_id', unique=True)
+	db.datasets.create_index([
+		('inspection.status', 1),
+		('enabled', 1),
+		('inspection.requested_at', 1)
+	])
+	
 	db.teams.create_index('team_id', unique=True)
 
 	db.team_memberships.create_index(
@@ -178,7 +228,72 @@ def get_dataset(dataset_id, user_id=None):
 		raise DatasetError('Dataset not found or not accessible', 404)
 	return doc
 
+def refresh_dataset_inspection(dataset_id):
+	"""Atomically request a fresh dataset inspection.
 
+	Only administrators may refresh inspections. The operation never
+	executes scientific processing inside the HTTP request.
+	"""
+
+	require_admin()
+	checked_id(dataset_id, 'dataset ID')
+
+	doc = get_dataset(dataset_id)
+
+	inspection = doc.get('inspection')
+
+	if isinstance(inspection, dict):
+		status = inspection.get('status', 'UNKNOWN')
+	else:
+		status = 'NOT_REQUESTED'
+
+	if status in ('PENDING', 'RUNNING'):
+		raise DatasetError(
+			'Dataset inspection is already pending or running',
+			409
+		)
+
+	if status not in (
+		'READY',
+		'FAILED',
+		'UNSUPPORTED',
+		'NOT_REQUESTED'
+	):
+		raise DatasetError(
+			'Dataset inspection has an invalid state',
+			409
+		)
+
+	new_inspection = new_inspection_record()
+
+	guard = {
+		'_id': doc['_id'],
+		'enabled': True
+	}
+
+	guard.update(inspection_version_guard(doc))
+
+	result = database().datasets.update_one(
+		guard,
+		{
+			'$set': {
+				'inspection': new_inspection
+			}
+		}
+	)
+
+	if result.matched_count != 1:
+		raise DatasetError(
+			'Dataset inspection changed concurrently; retry the request',
+			409
+		)
+
+	return {
+		'dataset_id': dataset_id,
+		'status': new_inspection['status'],
+		'requested_at': new_inspection['requested_at']
+	}
+	
 def resolve_dataset(dataset_id):
 	"""Always recheck both access and actual physical path at submission time."""
 	doc = get_dataset(dataset_id)
@@ -207,7 +322,230 @@ def guard_abspath(path):
 
 
 def public_metadata(doc):
-	return {k: v for k, v in doc.items() if k in ('name', 'description', 'type', 'format', 'visibility')}
+	"""Return authorized dataset metadata without filesystem paths."""
+
+	result = {
+		k: v
+		for k, v in doc.items()
+		if k in ('name', 'description', 'type', 'format', 'visibility')
+	}
+
+	inspection = doc.get('inspection')
+
+	if isinstance(inspection, dict):
+		result['inspection'] = {
+			'status': inspection.get('status', 'UNKNOWN'),
+			'requested_at': inspection.get('requested_at'),
+			'finished_at': inspection.get('finished_at')
+		}
+	else:
+		result['inspection'] = {
+			'status': 'NOT_REQUESTED'
+		}
+
+	return result
+
+def public_inspection(doc, include_error=False):
+	"""Return a safe, read-only view of a dataset inspection.
+
+	The caller must have already authorized the dataset through
+	get_dataset(). Never expose internal worker claims or storage paths.
+	"""
+
+	inspection = doc.get('inspection')
+
+	if not isinstance(inspection, dict):
+		return {
+			'dataset_id': doc['dataset_id'],
+			'status': 'NOT_REQUESTED'
+		}
+
+	status = inspection.get('status', 'UNKNOWN')
+
+	result = {
+		'dataset_id': doc['dataset_id'],
+		'status': status,
+		'attempt': inspection.get('attempt', 0),
+		'requested_at': inspection.get('requested_at'),
+		'started_at': inspection.get('started_at'),
+		'finished_at': inspection.get('finished_at'),
+		'last_checked_at': inspection.get('last_checked_at'),
+		'detected_format': inspection.get('detected_format'),
+		'declared_format': inspection.get('declared_format'),
+		'detection_evidence': inspection.get('detection_evidence'),
+		'inspector': inspection.get('inspector'),
+		'schema': inspection.get('schema')
+	}
+
+	if status == 'READY':
+		metadata = inspection.get('metadata')
+
+		if not isinstance(metadata, dict):
+			raise DatasetError(
+				'Stored inspection metadata is unavailable',
+				409
+			)
+
+		result['metadata'] = metadata
+		result['source_fingerprint'] = inspection.get(
+			'source_fingerprint'
+		)
+
+	elif status == 'FAILED':
+		if include_error:
+			result['error'] = inspection.get('error')
+
+	return result
+
+def public_dataset_targets(doc):
+	"""Return scientific field discovery from persisted MSv2 metadata.
+
+	The caller must authorize the dataset through get_dataset().
+	No filesystem or scientific inspector access occurs here.
+	"""
+
+	inspection = doc.get('inspection')
+
+	if not isinstance(inspection, dict):
+		return {
+			'dataset_id': doc['dataset_id'],
+			'status': 'NOT_REQUESTED'
+		}
+
+	status = inspection.get('status', 'UNKNOWN')
+
+	result = {
+		'dataset_id': doc['dataset_id'],
+		'status': status
+	}
+
+	if status != 'READY':
+		return result
+
+	schema = 'caesar.dataset-inspection.msv2.v1'
+
+	if inspection.get('schema') != schema:
+		raise DatasetError(
+			'Target discovery is not supported for this inspection schema',
+			409
+		)
+
+	metadata = inspection.get('metadata')
+
+	if not isinstance(metadata, dict):
+		raise DatasetError(
+			'Stored inspection metadata is unavailable',
+			409
+		)
+
+	observations = metadata.get('field_observations')
+
+	if not isinstance(observations, dict):
+		raise DatasetError(
+			'Stored field observations are unavailable',
+			409
+		)
+
+	if observations.get('available') is not True:
+		raise DatasetError(
+			'Field observations are not available',
+			409
+		)
+
+	fields = observations.get('fields')
+
+	if not isinstance(fields, list):
+		raise DatasetError(
+			'Stored field observations are invalid',
+			409
+		)
+
+	science_targets = []
+	calibrators = []
+	unclassified_fields = []
+	seen_ids = set()
+
+	for field in fields:
+		if not isinstance(field, dict):
+			raise DatasetError(
+				'Invalid field entry in inspection metadata',
+				409
+			)
+
+		field_id = field.get('field_id')
+		field_name = field.get('field_name')
+		classification = field.get('classification')
+
+		if (
+			type(field_id) is not int
+			or field_id < 0
+			or field_id in seen_ids
+			or not isinstance(field_name, str)
+			or not field_name
+		):
+			raise DatasetError(
+				'Invalid field identity in inspection metadata',
+				409
+			)
+
+		seen_ids.add(field_id)
+
+		item = {
+			'field_id': field_id,
+			'name': field_name,
+			'classification': classification,
+			'observation_intents': field.get(
+				'observation_intents', []
+			),
+			'scan_count': field.get('scan_count'),
+			'scan_count_truncated': field.get(
+				'scan_count_truncated', False
+			),
+			'visibility_row_count': field.get(
+				'visibility_row_count'
+			)
+		}
+
+		if classification == 'science_target':
+			science_targets.append(item)
+
+		elif classification == 'calibrator':
+			calibrators.append(item)
+
+		else:
+			unclassified_fields.append(item)
+
+	for collection in (
+		science_targets,
+		calibrators,
+		unclassified_fields
+	):
+		collection.sort(key=lambda item: item['field_id'])
+
+	result.update({
+		'detected_format': inspection.get('detected_format'),
+		'inspection_schema': schema,
+		'field_observations_available': True,
+		'fields_truncated': observations.get(
+			'fields_truncated', False
+		),
+		'main_rows_scanned': observations.get(
+			'main_rows_scanned'
+		),
+		'rows_with_unreported_field': observations.get(
+			'rows_with_unreported_field'
+		),
+		'counts': {
+			'science_targets': len(science_targets),
+			'calibrators': len(calibrators),
+			'unclassified_fields': len(unclassified_fields)
+		},
+		'science_targets': science_targets,
+		'calibrators': calibrators,
+		'unclassified_fields': unclassified_fields
+	})
+
+	return result
 
 def list_datasets():
 	user_id = identity()
@@ -256,10 +594,18 @@ def register_dataset(payload):
 	if (kind == 'directory' and not os.path.isdir(path)) or (kind == 'file' and not os.path.isfile(path)):
 		raise DatasetError('Dataset path type mismatch')
 	
-	doc = {'dataset_id': dataset_id, 'name': name.strip(), 'path': path,
-		'type': kind, 'visibility': visibility, 'allowed_teams': teams,
-		'enabled': payload.get('enabled', True), 'created_by': identity(),
-		'created_at': datetime.now(timezone.utc)}
+	doc = {
+		'dataset_id': dataset_id,
+		'name': name.strip(),
+		'path': path,
+		'type': kind,
+		'visibility': visibility,
+		'allowed_teams': teams,
+		'enabled': payload.get('enabled', True),
+		'created_by': identity(),
+		'created_at': datetime.now(timezone.utc),
+		'inspection': new_inspection_record()
+	}
 	
 	if not isinstance(doc['enabled'], bool):
 		raise DatasetError('enabled must be boolean')
@@ -318,9 +664,38 @@ def update_dataset(dataset_id, payload):
 			if database().teams.find_one({'team_id': team, 'enabled': True}) is None:
 				raise DatasetError('Unknown or disabled team: ' + team)
 	
-	res = database().datasets.update_one({'dataset_id': dataset_id}, {'$set': payload})
-	if not res.matched_count:
+	db = database()
+	existing = db.datasets.find_one({'dataset_id': dataset_id})
+
+	if existing is None:
 		raise DatasetError('Dataset not found', 404)
+
+	changes = dict(payload)
+
+	if (
+		'format' in changes
+		and changes['format'] != existing.get('format', '')
+	):
+		changes['inspection'] = new_inspection_record()
+
+	guard = {
+		'_id': existing['_id'],
+		'format': existing.get('format', '')
+	}
+
+	if 'inspection' in changes:
+		guard.update(inspection_version_guard(existing))
+
+	result = db.datasets.update_one(
+		guard,
+		{'$set': changes}
+	)	
+
+	if result.matched_count != 1:
+		raise DatasetError(
+			'Dataset changed concurrently; retry the update',
+			409
+		)
 
 
 def unregister_dataset(dataset_id):

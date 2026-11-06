@@ -1,7 +1,7 @@
 ##############################
 #   MODULE IMPORTS
 ##############################
-# Import standard modules
+# - Import standard modules
 import os
 import glob
 import signal
@@ -24,7 +24,7 @@ try:
 except ImportError:
 	from urllib2 import urlopen
 
-# Import flask modules
+# - Import flask modules
 from flask import current_app, Blueprint, render_template, request, redirect, url_for
 from flask import send_file, send_from_directory, abort, make_response, jsonify
 try:
@@ -34,29 +34,27 @@ except:
 	
 from werkzeug.utils import secure_filename
 
-# Import celery modules
-from celery import states
-from celery.exceptions import Ignore, SoftTimeLimitExceeded
-
-# Import Celery app
-from caesar_rest.app import celery as celery_app
+# - Optional legacy Celery integration
+from caesar_rest import celery as celery_app
 from caesar_rest import utils
-#from caesar_rest.app import CustomTask
 
-# Import mongo
+# - Import mongo
 from pymongo import MongoClient
 
-#from flask import current_app
-
-
-# Get logger
-#logger = logging.getLogger(__name__)
+# - Get logger
 from caesar_rest import logger
 
 ##############################
 #   WORKERS
 ##############################
-@celery_app.task(bind=True)
+def optional_celery_task(*args, **kwargs):
+	"""Register legacy accounting tasks only when Celery is available."""
+	if celery_app is None:
+		return lambda function: function
+
+	return celery_app.task(*args, **kwargs)
+
+@optional_celery_task(bind=True)
 def accounter_task(self):
 	""" Accounter task """
 

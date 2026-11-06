@@ -10,6 +10,7 @@ import uuid
 import time
 
 from pymongo import ReturnDocument
+from pymongo.errors import DuplicateKeyError, PyMongoError
 
 from caesar_rest import mongo
 from caesar_rest import logger
@@ -148,13 +149,53 @@ def run_submission_info(run):
 	}
 
 def ensure_indexes():
-	"""Call at deployment initialization, not during each request."""
-	pipelines, runs, counters = collections()
-	pipelines.create_index([('pipeline_id', 1)], unique=True)
-	runs.create_index([('run_id', 1)], unique=True)
-	runs.create_index([('pipeline_id', 1), ('node_id', 1), ('sequence', 1)], unique=True)
-	counters.create_index([('pipeline_id', 1), ('node_id', 1)], unique=True)
+	"""Create the required Pipeline V2 database indexes."""
 
+	pipelines, runs, counters = collections()
+
+	pipelines.create_index(
+		[('pipeline_id', 1)],
+		unique=True
+	)
+
+	runs.create_index(
+		[('run_id', 1)],
+		unique=True
+	)
+
+	runs.create_index(
+		[
+			('pipeline_id', 1),
+			('node_id', 1),
+			('sequence', 1)
+		],
+		unique=True
+	)
+
+	counters.create_index(
+		[
+			('pipeline_id', 1),
+			('node_id', 1)
+		],
+		unique=True
+	)
+
+	# Only idempotent registrations carry this field.
+	# Legacy runs and ordinary single-run registrations remain unaffected.
+	runs.create_index(
+		[
+			('owner', 1),
+			('pipeline_id', 1),
+			('idempotency_key', 1)
+		],
+		unique=True,
+		name='pipeline_run_idempotency_v1',
+		partialFilterExpression={
+			'idempotency_key': {
+				'$type': 'string'
+			}
+		}
+	)
 
 def validate_identifier(value, field):
 	if not isinstance(value, str) or IDENTIFIER_RE.fullmatch(value) is None:
@@ -258,7 +299,9 @@ def create_pipeline(owner, payload):
 	if not isinstance(payload, dict):
 		raise PipelineError('Expected a JSON object')
 
-	if set(payload) - {'app', 'name', 'description', 'metadata'}:
+	if set(payload) - {
+		'app', 'name', 'description', 'metadata', 'dataset_id'
+	}:
 		raise PipelineError('Unsupported pipeline field')
 
 	app = validate_identifier(payload.get('app'), 'app')
@@ -291,12 +334,29 @@ def create_pipeline(owner, payload):
 			'Specify the application using the top-level app field'
 		)
 
+	dataset_id = payload.get('dataset_id')
+
+	if 'dataset_id' in payload:
+		from caesar_rest import dataset_registry
+
+		if not isinstance(dataset_id, str):
+			raise PipelineError(
+				'dataset_id must be a string',
+				400
+			)
+
+		try:
+			dataset_registry.get_dataset(dataset_id)
+		except dataset_registry.DatasetError as exc:
+			raise PipelineError(str(exc), exc.status)
+
 	pipelines, _, _ = collections()
 
 	doc = {
 		'pipeline_id': uuid.uuid4().hex,
 		'owner': owner,
 		'app': app,
+		'dataset_id': dataset_id,
 		'name': name,
 		'description': description,
 		'metadata': metadata,
@@ -373,14 +433,42 @@ def create_run(
 	retention_root='',
 	max_directory_bytes=1024 * 1024 * 1024 * 1024,
 	max_directory_entries=100000, 
-	max_directory_depth=16
+	max_directory_depth=16,
+	idempotency_key=None,
+	request_fingerprint=None
 ):
 	"""Reserve a distinct experiment. Does NOT submit anything to Slurm."""
 	
 	t_run = time.perf_counter()
 	
+	# Idempotency metadata is server-derived, never accepted in the
+	# legacy execution payload.
+	if (idempotency_key is None) != (request_fingerprint is None):
+		raise PipelineError(
+			'Incomplete registration idempotency metadata',
+			500
+		)
+
+	if idempotency_key is not None:
+		from caesar_rest.pipeline import idempotency
+
+		idempotency.validate_key(idempotency_key)
+
+		if (
+			not isinstance(request_fingerprint, str)
+			or re.fullmatch(
+				r'[0-9a-f]{64}',
+				request_fingerprint
+			) is None
+		):
+			raise PipelineError(
+				'Invalid registration fingerprint',
+				500
+			)
+				
 	validate_identifier(node_id, 'node_id')
-	get_pipeline(owner, pipeline_id)
+	pipeline = get_pipeline(owner, pipeline_id)
+	pipeline_dataset_id = pipeline.get('dataset_id')
 	if not isinstance(payload, dict):
 		raise PipelineError('Expected a JSON object')
 	
@@ -405,18 +493,123 @@ def create_run(
 		if not isinstance(stage, str) or not stage:
 			raise PipelineError('Invalid parameters.stage')
 	
+	
 	dataset_id = payload.get('dataset_id')
+
+	if pipeline_dataset_id is not None:
+		if 'dataset_id' in payload:
+			raise PipelineError(
+				'Do not specify dataset_id for a dataset-bound pipeline',
+				400
+			)
+
+		if application != pipeline.get('app'):
+			raise PipelineError(
+				'Run application differs from pipeline application',
+				409
+			)
+
+		if stage is None:
+			raise PipelineError(
+				'Dataset-bound pipelines require a scientific stage',
+				400
+			)
+
+		from flask import current_app
+
+		policies = current_app.config.get(
+			'PIPELINE_V2_APPLICATIONS', {}
+		)
+
+		policy = policies.get(application) if isinstance(
+			policies, dict
+		) else None
+
+		if not isinstance(policy, dict):
+			raise PipelineError(
+				'Invalid V2 application policy',
+				503
+			)
+
+		stage_options = policy.get('input_options_by_stage')
+
+		if (
+			not isinstance(stage_options, dict)
+			or stage not in stage_options
+			or not isinstance(stage_options[stage], dict)
+		):
+			raise PipelineError(
+				'Missing V2 stage input policy',
+				503
+			)
+
+		dataset_input_name = policy.get(
+			'dataset_input_name',
+			'measurement_set'
+		)
+
+		if (
+			not isinstance(dataset_input_name, str)
+			or not dataset_input_name
+		):
+			raise PipelineError(
+				'Invalid V2 dataset input name',
+				503
+			)
+
+		input_names = list(stage_options[stage].values())
+
+		if input_names.count(dataset_input_name) > 1:
+			raise PipelineError(
+				'A stage cannot declare multiple dataset inputs',
+				503
+			)
+
+		dataset_id = (
+			pipeline_dataset_id
+			if dataset_input_name in input_names
+			else None
+		)
+
+		# Validate application-specific run parameters at registration.
+		# Submission validates them again against the persisted run.
+		from caesar_rest.job_configurator import JobConfigurator
+
+		configurator_class = (
+			JobConfigurator().app_configurators.get(application)
+		)
+
+		if configurator_class is None:
+			raise PipelineError(
+				'Unknown Pipeline V2 application configurator',
+				503
+			)
+
+		configurator = configurator_class(app_name=application)
+
+		try:
+			configurator.validate_pipeline_options(parameters)
+		except ValueError as exc:
+			raise PipelineError(
+				'Invalid application scientific options: %s' % exc,
+				409
+			) from exc
+
 
 	if dataset_id is not None:
 		from caesar_rest import dataset_registry
 
 		if not isinstance(dataset_id, str):
-			raise PipelineError('dataset_id must be a string')
+			raise PipelineError(
+				'dataset_id must be a string',
+				400
+			)
 
 		try:
 			dataset_registry.resolve_input_dataset(dataset_id)
 		except dataset_registry.DatasetError as exc:
-			raise PipelineError(str(exc), exc.status)
+			raise PipelineError(str(exc), exc.status)	
+	
 	
 	if not isinstance(parameters, dict) or not isinstance(input_runs, list):
 		raise PipelineError('parameters must be an object and input_runs a list')
@@ -431,6 +624,16 @@ def create_run(
 		parent = runs.find_one({'run_id': parent_id, 'pipeline_id': pipeline_id, 'owner': owner})
 		if parent is None or parent['status'] != 'COMPLETED':
 			raise PipelineError('Input run must exist and be completed: %s' % parent_id, 409)
+			
+		if (
+			pipeline_dataset_id is not None
+			and parent.get('dataset_id') is not None
+			and parent['dataset_id'] != pipeline_dataset_id
+		):
+			raise PipelineError(
+				'Upstream run dataset conflicts with pipeline dataset',
+				409
+			)			
 	
 	# Import lazily to avoid circular dependencies:
 	# artifacts.binding -> artifacts.access -> pipeline.manager.
@@ -502,7 +705,70 @@ def create_run(
 		'artifacts': [],
 		'created_at': utcnow()
 	}
-	runs.insert_one(doc)
+	
+	if idempotency_key is not None:
+		doc['idempotency_key'] = idempotency_key
+		doc['request_fingerprint'] = request_fingerprint	
+	
+	try:
+		runs.insert_one(doc)
+
+	except DuplicateKeyError as exc:
+		if idempotency_key is not None:
+			from caesar_rest.pipeline import idempotency
+
+			existing = idempotency.find_existing(
+				runs,
+				owner,
+				pipeline_id,
+				idempotency_key,
+				request_fingerprint
+			)
+
+			if existing is not None:
+				existing['idempotency_replayed'] = True
+				return existing
+
+		# Never treat unrelated unique-index collisions as replays.
+		raise PipelineError(
+			'Pipeline run registration uniqueness conflict',
+			409
+		) from exc
+
+	except PyMongoError as exc:
+		# An insert error can be ambiguous (e.g. connection lost
+		# after the primary committed). Check before reporting failure.
+		if idempotency_key is not None:
+			from caesar_rest.pipeline import idempotency
+
+			try:
+				existing = idempotency.find_existing(
+					runs,
+					owner,
+					pipeline_id,
+					idempotency_key,
+					request_fingerprint
+				)
+			except PyMongoError:
+				existing = None
+
+			if existing is not None:
+				existing['idempotency_replayed'] = True
+				return existing
+
+		# Do not automatically attempt another insertion.
+		if idempotency_key is not None:
+			message = (
+				'Registration outcome uncertain; retry with the same '
+				'idempotency key'
+			)
+		else:
+			message = (
+				'Registration outcome uncertain; inspect existing runs '
+				'before attempting another registration'
+			)
+
+		raise PipelineError(message, 503) from exc
 	
 	logger.info(
 		'V2 run registration database finalization: '
@@ -520,7 +786,12 @@ def create_run(
 		time.perf_counter() - t_run
 	)
 
-	return public_doc(doc)
+	result = public_doc(doc)
+
+	if idempotency_key is not None:
+		result['idempotency_replayed'] = False
+
+	return result
 
 
 def create_run_simple(
@@ -543,13 +814,51 @@ def create_run_simple(
 		'parameters',
 		'dataset_id',
 		'inputs',
-		'input_artifacts'
+		'input_artifacts',
+		'idempotency_key'
 	}	
 
 	if set(payload) - allowed:
 		raise PipelineError('Unsupported run field')
 
 	pipeline = get_pipeline(owner, pipeline_id)
+
+	idempotency_key = None
+	request_fingerprint = None
+
+	if 'idempotency_key' in payload:
+		from caesar_rest.pipeline import idempotency
+
+		idempotency_key = idempotency.validate_key(
+			payload['idempotency_key']
+		)
+
+		# Fingerprint the original client request, not the resolved
+		# upstream bindings or server-derived dataset attachment.
+		request_payload = {
+			key: value
+			for key, value in payload.items()
+			if key != 'idempotency_key'
+		}
+
+		request_fingerprint = idempotency.fingerprint(
+			request_payload
+		)
+
+		_, existing_runs, _ = collections()
+
+		existing = idempotency.find_existing(
+			existing_runs,
+			owner,
+			pipeline_id,
+			idempotency_key,
+			request_fingerprint
+		)
+
+		if existing is not None:
+			existing['idempotency_replayed'] = True
+			return existing
+
 
 	app = get_pipeline_app(pipeline)
 
@@ -615,7 +924,6 @@ def create_run_simple(
 
 		input_runs.add(source_run_id)
 
-
 	legacy_payload = {
 		'application': app,
 		'operation': default_node_id(stage),
@@ -625,6 +933,12 @@ def create_run_simple(
 	}
 
 	if 'dataset_id' in payload:
+		if pipeline.get('dataset_id') is not None:
+			raise PipelineError(
+				'Do not specify dataset_id for a dataset-bound pipeline',
+				400
+			)
+
 		legacy_payload['dataset_id'] = payload['dataset_id']
 
 	return create_run(
@@ -635,7 +949,9 @@ def create_run_simple(
 		retention_root=retention_root,
 		max_directory_bytes=max_directory_bytes,
 		max_directory_entries=max_directory_entries,
-		max_directory_depth=max_directory_depth
+		max_directory_depth=max_directory_depth,
+		idempotency_key=idempotency_key,
+		request_fingerprint=request_fingerprint
 	)
 
 def list_runs(owner, pipeline_id, node_id=None):

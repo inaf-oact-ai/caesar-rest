@@ -49,7 +49,7 @@ def get_args():
 	parser.add_argument('-datadir','--datadir', dest='datadir', default='/opt/caesar-rest/data', required=False, type=str, help='Directory where to store uploaded data') 
 	parser.add_argument('-jobdir','--jobdir', dest='jobdir', default='/opt/caesar-rest/jobs', required=False, type=str, help='Directory where to store jobs') 
 	parser.add_argument('-modeldir','--modeldir', dest='modeldir', default='/opt/caesar-rest/models', required=False, type=str, help='Directory where models are stored') 
-	parser.add_argument('-job_scheduler','--job_scheduler', dest='job_scheduler', default='celery', required=False, type=str, help='Job scheduler to be used. Options are: {celery,kubernetes,slurm} (default=celery)')
+	parser.add_argument('-job_scheduler','--job_scheduler', dest='job_scheduler', default='slurm', required=False, type=str, help='Job scheduler to be used. Options are: {celery, kubernetes, slurm} (default=slurm)')
 	parser.add_argument('-job_monitoring_period','--job_monitoring_period', dest='job_monitoring_period', default=5, required=False, type=int, help='Job monitoring poll period in seconds') 
 	parser.add_argument('--debug', dest='debug', action='store_true')	
 	parser.set_defaults(debug=True)
@@ -845,18 +845,17 @@ config.PIPELINE_ARTIFACT_RETENTION_MAX_DIRECTORY_DEPTH = pipeline_artifact_reten
 config.PIPELINE_ARTIFACT_RETENTION_ROOT_CLUSTER = pipeline_artifact_retention_root_cluster
 config.PIPELINE_V2_APPLICATIONS = pipeline_v2_applications
 
-# - Create data manager (DEPRECATED BY MONGO)
-##logger.info("Creating data manager ...")
-##datamgr= DataManager(rootdir=config.UPLOAD_FOLDER)
-##datamgr.register_data()
-
 # - Create job configurator
 logger.info("Creating job configurator ...")
 jobcfg= JobConfigurator()
 
-# - Update celery configs
-celery.conf.result_backend= result_backend
-celery.conf.broker_url= broker_url
+# - Configure the Celery broker and result backend only when selected.
+if job_scheduler == 'celery':
+	from caesar_rest.backend_dependencies import require_celery_app
+
+	celery_app = require_celery_app()
+	celery_app.conf.result_backend = result_backend
+	celery_app.conf.broker_url = broker_url
 
 # - Set legacy dataset configs
 config.DATASETS["smgps"]["path"]= dataset_smgps
@@ -907,14 +906,25 @@ else:
 #===============================
 if use_db and mongo is not None:
 	logger.info("Initializing MongoDB to app ...")
+
 	try:
 		mongo.init_app(app)
-		from caesar_rest.pipeline_manager import ensure_indexes
+		logger.info("Flask-PyMongo initialization completed successfully")
+
+		from caesar_rest.pipeline.manager import ensure_indexes
+
 		with app.app_context():
 			ensure_indexes()
-			
-	except:
-		logger.error("Failed to initialize MongoDB to app!")
+
+		logger.info("MongoDB pipeline indexes initialized successfully")
+
+	except Exception as e:
+		logger.exception(
+			"Failed to initialize MongoDB to app (err=%s)!",
+			str(e)
+		)
+		raise
+
 else:
 	logger.info("Starting app without mongo backend ...")
 

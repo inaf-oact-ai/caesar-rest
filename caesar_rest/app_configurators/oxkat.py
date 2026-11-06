@@ -1,19 +1,32 @@
+
 """CAESAR-REST configurator for the OXKAT Measurement Set pipeline.
 
-Supported stages:
-- GET_INFO: inspect a Measurement Set and generate observation metadata.
-- 1GC: prepare the first-generation calibration recipe using a Measurement
-  Set and the project_info.json artifact from a completed GET_INFO run.
+Implemented Pipeline V2 stages:
+- GET_INFO: inspect a registered MeerKAT Measurement Set and produce
+  observation, field and calibrator metadata.
+- 1GC: perform first-generation calibration and produce derived,
+  target-specific Measurement Sets and calibration diagnostics.
+- FLAG: process one calibrated science target per run, performing
+  flagging, initial imaging and mask generation.
+- 2GC: process one flagged science target per run, performing
+  second-generation calibration and associated imaging.
 
-The 1GC stage currently generates the calibration execution script but does
-not execute the scientific calibration steps.
+3GC_PEEL and 3GC_FACET are reserved but not implemented.
 
-For V2 pipeline submissions, inputs are resolved from registered datasets
-and retained upstream artifacts. The Measurement Set is staged as a
-read-only reference. Actual calibration will require a private writable
-copy of the Measurement Set.
+Pipeline V2 uses a dataset-bound pipeline and immutable upstream
+artifact bindings. GET_INFO and 1GC consume the registered original
+Measurement Set according to stage policy; FLAG and 2GC consume
+retained target-specific upstream artifacts.
 
-Later calibration and imaging stages remain unsupported.
+Scientific target discovery, readiness and bulk planning are
+provided through the Pipeline V2 APIs. Bulk registration creates
+independent runs but does not submit or execute them.
+
+MAASAI or another external client controls experiment selection,
+run submission, scientific evaluation and pipeline progression.
+
+Original datasets and retained upstream artifacts are not modified.
+Stages requiring writable Measurement Sets operate on private copies.
 """
 
 import os
@@ -44,7 +57,12 @@ OXKAT_STAGES = [
 # reach Slurm: they require distinct inputs, output contracts and permissions.
 IMPLEMENTED_STAGES = {"GET_INFO", "1GC", "FLAG", "2GC"}
 
+PREVIEW_RETENTION_PROFILES = ('none', 'selected', 'all')
+PREVIEW_RETENTION_STAGES = ('FLAG', '2GC')
+DEFAULT_PREVIEW_RETENTION = 'selected'
+
 _FIELD_SELECTION = re.compile(r'^(?:auto|[0-9]+(?:,[0-9]+)*)$')
+_TARGET_NAME = re.compile(r'^[A-Za-z0-9_][A-Za-z0-9_-]{0,63}$')
 
 ##################################################
 ###     APP CONFIG CLASS
@@ -63,63 +81,104 @@ class OxkatAppConfigurator(AppConfigurator):
 		
 		self.description = (
 			"Process MeerKAT radio-interferometric Measurement Sets "
-			"using OXKAT. GET_INFO extracts observation metadata; "
-			"1GC performs reference calibration and produces calibrated "
-			"target Measurement Sets; FLAG performs target flagging, "
-			"initial imaging and mask generation using retained "
-			"1GC outputs. Subsequent calibration and imaging stages "
-			"will be enabled incrementally."
-		)		
+			"using the OXKAT scientific pipeline. "
+			"GET_INFO extracts observation, field and calibrator metadata; "
+			"1GC performs first-generation calibration and produces "
+			"calibrated target Measurement Sets and diagnostics; "
+			"FLAG performs target-specific flagging, initial imaging "
+			"and mask generation; 2GC performs second-generation "
+			"calibration and associated imaging using retained FLAG "
+			"outputs. The application supports dataset-bound Pipeline "
+			"V2 workflows, scientific target readiness and per-target "
+			"bulk planning and registration. Each target run is "
+			"submitted and evaluated independently. Scientific "
+			"experiment selection and pipeline progression remain "
+			"the responsibility of an external orchestration client."
+		)
+		
+		
 		
 		self.tool_categories = ["measurement-set"]
 		
 		self.input_requirements = {
 			"supported_formats": ["ms"],
 			"expected_data": (
-				"GET_INFO requires one registered MeerKAT Measurement "
-				"Set directory (*.ms). "
-				"1GC requires the original registered Measurement Set "
-				"and retained project_info.json from GET_INFO. "
-				"FLAG requires a calibrated target Measurement Set "
-				"produced and retained by 1GC, together with "
-				"project_info.json describing the target. "
-				"FLAG currently supports one target MS per run."
+				"OXKAT processes registered MeerKAT Measurement Set "
+				"datasets through CAESAR-REST Pipeline V2. "
+				"GET_INFO requires the original Measurement Set. "
+				"1GC requires the original Measurement Set and "
+				"retained GET_INFO project_info metadata. "
+				"FLAG requires a retained calibrated target "
+				"Measurement Set from 1GC and project_info metadata. "
+				"2GC requires a retained flagged target Measurement "
+				"Set from FLAG and compatible project_info metadata. "
+				"FLAG and 2GC process one science target per run."
 			),
 			"notes": [
+				"Create a Pipeline V2 instance with app='oxkat' "
+				"and the accessible dataset_id in the pipeline "
+				"creation payload.",
+				"Do not repeat dataset_id in run registrations "
+				"for a dataset-bound pipeline.",
 				"Measurement Sets are registered server-side; "
 				"large scientific datasets are not uploaded.",
-				"GET_INFO references the original dataset using "
-				"dataset_id and does not modify it.",
-				"1GC uses the registered original Measurement Set "
-				"and the retained GET_INFO project_info artifact.",
-				"1GC performs calibration in a private workspace "
-				"and publishes derived Measurement Sets.",
-				"FLAG uses two retained upstream artifact bindings: "
-				"target_ms and project_info.",
-				"FLAG requires a private writable copy of the "
-				"calibrated target MS; retained upstream data "
-				"must remain unchanged.",
-				"FLAG does not require dataset_id because its "
-				"Measurement Set is an upstream pipeline artifact.",
-				"V2 inputs are resolved from authorized dataset IDs "
-				"and frozen artifact bindings; clients do not "
-				"supply filesystem paths.",
-			],
+				"GET_INFO reads the original registered Measurement "
+				"Set without modifying it.",
+				"1GC consumes the original Measurement Set and "
+				"retained project_info from GET_INFO.",
+				"1GC produces derived target Measurement Sets "
+				"and calibration diagnostics in a private workspace.",
+				"FLAG consumes retained target_ms from 1GC and "
+				"compatible project_info metadata.",
+				"2GC consumes retained target_ms from FLAG and "
+				"compatible project_info metadata.",
+				"FLAG and 2GC support the target parameter to "
+				"identify the science target being processed.",
+				"FLAG and 2GC require private writable copies "
+				"of their input target Measurement Sets.",
+				"Scientific target readiness and bulk planning "
+				"are available through Pipeline V2 endpoints.",
+				"Bulk planning proposes eligible target runs; "
+				"bulk registration creates runs without submitting "
+				"them for execution.",
+				"Individual run registration supports alternative "
+				"scientific configurations through oxkat_config.",
+				"Clients must use server-resolved dataset identities "
+				"and upstream artifact references, not filesystem "
+				"paths or arbitrary artifact indices.",
+				"Upstream runs must have suitable completed and "
+				"retained outputs before downstream binding."
+			]
 		}
-		
+
 		
 		self.limitations = [
-			"GET_INFO, 1GC and FLAG are supported through V2 pipelines.",
-			"1GC requires a registered original Measurement Set and "
-			"the retained project_info artifact from GET_INFO.",
-			"FLAG requires a retained calibrated target Measurement Set "
-			"from 1GC and validated project_info metadata.",
-			"FLAG initially supports one target Measurement Set per run.",
-			"Derived Measurement Sets are processed in private writable "
-			"workspaces; original datasets and retained upstream artifacts "
-			"must not be modified.",
-			"2GC, 3GC_PEEL and 3GC_FACET are not yet supported."
+			"GET_INFO, 1GC, FLAG and 2GC are supported through "
+			"Pipeline V2; 3GC_PEEL and 3GC_FACET are not implemented.",
+			"1GC requires the original registered Measurement Set "
+			"and retained project_info from GET_INFO.",
+			"FLAG requires a retained calibrated target Measurement "
+			"Set from 1GC and compatible project_info metadata.",
+			"2GC requires a retained flagged target Measurement Set "
+			"from FLAG and compatible project_info metadata.",
+			"FLAG and 2GC process one science target per run.",
+			"Derived Measurement Sets are processed using private "
+			"writable copies; original datasets and retained "
+			"upstream artifacts must remain unchanged.",
+			"Scientific target discovery and planning depend on "
+			"available dataset inspection metadata and selected "
+			"upstream results.",
+			"Bulk registration creates independent pipeline runs "
+			"but does not submit or execute them.",
+			"No automatic scientific quality assessment, "
+			"experiment optimization or downstream stage "
+			"advancement is performed by CAESAR-REST.",
+			"Run completion alone does not guarantee that "
+			"outputs are retained and consumable.",
+			"Registered directory artifacts cannot be downloaded "
+			"through the regular-file artifact endpoint."
 		]
+
 
 		
 		# - Set valid options
@@ -129,13 +188,17 @@ class OxkatAppConfigurator(AppConfigurator):
 				value="",
 				value_type=str,
 				description=(
-					"OXKAT processing stage. GET_INFO extracts observation "
-					"metadata; 1GC executes reference calibration and "
-					"produces calibrated target Measurement Sets; "
-					"FLAG performs target flagging, initial imaging "
-					"and cleaning-mask generation using retained "
-					"1GC products. 2GC and 3GC stages are reserved "
-					"for future implementation."
+					"OXKAT scientific processing stage. "
+					"GET_INFO extracts observation metadata; "
+					"1GC performs first-generation calibration "
+					"and produces calibrated target Measurement Sets; "
+					"FLAG performs target-specific flagging, initial "
+					"imaging and mask generation using retained "
+					"1GC products; 2GC performs second-generation "
+					"calibration and imaging using retained FLAG "
+					"products. 3GC_PEEL and 3GC_FACET are reserved "
+					"but not implemented. FLAG and 2GC support "
+					"one explicitly selected science target per run."
 				),
 				category="RUN",
 				default_value="GET_INFO",
@@ -179,8 +242,8 @@ class OxkatAppConfigurator(AppConfigurator):
 				"type": "text/x-shellscript",
 				"role": "diagnostic",
 				"description": (
-					"Generated first-generation calibration script. "
-					"Produced during 1GC preparation but not executed."
+					"Generated first-generation calibration execution "
+					"script used by the OXKAT 1GC workflow."
 				),
 				"format": "",
 				"parser": "",
@@ -328,6 +391,74 @@ class OxkatAppConfigurator(AppConfigurator):
 				"stages": ["2GC"],
 				"required": False,
 			},
+			"image_qa": {
+				"path": "previews/image_qa.json",
+				"glob": None,
+				"type": "application/json",
+				"role": "diagnostic",
+				"description": (
+					"Complete OXKAT imaging QA, preview index, "
+					"imaging families and BANE/Aegean statistics."
+				),
+				"format": "",
+				"parser": "json",
+				"stages": ["FLAG", "2GC"],
+				"required": False,
+			},
+			"image_previews": {
+				"path": None,
+				"glob": "previews/selected/preview_*.png",
+				"type": "image/png",
+				"role": "diagnostic",
+				"description": (
+					"Curated imaging previews across OXKAT "
+					"imaging families."
+				),
+				"format": "png",
+				"parser": "",
+				"stages": ["FLAG", "2GC"],
+				"required": False,
+			},
+			"sourcefind_logs": {
+				"path": None,
+				"glob": "previews/logs/sourcefind_*.log",
+				"type": "text/plain",
+				"role": "diagnostic",
+				"description": "BANE and Aegean execution logs.",
+				"stages": ["FLAG", "2GC"],
+				"required": False,
+			},
+			"sourcefind_catalog_native": {
+				"path": None,
+				"glob": "previews/catalog/sourcefind_*.dat",
+				"type": "text/plain",
+				"role": "diagnostic",
+				"description": "Aegean native ASCII catalogs.",
+				"stages": ["FLAG", "2GC"],
+				"required": False,
+			},
+			"sourcefind_catalog_tables": {
+				"path": None,
+				"glob": "previews/catalog/sourcefind_*.tab",
+				"type": "text/tab-separated-values",
+				"role": "diagnostic",
+				"description": (
+					"Aegean component and island source tables."
+				),
+				"stages": ["FLAG", "2GC"],
+				"required": False,
+			},
+			"sourcefind_catalog_regions": {
+				"path": None,
+				"glob": "previews/catalog/sourcefind_*.reg",
+				"type": "text/plain",
+				"role": "diagnostic",
+				"description": (
+					"Aegean component and island DS9 regions."
+				),
+				"stages": ["FLAG", "2GC"],
+				"required": False,
+			},
 			"log": {
 				"path": None,
 				"glob": "*.log",
@@ -340,8 +471,125 @@ class OxkatAppConfigurator(AppConfigurator):
 				"notes": "Diagnostic artifacts can disclose internal paths; restrict access.",
 			},
 		}
+		
+		# Diagnostic job archive selection.
+		# Large scientific products are available through retained
+		# Pipeline V2 artifacts, not duplicated in the job archive.
+		self.archive_policy = {
+			'include': [
+				'results/*.log',
+				'results/*.json',
+				'results/*.txt',
+				'results/*.sh',
+				'results/previews/image_qa.json',
+				'results/previews/selected/*.png',
+				'results/previews/catalog/*.dat',
+				'results/previews/catalog/*.tab',
+				'results/previews/catalog/*.reg',
+				'results/previews/logs/*.log',
+			],
+		}
+
 		self.option_value_transformer = {}
 
+
+	def describe_option_schema(self):
+		"""Publish V1 and V2 options under one discoverable registry."""
+
+		schema = super().describe_option_schema()
+
+		active_stages = [
+			stage for stage in OXKAT_STAGES
+			if stage in IMPLEMENTED_STAGES
+		]
+
+		schema['stage']['interfaces']['pipeline_v2'] = {
+			'type': 'string',
+			'required': True,
+			'allowed_values': active_stages,
+		}
+
+		schema['target'] = {
+			'interfaces': {
+				'pipeline_v2': {
+					'type': 'string',
+					'required': False,
+					'stages': list(PREVIEW_RETENTION_STAGES),
+					'pattern': _TARGET_NAME.pattern,
+					'description': (
+						'Science target selected for FLAG or 2GC.'
+					),
+				}
+			}
+		}
+
+		schema['preview_retention'] = {
+			'interfaces': {
+				'pipeline_v2': {
+					'type': 'string',
+					'required': False,
+					'stages': list(PREVIEW_RETENTION_STAGES),
+					'allowed_values': list(PREVIEW_RETENTION_PROFILES),
+					'default': DEFAULT_PREVIEW_RETENTION,
+					'description': (
+						'Generate all preview images and register '
+						'none, a curated selection, or all PNGs '
+						'for artifact retention.'
+					),
+				}
+			}
+		}
+
+		properties = {}
+
+		for name, spec in sorted(
+			oxkat_scientific_config.SCHEMA.items()
+		):
+			stages = [
+				stage for stage in active_stages
+				if stage in spec['stages']
+			]
+
+			if not stages:
+				continue
+
+			entry = {
+				'kind': spec['kind'],
+				'stages': stages,
+			}
+
+			for field in ('minimum', 'maximum', 'choices'):
+				if field in spec:
+					entry[field] = spec[field]
+
+			properties[name] = entry
+
+		schema['oxkat_config'] = {
+			'interfaces': {
+				'pipeline_v2': {
+					'type': 'object',
+					'required': False,
+					'min_properties': 1,
+					'max_properties': 128,
+					'additional_properties': False,
+					'stages': active_stages,
+					'schema_version': (
+						oxkat_scientific_config.SCHEMA_VERSION
+					),
+					'schema_digest': (
+						oxkat_scientific_config.schema_digest()
+					),
+					'properties': properties,
+					'description': (
+						'Validated OXKAT scientific overrides. '
+						'Each property is restricted to its '
+						'declared processing stages.'
+					),
+				}
+			}
+		}
+
+		return schema
 
 
 	def validate_pipeline_options(self, job_options):
@@ -355,14 +603,55 @@ class OxkatAppConfigurator(AppConfigurator):
 		if stage not in IMPLEMENTED_STAGES:
 			raise ValueError('OXKAT stage is not implemented: %s' % stage)
 
-		unknown = set(job_options) - {'stage', 'oxkat_config'}
-
+		unknown = set(job_options) - {
+			'stage',
+			'target',
+			'oxkat_config',
+			'preview_retention',
+		}
+		
 		if unknown:
 			raise ValueError(
 				'Unsupported OXKAT job options: %s' %
 				', '.join(sorted(unknown))
 			)
+			
+		# - Validate target	
+		if 'target' in job_options:
+			target = job_options['target']
 
+			if stage not in ('FLAG', '2GC'):
+				raise ValueError(
+					'target is supported only for FLAG and 2GC'
+				)
+
+			if (
+				not isinstance(target, str)
+				or not _TARGET_NAME.fullmatch(target)
+			):
+				raise ValueError('Invalid OXKAT target name')			
+			
+		# - Validate preview retention
+		if 'preview_retention' in job_options:
+			profile = job_options['preview_retention']
+
+			if stage not in PREVIEW_RETENTION_STAGES:
+				raise ValueError(
+					'preview_retention is supported only '
+					'for FLAG and 2GC'
+				)
+
+			if (
+				not isinstance(profile, str)
+				or profile not in PREVIEW_RETENTION_PROFILES
+			):
+				raise ValueError(
+					'preview_retention must be one of: '
+					+ ', '.join(PREVIEW_RETENTION_PROFILES)
+				)
+		
+			
+		# - Validate config	
 		if 'oxkat_config' not in job_options:
 			return None
 
@@ -391,36 +680,211 @@ class OxkatAppConfigurator(AppConfigurator):
 
 		overrides = self.validate_pipeline_options(parameters)
 
-		# - Preserve existing generic validation for scalar V2 arguments.
 		scalar_parameters = dict(parameters)
 		scalar_parameters.pop('oxkat_config', None)
+		target = scalar_parameters.pop('target', None)
+		preview_retention = scalar_parameters.pop('preview_retention', None)
 
 		args = scalar_validator(scalar_parameters, allowed)
 
-		if overrides is None:
-			return args
+		if target is not None:
+			args.append('--target-name=%s' % target)
 
-		document = {
-			'stage': scalar_parameters['stage'],
-			'overrides': overrides,
+		if preview_retention is not None:
+			args.append(
+				'--preview-retention=%s' % preview_retention
+			)
+
+		if overrides is not None:
+			document = {
+				'stage': scalar_parameters['stage'],
+				'overrides': overrides,
+			}
+
+			serialized = json.dumps(
+				document,
+				sort_keys=True,
+				separators=(',', ':'),
+				allow_nan=False
+			).encode('utf-8')
+
+			token = base64.urlsafe_b64encode(serialized).decode('ascii')
+			token = token.rstrip('=')
+
+			if len(token) > 3000:
+				raise ValueError('Encoded OXKAT configuration is too large')
+
+			args.append('--oxkat-config=%s' % token)
+
+		return args	
+
+
+	def build_scientific_readiness(self, pipeline, runs, dataset_doc):
+		"""Evaluate OXKAT readiness using persisted scientific metadata."""
+
+		from caesar_rest.app_configurators import oxkat_readiness
+
+		return oxkat_readiness.resolve_snapshot(
+			pipeline,
+			runs,
+			dataset_doc
+		)
+
+	def build_bulk_plan(self, scientific, stage, targets=None):
+		"""Translate scientific readiness into OXKAT run proposals."""
+
+		from caesar_rest.app_configurators import oxkat_readiness
+
+		return oxkat_readiness.build_bulk_plan(
+			scientific,
+			stage,
+			targets
+		)
+
+	def validate_pipeline_bindings(self, parameters, bindings):
+		"""Validate target-specific OXKAT V2 artifact bindings.
+
+		FLAG and 2GC must consume the Measurement Set corresponding
+		to the explicitly requested science target.
+
+		The binding metadata comes from owner-scoped pipeline records,
+		not from client-supplied filesystem paths.
+		"""
+
+		if not isinstance(parameters, dict):
+			raise ValueError('Invalid OXKAT pipeline parameters')
+
+		if not isinstance(bindings, dict):
+			raise ValueError('Invalid OXKAT pipeline bindings')
+
+		stage = parameters.get('stage')
+
+		if stage not in ('FLAG', '2GC'):
+			return None
+
+		target = parameters.get('target')
+
+		# Preserve backward compatibility with existing single-target
+		# runs that do not specify an explicit target.
+		if target is None:
+			return None
+
+		if (
+			not isinstance(target, str)
+			or not _TARGET_NAME.fullmatch(target)
+		):
+			raise ValueError('Invalid OXKAT target name')
+
+		target_binding = bindings.get('target_ms')
+		project_binding = bindings.get('project_info')
+
+		if not isinstance(target_binding, dict):
+			raise ValueError(
+				'OXKAT requires a retained target_ms artifact'
+			)
+
+		if not isinstance(project_binding, dict):
+			raise ValueError(
+				'OXKAT requires a retained project_info artifact'
+			)
+
+		if target_binding.get('artifact_kind') != 'directory':
+			raise ValueError(
+				'OXKAT target_ms must be a directory artifact'
+			)
+
+		if target_binding.get('source_stage') not in (
+			'1GC',
+			'FLAG'
+		):
+			raise ValueError(
+				'OXKAT target_ms comes from an unsupported stage'
+			)
+
+		if (
+			stage == 'FLAG'
+			and target_binding.get('source_stage') != '1GC'
+		):
+			raise ValueError(
+				'FLAG target_ms must originate from 1GC'
+			)
+
+		if (
+			stage == '2GC'
+			and target_binding.get('source_stage') != 'FLAG'
+		):
+			raise ValueError(
+				'2GC target_ms must originate from FLAG'
+			)
+
+		expected_artifact_names = {
+			'1GC': 'working_measurement_sets',
+			'FLAG': 'flagged_target_measurement_sets'
 		}
 
-		serialized = json.dumps(
-			document,
-			sort_keys=True,
-			separators=(',', ':'),
-			allow_nan=False
-		).encode('utf-8')
+		source_stage = target_binding['source_stage']
 
-		token = base64.urlsafe_b64encode(serialized).decode('ascii')
-		token = token.rstrip('=')
+		if target_binding.get('artifact_name') != (
+			expected_artifact_names[source_stage]
+		):
+			raise ValueError(
+				'Unexpected OXKAT target Measurement Set artifact'
+			)
 
-		if len(token) > 3000:
-			raise ValueError('Encoded OXKAT configuration is too large')
+		relative_path = target_binding.get('relative_path')
 
-		args.append('--oxkat-config=%s' % token)
+		if not isinstance(relative_path, str):
+			raise ValueError(
+				'Invalid OXKAT target artifact path'
+			)
 
-		return args
+		ms_name = relative_path.rsplit('/', 1)[-1]
+
+		if not ms_name.endswith('_' + target + '.ms'):
+			raise ValueError(
+				'Selected Measurement Set does not match '
+				'the requested OXKAT target: %s' % target
+			)
+
+		if (
+			project_binding.get('artifact_name') != 'project_info'
+			or project_binding.get('artifact_kind') != 'file'
+		):
+			raise ValueError(
+				'Invalid OXKAT project_info binding'
+			)
+
+		if stage == 'FLAG':
+			if project_binding.get('source_stage') not in (
+				'GET_INFO',
+				'1GC'
+			):
+				raise ValueError(
+					'FLAG project_info must originate from '
+					'GET_INFO or 1GC'
+				)
+
+		if stage == '2GC':
+			if project_binding.get('source_stage') not in (
+				'GET_INFO',
+				'1GC',
+				'FLAG'
+			):
+				raise ValueError(
+					'2GC project_info comes from an unsupported stage'
+				)
+				
+			if project_binding.get('source_stage') == 'FLAG':
+				if (
+					project_binding.get('source_run_id')
+					!= target_binding.get('source_run_id')
+				):
+					raise ValueError(
+						'2GC project_info and target_ms must originate '
+						'from the same FLAG run'
+					)				
+
+		return None
 
 
 	def set_data_input_option_value(self):

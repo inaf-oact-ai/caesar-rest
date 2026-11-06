@@ -141,11 +141,31 @@ def discover_artifacts(workspace, contract, max_files=1000, max_directory_entrie
 			raise ArtifactDiscoveryError('Exactly one of path/glob must be declared')
 		if exact:
 			relatives = [_safe_relative(exact)]
+
 		else:
 			pattern = _safe_relative(pattern)
-			if '/' in pattern or '**' in pattern:
-				raise ArtifactDiscoveryError('Only flat glob patterns are supported')
-			relatives = sorted(os.path.basename(x) for x in glob.glob(str(results / pattern)))
+
+			if '**' in pattern:
+				raise ArtifactDiscoveryError(
+					'Recursive artifact globs are not supported'
+				)
+
+			parts = pattern.split('/')
+			parent_parts = parts[:-1]
+
+			if any(
+				any(character in part for character in '*?[')
+				for part in parent_parts
+			):
+				raise ArtifactDiscoveryError(
+					'Wildcard artifact directories are not supported'
+				)
+
+			relatives = sorted(
+				os.path.relpath(path, str(results))
+				for path in glob.glob(str(results / pattern))
+			)
+		
 		if spec.get('required') and not relatives:
 			raise ArtifactDiscoveryError('Missing required artifact: %s' % key)
 

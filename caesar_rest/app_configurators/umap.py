@@ -274,7 +274,7 @@ class UMAPAppConfigurator(AppConfigurator):
 				"parser": "json",
 				"required": True,
 				"notes": (
-					"The embeddings json output filename produced by UMAP in unsupervised run mode is by default set to 'latent_data_umap_unsupervised.json', but it can be configured by the user with the option 'outfile-unsup-json'"
+					"The embeddings json output filename produced by UMAP in unsupervised run mode is by default set to 'featdata_umap.json', but it can be configured by the user with the option 'outfile-unsup-json'"
 				)
 			},
 			"embeddings-ascii": {
@@ -287,7 +287,7 @@ class UMAPAppConfigurator(AppConfigurator):
 				"parser": "text",
 				"required": True,
 				"notes": (
-					"The embeddings ascii output filename produced by UMAP in unsupervised run mode is by default set to 'latent_data_umap_unsupervised.dat', but it can be configured by the user with the option 'outfile-unsup'"
+					"The embeddings ascii output filename produced by UMAP in unsupervised run mode is by default set to 'featdata_umap.dat', but it can be configured by the user with the option 'outfile-unsup'"
 				)
 			},
 			"embeddings-ascii-supervised": {
@@ -300,7 +300,7 @@ class UMAPAppConfigurator(AppConfigurator):
 				"parser": "text",
 				"required": False,
 				"notes": (
-					"The embeddings ascii output filename produced by UMAP in supervised run mode is by default set to 'latent_data_umap_supervised.dat', but it can be configured by the user with the option 'outfile-sup'"
+					"The embeddings ascii output filename produced by UMAP in supervised run mode is by default set to 'featdata_umap_sup.dat', but it can be configured by the user with the option 'outfile-sup'"
 				)
 			},
 			"datascaler": {

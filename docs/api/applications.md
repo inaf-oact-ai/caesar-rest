@@ -1,0 +1,623 @@
+# Application discovery REST API
+
+CAESAR-REST provides REST endpoints for discovering available scientific applications and retrieving their self-describing execution contracts.
+
+Application descriptions expose scientific purpose, tool categories, input requirements, configurable job options, expected outputs and limitations. This metadata allows clients such as MAASAI to identify suitable scientific tools and understand their capabilities before registering or submitting jobs.
+
+Application discovery is distinct from scientific pipeline orchestration. The self-description provides application-specific information, while the Pipeline V2 REST API defines pipeline creation, run registration, readiness, execution, artifact management and preferred-run selection.
+
+All endpoints use the base path `/caesar/api/v1.0`. When authentication is enabled, requests require a valid OAuth 2.0 bearer access token.
+
+See [REST API overview](overview.md) and [Keycloak authentication](../deployment/authentication.md).
+
+## 1. List available applications
+
+**Endpoint:**
+
+```http
+GET /caesar/api/v1.0/apps
+```
+
+This endpoint returns the names of scientific applications registered with the CAESAR-REST job configurator.
+
+Example:
+
+```bash
+curl --fail-with-body \
+	-H "Authorization: Bearer ${ACCESS_TOKEN}" \
+	"https://server.example.org:8444/caesar/api/v1.0/apps"
+```
+
+The response is a JSON object containing an `apps` array.
+
+An illustrative response is:
+
+```json
+{
+  "apps": [
+    "caesar",
+    "aegean",
+    "umap",
+    "hdbscan",
+    "fextractor",
+    "oxkat"
+  ]
+}
+```
+
+The example is illustrative, not an exhaustive or guaranteed list of applications in a particular deployment.
+
+The actual application list is generated dynamically from the server's registered application configurators. It may change as applications are added, removed or updated.
+
+Clients should use this endpoint rather than maintaining a hardcoded list of supported application names.
+
+An application appearing in this list means that its configurator is registered. It does not necessarily guarantee that its scientific container image, external dependencies or execution backend have been successfully validated in the current deployment.
+
+### Application reference pages
+
+The following pages summarize scientific purpose, inputs, outputs, limitations, supported options and example submissions. They describe the `devel` configurator metadata; `GET /apps` and each live `GET /app/{app_name}/describe` response remain authoritative for the deployment.
+
+| Application | Scientific purpose | Reference |
+| --- | --- | --- |
+| CAESAR | Radio compact/extended source finding | [CAESAR](applications/caesar.md) |
+| Aegean | Radio compact-source finding and Gaussian fitting | [Aegean](applications/aegean.md) |
+| CuTEx | Curvature-based compact-source extraction and fitting | [CuTEx](applications/cutex.md) |
+| CAESAR-YOLO | Learned radio-source detection and morphological classification | [CAESAR-YOLO](applications/caesar-yolo.md) |
+| Classifier ViT | Radio image classification | [Classifier ViT](applications/classifier-vit.md) |
+| Classifier ViT Catalog | Classify catalogued sources using image cutouts | [Classifier ViT Catalog](applications/classifier-vit-catalog.md) |
+| UMAP | Feature dimensionality reduction | [UMAP](applications/umap.md) |
+| HDBSCAN | Density-based feature clustering | [HDBSCAN](applications/hdbscan.md) |
+| Outlier Finder | IsolationForest anomaly detection | [Outlier Finder](applications/outlier-finder.md) |
+| Similarity Search | Nearest-neighbor retrieval using feature embeddings | [Similarity Search](applications/similarity-search.md) |
+| Fextractor | Image and time-series feature extraction | [Fextractor](applications/fextractor.md) |
+| Solar Flare Forecaster | Forecast M+ flares from active-region data | [SFForecaster](applications/sfforecaster.md) |
+| OXKAT | MeerKAT MS calibration and imaging stages | [OXKAT](applications/oxkat.md) |
+
+Other apps, including Similarity Search, will receive pages once `TBD` metadata have been completed and reviewed. `caesar-rest` is the name of the service rather than a separately registered scientific application.
+
+## 2. Retrieve an application description
+
+**Endpoint:**
+
+```http
+GET /caesar/api/v1.0/app/{app_name}/describe
+```
+
+Replace `{app_name}` with an application name returned by the discovery endpoint.
+
+For example:
+
+```bash
+curl --fail-with-body \
+	-H "Authorization: Bearer ${ACCESS_TOKEN}" \
+	"https://server.example.org:8444/caesar/api/v1.0/app/umap/describe"
+```
+
+The endpoint obtains the application's description from its registered configurator.
+
+The response is a JSON object produced by the application's registered configurator.
+
+The current self-description schema includes the following top-level fields:
+
+| Field | Description |
+| --- | --- |
+| `name` | Registered application identifier |
+| `description` | Scientific purpose and supported processing capabilities |
+| `tool_categories` | Categories used for scientific tool discovery and selection |
+| `input_requirements` | Expected input data, supported formats and additional requirements |
+| `job_options` | Application-specific configurable job options |
+| `job_outputs` | Descriptions of expected scientific output products |
+| `limitations` | Known restrictions, unsupported operations and execution constraints |
+
+These fields are generated by `AppConfigurator.describe_dict()`.
+
+A representative subset of the UMAP description is:
+
+```json
+{
+  "mindist": {
+    "advanced": 0,
+    "category": "PROCESSING",
+    "default": 0.1,
+    "description": "Min dist UMAP parameter (default=0.1)",
+    "enum": false,
+    "mandatory": false,
+    "max": 1.0,
+    "min": 0.0,
+    "subcategory": "",
+    "type": "float"
+  },
+  "nneighbors": {
+    "advanced": 0,
+    "category": "PROCESSING",
+    "default": 15,
+    "description": "N neighbors UMAP parameter (default=15)",
+    "enum": false,
+    "mandatory": false,
+    "max": 10000,
+    "min": 1,
+    "subcategory": "",
+    "type": "int"
+  }
+}
+```
+
+This is an abbreviated historical example. The installed application configurator determines the actual fields, defaults and supported parameters.
+
+The original, more extensive UMAP description remains available in the [archived README](../archive/ORIGINAL_README.md).
+
+An abbreviated example for OXKAT pipeline app is:
+
+```json
+{
+  "name": "oxkat",
+  "description": "Process MeerKAT radio-interferometric Measurement Sets using the OXKAT scientific pipeline.",
+  "tool_categories": [
+    "measurement-set"
+  ],
+  "input_requirements": {
+    "supported_formats": [
+      "ms"
+    ],
+    "expected_data": "Registered MeerKAT Measurement Sets and stage-specific retained upstream artifacts.",
+    "notes": [
+      "Create a dataset-bound Pipeline V2 instance.",
+      "FLAG and 2GC process one science target per run."
+    ]
+  },
+  "job_options": {
+    "stage": {
+      "type": "str",
+      "default": "GET_INFO",
+      "enum": true,
+      "allowed": [
+        "GET_INFO",
+        "1GC",
+        "FLAG",
+        "2GC",
+        "3GC_PEEL",
+        "3GC_FACET"
+      ]
+    }
+  },
+  "job_outputs": {
+    "manifest": {
+      "path": "oxkat_manifest.json",
+      "type": "application/json",
+      "role": "primary_result",
+      "required": true
+    }
+  },
+  "limitations": [
+    "3GC_PEEL and 3GC_FACET are not implemented."
+  ]
+}
+```
+
+This is an illustrative, abbreviated representation of the OXKAT self-description, not a complete response or a normative JSON schema. The actual option metadata includes additional fields, and the descriptions are more extensive.
+
+Clients should retrieve the live response rather than rely on this example.
+
+The `job_outputs` entries describe potential scientific products, including their names, formats, roles and, where applicable, the stages producing them.
+
+An output declaration does not guarantee that every run will produce that artifact. Actual artifact availability must be determined from the completed pipeline run's registered outputs.
+
+The application configurator is the authoritative source for its self-description. Execution-time server-side validation remains authoritative for accepting scientific options and input bindings.
+
+### Option metadata
+
+Application option descriptions may include:
+
+| Field | Meaning |
+| --- | --- |
+| `type` | Expected option value type |
+| `description` | Human-readable parameter description |
+| `default` | Default value, when defined |
+| `mandatory` | Whether the option is required |
+| `min` | Minimum accepted value, when applicable |
+| `max` | Maximum accepted value, when applicable |
+| `enum` | Enumeration information, where supported |
+| `category` | Functional category, such as `INPUT`, `PROCESSING` or `OUTPUT` |
+| `subcategory` | More specific option grouping |
+| `advanced` | Indicator used to distinguish advanced options |
+
+Not every option necessarily defines every metadata field.
+
+Some scientific application options represent command-line flags and therefore do not accept an ordinary scalar value.
+
+Clients should interpret the returned metadata according to the application-specific contract rather than assuming that every option is a numeric or string parameter.
+
+### Input requirements and scientific outputs
+
+The `input_requirements` field describes the expected scientific data and application-specific input constraints.
+
+Typical information includes:
+
+- Supported scientific data formats.
+- Expected input data and its scientific meaning.
+- Requirements for registered datasets or upstream pipeline artifacts.
+- Stage-dependent input restrictions.
+- Additional instructions for constructing valid requests.
+
+The `job_outputs` field describes output products known to the application configurator.
+
+An output definition may include:
+
+| Field | Description |
+| --- | --- |
+| `path` | Declared output path or directory name |
+| `glob` | Pattern used to identify matching outputs |
+| `kind` | Artifact kind, such as `directory` |
+| `type` | Declared media or scientific data type |
+| `role` | Scientific output role, such as `primary_result`, `diagnostic` or `auxiliary` |
+| `description` | Human-readable output description |
+| `format` | Optional format information |
+| `parser` | Suggested parser, where applicable |
+| `stages` | Scientific stages associated with the output |
+| `required` | Whether the output is declared mandatory |
+| `notes` | Additional application-specific information |
+
+Not every output declaration contains every field.
+
+For OXKAT, output descriptions include observation metadata, calibrated Measurement Sets, calibration solution tables, diagnostic plots, imaging products, execution scripts and logs.
+
+Some products are represented as files, while others are directory artifacts containing multiple scientific files.
+
+Application output descriptions must not be confused with the registered artifact inventory of a particular pipeline run.
+
+The self-description indicates which products an application may produce. The Pipeline V2 artifact API reports which products were actually registered for a specific run.
+
+For example:
+
+```http
+GET /caesar/api/v1.0/pipelines/{pipeline_id}/nodes/{node_id}/runs/{run_id}/artifacts
+```
+
+Clients should inspect this run-specific inventory before attempting to retrieve an output.
+
+Individual registered files can be downloaded by stable numeric index,
+unique logical artifact name, or exact registered relative path, subject
+to authentication, ownership and artifact availability.
+
+Clients may access artifacts of explicit completed runs before choosing
+the preferred run of a node. Selected-run aliases are also supported
+for convenience.
+
+When a logical name matches multiple registered files, the name-based
+download returns HTTP `409`. Clients should select a specific registered
+relative path or index instead.
+
+The file-download API does not support downloading entire directory artifacts.
+
+The regular-file download endpoint does not currently support downloading entire directory artifacts.
+
+### Application diagnostic archive policy
+
+An application configurator may define an `archive_policy` describing
+which lightweight files should be included in a staged Pipeline V2
+job-output archive.
+
+This policy is independent of `job_outputs`.
+
+The two declarations serve different purposes:
+
+| Declaration | Purpose |
+| --- | --- |
+| `job_outputs` | Describes scientific artifacts that can be discovered, registered and retained for a pipeline run |
+| `archive_policy` | Selects lightweight diagnostic files to include in the downloadable job archive |
+
+The archive policy uses workspace-relative inclusion patterns.
+
+For example, an application may declare:
+
+```json
+{
+  "archive_policy": {
+    "include": [
+      "results/*.log",
+      "results/*.json",
+      "results/*.txt",
+      "results/*.sh"
+    ]
+  }
+}
+```
+
+The generic archive builder supports inclusion-only patterns under
+`results/`. Wildcards are permitted in file basenames, but not in
+parent directory components, and recursive `**` patterns are not supported.
+
+The staging manifest `input/staging.json` is included automatically
+when present.
+
+Application-specific policies may additionally include preview images,
+QA reports, scientific catalogs and diagnostic logs.
+
+For example, OXKAT's configured archive policy includes:
+
+```json
+{
+  "include": [
+    "results/*.log",
+    "results/*.json",
+    "results/*.txt",
+    "results/*.sh",
+    "results/previews/image_qa.json",
+    "results/previews/selected/*.png",
+    "results/previews/catalog/*.dat",
+    "results/previews/catalog/*.tab",
+    "results/previews/catalog/*.reg",
+    "results/previews/logs/*.log"
+  ]
+}
+```
+
+The generated archive is a diagnostic bundle and does not contain
+complete scientific directory artifacts.
+
+A file can be registered and retained as a scientific artifact even
+when it is not included in the downloadable job archive.
+
+The archive builder records included and omitted files in the
+`archive_policy.json` manifest within the generated archive.
+
+Clients should use the Pipeline V2 artifact inventory and retrieval
+endpoints to discover the actual scientific results of a completed run,
+rather than treating archive contents as an authoritative artifact list.
+
+See the [Jobs REST API](jobs.md) and
+[Scientific Pipeline V2 API](scientific-pipelines.md).
+
+### Limitations and tool selection
+
+The `limitations` field describes application-specific restrictions that automated clients should consider when selecting tools and constructing workflows.
+
+These may include:
+
+- Unsupported scientific stages.
+- Stage-specific input requirements.
+- Restrictions on target processing.
+- Dependencies on retained upstream artifacts.
+- Limitations affecting execution, artifact retrieval or scientific evaluation.
+
+Clients such as MAASAI should use `description`, `tool_categories`, `input_requirements`, `job_options`, `job_outputs` and `limitations` together when evaluating application suitability.
+
+However, natural-language descriptions do not replace execution-time validation or the generic Pipeline V2 API contract.
+
+## 3. Unknown applications
+
+If an unknown application name is supplied, the description endpoint returns HTTP `400`.
+
+An illustrative response is:
+
+```json
+{
+  "status": "Unknown app unknown-application!"
+}
+```
+
+Clients should check the application list before attempting to retrieve a description or submit a job.
+
+## 4. Application discovery and job submission
+
+Application discovery and scientific job submission are separate operations.
+
+The discovery endpoints describe the applications registered with CAESAR-REST. Jobs are submitted through:
+
+```http
+POST /caesar/api/v1.0/job
+```
+
+The job submission request identifies the application and provides its required inputs and execution options.
+
+The server applies application-specific validation and constructs the scientific execution request using the corresponding configurator.
+
+Clients should not assume that all registered applications accept identical inputs, output formats or execution options.
+
+See [Job submission and monitoring](jobs.md) for the job request and response contract.
+
+## 5. Application-specific scientific configuration
+
+Some scientific applications support additional scientific configuration beyond ordinary scalar command-line parameters.
+
+These options may depend on the selected scientific stage, execution mode or application-specific validation rules.
+
+### OXKAT and Scientific Pipeline V2
+
+The OXKAT application supports four implemented Pipeline V2 scientific stages:
+
+| Stage | Scientific operation |
+| --- | --- |
+| `GET_INFO` | Extract observation, field and calibrator metadata from a registered Measurement Set |
+| `1GC` | Perform first-generation calibration and produce derived target Measurement Sets and calibration diagnostics |
+| `FLAG` | Perform target-specific flagging, initial imaging and mask generation |
+| `2GC` | Perform target-specific second-generation calibration and associated imaging |
+
+The `3GC_PEEL` and `3GC_FACET` stages remain reserved and are not implemented.
+
+Although these stages appear among the configured `stage` enumeration values, their execution is rejected by the current application validation logic.
+
+#### Dataset and upstream input requirements
+
+OXKAT uses a dataset-bound Pipeline V2 workflow.
+
+An example pipeline creation request is:
+
+```http
+POST /caesar/api/v1.0/pipelines
+```
+
+```json
+{
+  "app": "oxkat",
+  "dataset_id": "oxkat-test-dataset-v5",
+  "name": "MeerKAT calibration experiments"
+}
+```
+
+The `dataset_id` is associated with the pipeline rather than repeated in individual run registrations.
+
+Stage inputs are resolved according to the application's input policy:
+
+- GET_INFO consumes the registered original Measurement Set.
+- 1GC consumes the original Measurement Set and retained GET_INFO project information.
+- FLAG consumes a retained target Measurement Set from 1GC and compatible project information.
+- 2GC consumes a retained target Measurement Set from FLAG and compatible project information, together with the required FLAG imaging product.
+
+FLAG and 2GC process one scientific target per registered run.
+
+Input artifact references are validated and frozen when the run is registered.
+
+Clients must not construct arbitrary server-side filesystem paths or guess upstream artifact indices.
+
+#### Scientific parameters
+
+OXKAT validates the scientific stage and supports additional stage-specific parameters.
+
+The Pipeline V2 parameter object can contain:
+
+| Parameter | Description |
+| --- | --- |
+| `target` | Science target identifier, supported for FLAG and 2GC |
+| `oxkat_config` | Dictionary of validated, stage-specific OXKAT scientific configuration overrides |
+
+The scientific stage itself is supplied through the top-level `stage` field of the run-registration request.
+
+For example:
+
+```json
+{
+  "stage": "FLAG",
+  "node_id": "stage_flag_f1",
+  "parameters": {
+    "target": "MAXIJ1348"
+  },
+  "inputs": {
+    "target_ms": {
+      "run_id": "ONE_GC_RUN_ID",
+      "artifact": "working_measurement_sets",
+      "artifact_index": 3
+    },
+    "project_info": {
+      "run_id": "GET_INFO_RUN_ID",
+      "artifact": "project_info",
+      "artifact_index": 8
+    }
+  }
+}
+```
+
+The run IDs and artifact indices above are illustrative. Actual input references must be obtained from the current pipeline state or an eligible bulk-planning proposal.
+
+The `oxkat_config` dictionary supports application-specific scientific alternatives.
+
+For example, an individual run registration may provide:
+
+```json
+{
+  "stage": "FLAG",
+  "node_id": "stage_flag_f1",
+  "parameters": {
+    "target": "MAXIJ1348",
+    "oxkat_config": {
+      "OPTION_NAME": "OPTION_VALUE"
+    }
+  },
+  "inputs": {
+    "target_ms": {
+      "run_id": "ONE_GC_RUN_ID",
+      "artifact": "working_measurement_sets",
+      "artifact_index": 3
+    },
+    "project_info": {
+      "run_id": "GET_INFO_RUN_ID",
+      "artifact": "project_info",
+      "artifact_index": 8
+    }
+  }
+}
+```
+
+`OPTION_NAME` and `OPTION_VALUE` are placeholders, not real OXKAT configuration parameters.
+
+All overrides are validated against the application's scientific configuration policy. Unknown, invalid or stage-incompatible settings are rejected.
+
+An alternative experiment must be registered as a new run. It does not modify the parameters or input bindings of an existing run.
+
+#### Scientific readiness and bulk planning
+
+OXKAT provides application-specific scientific readiness and target-aware bulk planning through the generic Pipeline V2 REST API.
+
+The relevant endpoints are:
+
+```http
+GET /caesar/api/v1.0/datasets/{dataset_id}/targets
+GET /caesar/api/v1.0/pipelines/{pipeline_id}/scientific-readiness
+POST /caesar/api/v1.0/pipelines/{pipeline_id}/bulk-plan
+POST /caesar/api/v1.0/pipelines/{pipeline_id}/bulk-register
+```
+
+The current OXKAT bulk planner supports FLAG and 2GC.
+
+Bulk planning determines which scientific targets have eligible upstream inputs and produces concrete run-registration proposals.
+
+Bulk registration accepts unchanged proposals and creates independent pipeline runs using per-item idempotency keys.
+
+These endpoints do not execute scientific stages.
+
+MAASAI or another external orchestration client is responsible for submitting runs, evaluating scientific products, selecting preferred experiments and deciding when to advance to the next stage.
+
+Bulk registration also differs from generic application batch processing. It is a Pipeline V2 run-registration mechanism, not an indication that the application supports batch processing through the legacy job API.
+
+#### Self-description scope
+
+The OXKAT `GET /app/oxkat/describe` response provides the scientific application description, supported formats, declared job options, expected outputs and limitations.
+
+The current `job_options` description advertises the `stage` option. The `target` and `oxkat_config` parameters are accepted and validated through the Pipeline V2-specific configuration path, but are not currently advertised as separate entries in the generic `job_options` dictionary.
+
+Therefore, clients requiring the full OXKAT Pipeline V2 request contract must also consult the Pipeline V2 API documentation.
+
+The OXKAT configurator's descriptions are intended to support scientific tool discovery and selection, while the REST API documentation defines the actual request and response contracts.
+
+See [Scientific Pipeline V2](scientific-pipelines.md) and the [MAASAI orchestration contract](../maasai_orchestration_contract.md).
+
+## 6. Client integration recommendations
+
+Clients integrating with CAESAR-REST should retrieve available applications and their self-descriptions from the running server.
+
+For tool selection, clients should consider the application's scientific purpose, supported formats, input requirements, job options, declared outputs and known limitations.
+
+For ordinary scientific jobs, application metadata can be used to construct forms, populate defaults and perform basic client-side validation.
+
+For Pipeline V2 workflows, application discovery is only the first step.
+
+An orchestration client should additionally:
+
+1. Identify an accessible scientific dataset.
+2. Create or retrieve the appropriate dataset-bound pipeline.
+3. Verify dataset inspection and scientific readiness when required.
+4. Register scientific runs using the Pipeline V2 request contract.
+5. Submit and monitor registered runs explicitly.
+6. Inspect and retrieve actual run outputs using the artifact APIs.
+7. Evaluate scientific results and select preferred runs.
+8. Plan and register subsequent stages using validated upstream artifacts.
+
+Application descriptions provide scientific tool-selection metadata. They are not substitutes for the Pipeline V2 REST API, scientific readiness or authoritative execution-time validation.
+
+In particular, clients must not assume that every option accepted by a pipeline-specific validation path is represented as an independent entry in the generic `job_options` dictionary.
+
+The current application self-description schema also does not provide a complete machine-readable specification of stage-specific input bindings, bulk-planning workflows or scientific evaluation criteria.
+
+These capabilities are documented through the Pipeline V2 and MAASAI orchestration contracts.
+
+Future extensions may expose more structured stage-level requirements and scientific evaluation-product metadata, allowing automated clients to reduce their reliance on natural-language descriptions.
+
+## References
+
+- [REST API overview](overview.md)
+- [Data and datasets API](data.md)
+- [Job submission and monitoring](jobs.md)
+- [Scientific Pipeline concepts, detailed API reference and examples](scientific-pipelines.md)
+- [MAASAI integration](../maasai_integration.md)
+- [MAASAI Pipeline V2 orchestration contract](../maasai_orchestration_contract.md)
+- [Archived original README](../archive/ORIGINAL_README.md)
