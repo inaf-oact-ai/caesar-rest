@@ -201,11 +201,32 @@ All paths in the following tables are relative to `/caesar/api/v1.0`.
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
-| `GET` | `/pipelines/{pipeline_id}/nodes/{node_id}/runs/{run_id}/artifacts` | List registered output artifacts |
-| `GET` | `/pipelines/{pipeline_id}/nodes/{node_id}/runs/{run_id}/artifacts/{index}` | Download a retained file artifact |
-| `GET` | `/pipelines/{pipeline_id}/nodes/{node_id}/selected/artifacts/{artifact_name}` | Resolve a named artifact of the selected run |
+| `GET` | `/pipelines/{pipeline_id}/nodes/{node_id}/runs/{run_id}/artifacts` | List registered artifacts of an explicit run |
+| `GET` | `/pipelines/{pipeline_id}/nodes/{node_id}/runs/{run_id}/artifacts/{index}` | Download a regular-file artifact by numeric index |
+| `GET` | `/pipelines/{pipeline_id}/nodes/{node_id}/runs/{run_id}/artifacts/by-name/{artifact_name}` | Download a uniquely named file from an explicit run |
+| `GET` | `/pipelines/{pipeline_id}/nodes/{node_id}/runs/selected/artifacts/by-name/{artifact_name}` | Download a uniquely named file from the selected run |
+| `GET` | `/pipelines/{pipeline_id}/nodes/{node_id}/runs/{run_id}/artifacts/by-path?relative_path={path}` | Download a file from an explicit run using its registered relative path |
+| `GET` | `/pipelines/{pipeline_id}/nodes/{node_id}/runs/selected/artifacts/by-path?relative_path={path}` | Download a file from the selected run using its registered relative path |
+| `GET` | `/pipelines/{pipeline_id}/nodes/{node_id}/selected/artifacts/{artifact_name}` | Resolve selected-run artifact metadata without downloading it (legacy-compatible) |
 | `GET` | `/pipelines/{pipeline_id}/nodes/{node_id}/selected/directories/{artifact_name}` | Resolve and verify a selected retained directory |
 | `POST` | `/pipelines/{pipeline_id}/nodes/{node_id}/runs/{run_id}/retain` | Queue output retention |
+
+
+Artifact retrieval does not require a run to be selected. Clients may inspect
+and download artifacts from any authorized, completed run with registered
+outputs.
+
+The `selected` path component is a convenience alias resolved to the node's
+current preferred run at request time. It does not identify an immutable run.
+Clients comparing experiments should use explicit run IDs.
+
+File downloads by name require a unique artifact name within the run. When
+several files share a logical name, clients should use an exact registered
+`relative_path` or the artifact's numeric index.
+
+All file download methods use the existing owner-scoped artifact access and
+integrity checks. Directory artifacts are not supported by these file
+download endpoints.
 
 The node-oriented registration endpoints remain available for compatibility. New agent-oriented clients should generally use the simplified pipeline-level run-registration endpoint.
 
@@ -696,6 +717,7 @@ The server manages their metadata, identities, retained storage and integrity in
 
 Clients should not construct internal filesystem paths from pipeline IDs, run IDs or artifact names.
 
+
 ### 12.1 List registered artifacts
 
 **Endpoint:**
@@ -704,9 +726,20 @@ Clients should not construct internal filesystem paths from pipeline IDs, run ID
 GET /caesar/api/v1.0/pipelines/{pipeline_id}/nodes/{node_id}/runs/{run_id}/artifacts
 ```
 
-Returns the public artifact metadata for the specified owner-visible run.
+Returns the public artifact inventory of the specified owner-visible run.
 
-### 12.2 Download a retained file artifact
+Each artifact has a stable numeric `index` assigned when registered. Public
+metadata includes the artifact's logical `name`, `relative_path`, media
+`type`, scientific `role`, and `size_bytes`, where available.
+
+A logical name is not necessarily unique. For example, an imaging stage may
+register multiple PNG files under the same `image_previews` name.
+
+The `relative_path` is a registered workspace-relative identifier, not an
+authorization to read arbitrary server files. Clients must never turn it
+into a server filesystem path.
+
+### 12.2 Download a file by index
 
 **Endpoint:**
 
@@ -714,23 +747,154 @@ Returns the public artifact metadata for the specified owner-visible run.
 GET /caesar/api/v1.0/pipelines/{pipeline_id}/nodes/{node_id}/runs/{run_id}/artifacts/{index}
 ```
 
-Downloads a registered and retained file artifact identified by its artifact index.
+Downloads an individual registered regular-file artifact using its numeric
+index.
 
-This endpoint is intended for file artifacts, not arbitrary directories.
+Artifact indices remain stable within the run. These identifiers are useful
+for reproducing earlier evaluations and for inspecting frozen artifact
+bindings.
 
-### 12.3 Resolve a selected named file artifact
+The server returns the file as an attachment using its registered media type
+and original filename.
 
-**Endpoint:**
+The endpoint does not support downloading entire directory artifacts.
+
+### 12.3 Download a file by logical name
+
+**Explicit run:**
+
+```http
+GET /caesar/api/v1.0/pipelines/{pipeline_id}/nodes/{node_id}/runs/{run_id}/artifacts/by-name/{artifact_name}
+```
+
+**Selected run:**
+
+```http
+GET /caesar/api/v1.0/pipelines/{pipeline_id}/nodes/{node_id}/runs/selected/artifacts/by-name/{artifact_name}
+```
+
+These endpoints download the file corresponding to a uniquely registered
+logical artifact name.
+
+For example, a completed OXKAT 2GC run may expose the unique `image_qa`
+artifact:
+
+```http
+GET /caesar/api/v1.0/pipelines/{pipeline_id}/nodes/{node_id}/runs/{run_id}/artifacts/by-name/image_qa
+```
+
+The `artifact_name` is the registered logical name, not the filename.
+For example, `image_qa` refers to the registered `image_qa.json` file.
+
+Names must identify exactly one artifact in the chosen run. If no artifact
+matches, the server returns HTTP `404`. If multiple artifacts share the name,
+the server returns HTTP `409`.
+
+A file from an explicitly identified run can be downloaded whether or not
+that run is currently selected.
+
+The selected-run form resolves the current preferred run for the specified
+node. When no run is selected, it returns HTTP `409`.
+
+### 12.4 Download a file by registered relative path
+
+**Explicit run:**
+
+```http
+GET /caesar/api/v1.0/pipelines/{pipeline_id}/nodes/{node_id}/runs/{run_id}/artifacts/by-path?relative_path={path}
+```
+
+**Selected run:**
+
+```http
+GET /caesar/api/v1.0/pipelines/{pipeline_id}/nodes/{node_id}/runs/selected/artifacts/by-path?relative_path={path}
+```
+
+These endpoints identify one registered file by its exact `relative_path`.
+
+This is useful when many artifacts share the same logical name, such as
+`image_previews`, `log`, or a group of source-finding catalogs.
+
+For example:
+
+```http
+GET /caesar/api/v1.0/pipelines/{pipeline_id}/nodes/{node_id}/runs/{run_id}/artifacts/by-path?relative_path=results%2Fpreviews%2Fimage_qa.json
+```
+
+Clients should URL-encode the query parameter using their HTTP library.
+
+The supplied value must match a registered artifact path exactly. It is not
+interpreted as a general filesystem path and does not permit directory
+traversal or access to unregistered files.
+
+The endpoint returns HTTP `400` for malformed paths, HTTP `404` when no
+registered artifact matches, and HTTP `409` when the selector is ambiguous
+or identifies a directory artifact.
+
+### 12.5 Resolve selected-run artifact metadata
+
+**Legacy-compatible endpoint:**
 
 ```http
 GET /caesar/api/v1.0/pipelines/{pipeline_id}/nodes/{node_id}/selected/artifacts/{artifact_name}
 ```
 
-Resolves the named artifact associated with the currently preferred run.
+This endpoint resolves the named file artifact of the currently preferred
+run and returns JSON metadata rather than downloading the file.
 
-The operation checks artifact availability according to the server's managed storage and access rules.
+The response identifies the resolved `run_id`, `job_id`, artifact index,
+registered relative path, media type, role, size, and availability.
 
-### 12.4 Resolve a selected directory artifact
+The resolver shares the same run and artifact lookup logic as the newer
+download endpoints.
+
+It remains available for compatibility with existing clients.
+
+A unique name and a currently selected run are required. Ambiguous names
+return HTTP `409`.
+
+For immutable references, clients should preserve the concrete `run_id`
+and artifact index returned by the resolver rather than repeatedly
+resolving the mutable selection.
+
+### Example: inspect an unselected OXKAT 2GC run
+
+An orchestration client may need to evaluate several 2GC runs before
+choosing the preferred scientific result.
+
+For example, the following request downloads the QA report of a specific
+run, independently of the node's current selection:
+
+```http
+GET /caesar/api/v1.0/pipelines/bd365aea3a924501b89b986400bdceb3/nodes/stage_2gc/runs/c56fac2c608f46f3bca217123f803470/artifacts/by-name/image_qa
+```
+
+For the same run, the registered artifact inventory includes multiple
+`image_previews` files. Therefore, a request using
+`/artifacts/by-name/image_previews` is ambiguous and returns HTTP `409`.
+
+Instead, a client can retrieve an individual preview by its registered
+relative path:
+
+```http
+GET /caesar/api/v1.0/pipelines/bd365aea3a924501b89b986400bdceb3/nodes/stage_2gc/runs/c56fac2c608f46f3bca217123f803470/artifacts/by-path?relative_path=results%2Fpreviews%2Fselected%2Fpreview_img_measurement_set_1024ch_MAXIJ0637-4252.ms_pcalmask-MFS-image.pbcor__overview.png
+```
+
+The same image can be retrieved using its stable index:
+
+```http
+GET /caesar/api/v1.0/pipelines/bd365aea3a924501b89b986400bdceb3/nodes/stage_2gc/runs/c56fac2c608f46f3bca217123f803470/artifacts/38
+```
+
+These requests require the caller's normal bearer-token authentication.
+
+Clients should discover artifact indices and relative paths through the
+run's artifact listing instead of hardcoding values from this example.
+
+Once the evaluation is complete, the client may update the node's
+preferred-run selection using the existing conditional selection API.
+
+### 12.6 Resolve a selected directory artifact
 
 **Endpoint:**
 
@@ -744,7 +908,7 @@ Directory artifacts are not ordinary downloadable files.
 
 For downstream scientific execution, use the managed artifact-binding mechanism rather than attempting to download and reconstruct directories through the REST client.
 
-### 12.5 Request artifact retention
+### 12.7 Request artifact retention
 
 **Endpoint:**
 
@@ -760,7 +924,7 @@ Clients can monitor the run's artifact status until it reaches `READY`, or inves
 
 Automatic registration and retention depend on deployment configuration.
 
-### 12.6 Retention and downstream execution
+### 12.8 Retention and downstream execution
 
 Output retention is essential for multi-stage workflows.
 
@@ -813,11 +977,20 @@ Pipeline endpoints return standard HTTP status codes together with endpoint-spec
 
 | HTTP status | Typical meaning |
 | --- | --- |
-| `400` | Invalid request shape, identifiers, stage parameters or input fields |
+| `400` | Invalid request, artifact name, registered relative-path selector, identifiers, stage parameters or input fields |
 | `401` / `403` | Authentication or authorization failure, depending on deployment |
-| `404` | Requested owner-visible pipeline, run or artifact not found |
-| `409` | Lifecycle conflict, missing selection, stale conditional update or unavailable upstream artifact |
+| `404` | Requested owner-visible pipeline, run or artifact not found; no artifact matches the requested name or path |
+| `409` | Lifecycle conflict, missing preferred-run selection, ambiguous artifact name or path, unsupported directory download, stale conditional selection or unavailable artifact |
 | `503` | Service or configuration problem, or submission outcome requiring operational investigation |
+
+Artifact downloads may also fail when retained data is missing or its
+integrity verification fails. A successful artifact-listing response
+does not by itself guarantee that every registered payload remains
+accessible or unchanged.
+
+File downloads verify retained-file metadata and integrity before returning
+the file. Directory artifacts use separate verification and managed
+downstream-staging mechanisms.
 
 The exact error code depends on the endpoint and validation failure.
 

@@ -203,4 +203,233 @@ performs the authoritative integrity verification.
 See the [Pipeline API reference](../api/scientific-pipelines.md)
 for further details.
 
-   
+## 5. Administrative artifact reconciliation
+
+The normal artifact-retention worker promotes registered outputs of
+completed scientific pipeline runs.
+
+Once a run has a published `retained_artifacts` list, the worker does not
+automatically discover and append additional artifacts.
+
+This behavior protects existing artifact indices and prevents ordinary
+retention processing from modifying an already published artifact set.
+
+However, a previously completed run may contain additional scientific
+diagnostics that were not registered because its output contract was updated
+after execution.
+
+CAESAR-REST provides an explicit administrative reconciliation utility for
+recovering such missing regular-file artifacts without rerunning the
+scientific application.
+
+### Reconciliation scope
+
+The utility is:
+
+```text
+scripts/reconcile_pipeline_artifacts.py
+```
+
+It supports previously completed and fully retained Pipeline V2 runs.
+
+The reconciliation implementation:
+
+- Verifies the run identity, successful execution state and existing
+  retention metadata.
+- Uses the current application output contract to rediscover artifacts
+  in the original job workspace.
+- Preserves all existing artifact indices and retention records.
+- Appends only newly discovered regular-file artifacts.
+- Copies and checksums newly registered files.
+- Checks existing retained directory manifests without copying the
+  scientific directories again.
+- Serializes reconciliation with mixed-artifact retention using the
+  existing per-run retention lock.
+- Atomically publishes the expanded artifact registration and retention
+  arrays after successful copying.
+- Supports safe retry after interruption by verifying prepared files
+  before reuse.
+
+The utility deliberately refuses to append new directory artifacts.
+
+Existing retained scientific directories are not recopied.
+
+### Dry run
+
+Run the utility in the configured CAESAR-REST Python environment with
+the normal MongoDB settings.
+
+Example:
+
+```bash
+python scripts/reconcile_pipeline_artifacts.py \
+	--pipeline-id PIPELINE_ID \
+	--node-id NODE_ID \
+	--run-id RUN_ID \
+	--retention-root /storage/caesar-rest/pipeline-artifacts
+```
+
+The command defaults to dry-run mode.
+
+A dry run verifies the existing retention state, discovers available
+additional artifacts and reports the proposed changes.
+
+It does not copy new artifacts or update MongoDB.
+
+The output includes:
+
+```json
+{
+  "run_id": "RUN_ID",
+  "existing": 58,
+  "additional": 0,
+  "total": 58,
+  "dry_run": true,
+  "new_artifacts": []
+}
+```
+
+The example counts are illustrative. In a real response, `new_artifacts`
+contains the proposed indices, logical names and relative paths of the
+newly discovered artifacts.
+
+### Apply reconciliation
+
+After reviewing the dry-run results, use the same command with `--apply`:
+
+```bash
+python scripts/reconcile_pipeline_artifacts.py \
+	--pipeline-id PIPELINE_ID \
+	--node-id NODE_ID \
+	--run-id RUN_ID \
+	--retention-root /storage/caesar-rest/pipeline-artifacts \
+	--apply
+```
+
+The operation requires access to the original job workspace and persistent
+retention storage.
+
+Run it only in a trusted administrative environment. Ensure that the
+scientific job is no longer writing outputs.
+
+The utility is an offline administrative operation, not a public REST
+endpoint.
+
+On successful application, it reports `committed: true`.
+
+### Verify reconciliation
+
+After applying reconciliation:
+
+1. Retrieve the run status and verify that the artifact inventory has
+   the expected size.
+2. Confirm that `artifacts_status` is `READY` and
+   `readiness.can_consume` is `true`.
+3. Retrieve the artifact inventory through the public REST API.
+4. Download representative newly registered files and verify their
+   contents.
+5. Repeat the reconciliation in dry-run mode and confirm that
+   `additional` is zero.
+
+Reconciliation preserves previously registered artifact indices.
+It does not rerun scientific processing, regenerate job archives or
+modify preferred-run selection.
+
+### Limitations and safety
+
+Reconciliation should not be treated as automatic output-contract migration
+for every historical run.
+
+The operation requires the original workspace to remain available, with
+newly discovered files matching their registered metadata.
+
+Existing retained directory manifests are validated, but this
+administrative operation does not perform full byte-level rehashing of
+all retained scientific directories.
+
+Do not use reconciliation to repair corrupted retained data or incomplete
+scientific execution. Such cases require separate investigation.
+
+The ordinary `/pipelines/{pipeline_id}/sync` endpoint synchronizes
+execution state; it does not append missing artifacts to an already
+retained run.
+
+## 6. Historical Pipeline V2 archive migration
+
+Existing staged Pipeline V2 jobs may still have full job-output archives
+created before lightweight diagnostic archive policies were introduced.
+
+CAESAR-REST provides an administrative migration utility:
+
+```text
+scripts/migrate_pipeline_job_archives.py
+```
+
+The utility can replace selected historical archives with lightweight
+diagnostic archives without rerunning scientific processing.
+
+It requires a successful staged Pipeline V2 job, a completed pipeline run,
+a complete registered and retained artifact set, the original workspace,
+and a valid application archive policy.
+
+### Dry run
+
+```bash
+python scripts/migrate_pipeline_job_archives.py \
+	--owner OWNER_ID \
+	--retention-root /storage/caesar-rest/pipeline-artifacts \
+	--job-id JOB_ID
+```
+
+The command validates eligibility but does not create or modify archives.
+
+Multiple `--job-id` arguments may be supplied to inspect multiple jobs.
+
+### Apply
+
+Append `--apply` only after reviewing the dry-run results:
+
+```bash
+python scripts/migrate_pipeline_job_archives.py \
+	--owner OWNER_ID \
+	--retention-root /storage/caesar-rest/pipeline-artifacts \
+	--job-id JOB_ID \
+	--apply
+```
+
+For each eligible job, the utility:
+
+1. Verifies the job and run records.
+2. Verifies retained file checksums and directory manifests.
+3. Generates a separate diagnostic archive using the current
+   application archive policy.
+4. Validates archive contents against the original files.
+5. Refuses replacement if diagnostic files were omitted by policy
+   size or count limits.
+6. Atomically replaces the original archive when the new archive
+   is smaller and validation succeeds.
+
+The migration does not modify MongoDB artifact records or pipeline
+selections.
+
+The existing `/job/{job_id}/output` endpoint continues to reference
+the same archive filename.
+
+### Operational precautions
+
+Run archive migration only when the job monitor is not writing the selected
+archives and no clients are downloading them.
+
+The tool does not coordinate archive replacement with active readers
+or writers.
+
+The retention directory and original job workspace are separate storage
+resources. Archive migration may substantially reduce archive storage,
+but it does not remove scientific files from the job workspace.
+
+Do not delete original scientific workspaces solely because archive
+migration succeeded.
+
+For archive format and policy details, see the
+[Jobs REST API](../api/jobs.md).
+

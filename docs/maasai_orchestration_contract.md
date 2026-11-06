@@ -1,8 +1,15 @@
 # MAASAI ↔ CAESAR-REST Pipeline V2 orchestration contract
 
-**Status:** R4C.3.3 integration contract completed and locally validated on 2026-11-04; deployment and end-to-end scientific regression are covered by R4C.4.   
-**Base URL:** `/caesar/api/v1.0`   
-**Authentication:** `Authorization: Bearer <access-token>` (Keycloak/OIDC). All pipeline and run operations are owner-scoped.
+**Status:** R4C.3.3 orchestration contract completed and locally validated on
+2026-11-04. Pipeline V2 artifact retrieval by explicit run, selected run,
+name, path and index has subsequently been implemented, tested and
+deployment-validated in November 2026. Scientific run evaluation and
+MAASAI-side comparison logic remain separate integration activities.
+
+**Base URL:** `/caesar/api/v1.0`
+
+**Authentication:** `Authorization: Bearer <access-token>` (Keycloak/OIDC).
+All pipeline and artifact operations are owner-scoped.
 
 ## 1. Ownership and invariants
 
@@ -35,8 +42,50 @@ Paths are relative to the base URL.
 | `POST` | `/pipelines/{pid}/nodes/{nid}/runs/{rid}/retain` | Queue eligible output retention |
 | `PUT` | `/pipelines/{pid}/nodes/{nid}/selection` | Compare-and-set preferred completed run |
 | `GET` | `/pipelines/{pid}/nodes/{nid}/runs/{rid}/artifacts` | Inspect registered outputs |
+| `GET` | `/pipelines/{pid}/nodes/{nid}/runs/{rid}/artifacts/{index}` | Download a registered file from a specific run by stable index |
+| `GET` | `/pipelines/{pid}/nodes/{nid}/runs/{rid}/artifacts/by-name/{name}` | Download a uniquely named file from an explicit run |
+| `GET` | `/pipelines/{pid}/nodes/{nid}/runs/selected/artifacts/by-name/{name}` | Download a uniquely named file from the currently selected run |
+| `GET` | `/pipelines/{pid}/nodes/{nid}/runs/{rid}/artifacts/by-path?relative_path={path}` | Download an exact registered file from an explicit run |
+| `GET` | `/pipelines/{pid}/nodes/{nid}/runs/selected/artifacts/by-path?relative_path={path}` | Download an exact registered file from the selected run |
+| `GET` | `/pipelines/{pid}/nodes/{nid}/selected/artifacts/{name}` | Resolve selected-run file metadata without downloading |
 
 There is **no bulk-submit** endpoint and **no automatic scientific evaluator**. MAASAI submits each registered run individually, with explicit scheduling/concurrency policy.
+
+### Artifact retrieval and evaluation contract
+
+MAASAI may access registered artifacts of an authorized completed run
+without making that run the node's preferred selection.
+
+The preferred-run pointer is an orchestration decision, not an artifact
+access-control boundary.
+
+For scientific experiment comparisons, MAASAI SHOULD:
+
+1. Use explicit `run_id` values for all evaluation requests.
+2. Retrieve each candidate run's registered artifact inventory.
+3. Download uniquely named QA products using `by-name`.
+4. Download individual members of repeated artifact families using
+   `by-path` or their registered numeric indices.
+5. Preserve the concrete run and artifact identifiers used for evaluation.
+6. Select a preferred run only after the comparison is complete.
+
+The `selected` alias is a late-bound convenience reference and may
+resolve to a different run after a selection update.
+
+An artifact name that matches multiple registered files is ambiguous
+and returns HTTP `409`.
+
+The download endpoints support registered regular files only.
+Scientific directory artifacts remain accessible through the managed
+downstream-binding mechanism, not general HTTP directory download.
+
+A completed run may have registered artifacts before retention completes.
+The available artifact-download implementation performs its normal
+access and integrity checks; downstream consumers must still respect
+artifact readiness and binding validation.
+
+CAESAR-REST does not rank scientific experiments or choose their
+preferred outputs. MAASAI retains responsibility for scientific evaluation.
 
 ## 3. OXKAT workflow across four science targets
 

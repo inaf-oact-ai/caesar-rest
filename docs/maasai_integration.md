@@ -362,58 +362,132 @@ If a run completes but output retention is pending, continue observing readiness
 
 ## Retrieve scientific products for evaluation
 
-After an experiment completes, MAASAI may need to inspect scientific outputs before deciding whether the run is acceptable or whether another experiment should be registered.
+MAASAI may need to compare several completed scientific experiments before
+choosing a preferred result.
 
-The application self-description lists the scientific products that an application may generate:
+**Artifact retrieval does not require preferred-run selection.**
+
+CAESAR-REST supports inspection and download from an explicitly identified
+run, whether or not that run is currently selected for its node.
+
+### Discover available products
+
+The application self-description declares the products an application may
+generate:
 
 ```http
 GET /app/{app_name}/describe
 ```
 
-For OXKAT, these declarations include project metadata, calibration tables, diagnostic plots, imaging products, execution scripts and logs.
+These declarations are application-specific and do not guarantee that
+every output exists for every run.
 
-The self-description does not guarantee that every declared output is present in every run.
-
-To discover the actual products registered for a completed run:
+For a specific completed experiment, retrieve its actual registered
+artifact inventory:
 
 ```http
 GET /pipelines/{pipeline_id}/nodes/{node_id}/runs/{run_id}/artifacts
 ```
 
-The response lists registered output artifacts and their metadata, including artifact indices and available type and role information.
+The response includes artifact indices, logical names, registered relative
+paths, media types, roles and sizes.
 
-For an eligible regular-file artifact, MAASAI can request:
+### Download evaluation products from an explicit run
+
+To download a uniquely named artifact such as `image_qa`:
+
+```http
+GET /pipelines/{pipeline_id}/nodes/{node_id}/runs/{run_id}/artifacts/by-name/image_qa
+```
+
+To download a particular preview when multiple files share the logical
+name `image_previews`:
+
+```http
+GET /pipelines/{pipeline_id}/nodes/{node_id}/runs/{run_id}/artifacts/by-path?relative_path={registered_relative_path}
+```
+
+The `relative_path` parameter must be URL-encoded and must match an
+artifact listed in the corresponding run's inventory.
+
+An artifact may also be downloaded by its numeric index:
 
 ```http
 GET /pipelines/{pipeline_id}/nodes/{node_id}/runs/{run_id}/artifacts/{index}
 ```
 
-The server verifies the request against the registered run and applicable artifact-access rules.
+Clients must not assume that a logical name identifies exactly one file.
+An ambiguous name returns HTTP `409`.
 
-Directory artifacts cannot currently be downloaded through the regular-file endpoint.
+### Access products from the preferred run
 
-This limitation is important for OXKAT because calibration and imaging diagnostics are often grouped within directory artifacts.
+Once a preferred run has been selected for the node, convenience endpoints
+are available:
 
-MAASAI must not construct filesystem paths to retrieve files directly from execution workspaces or retained-artifact storage.
+```http
+GET /pipelines/{pipeline_id}/nodes/{node_id}/runs/selected/artifacts/by-name/{artifact_name}
+```
+
+```http
+GET /pipelines/{pipeline_id}/nodes/{node_id}/runs/selected/artifacts/by-path?relative_path={registered_relative_path}
+```
+
+The `selected` alias is resolved at request time. MAASAI should not use
+this mutable alias when comparing alternative experiments whose identities
+must remain stable.
+
+For reproducibility, persist the concrete `run_id` and artifact
+identifiers used for scientific evaluation.
+
+The older selected-artifact resolver also remains available:
+
+```http
+GET /pipelines/{pipeline_id}/nodes/{node_id}/selected/artifacts/{artifact_name}
+```
+
+Unlike the download endpoints, this resolver returns JSON metadata.
+
+### Artifact access and scientific data directories
+
+File retrieval remains authenticated and owner-scoped. The server uses the
+registered artifact identity and managed storage to open the file, rather
+than interpreting a client-selected filesystem location.
+
+Directory artifacts, including OXKAT Measurement Sets, scientific image
+directories and calibration tables, are not downloadable through the
+regular-file API.
+
+These directories are retained for managed downstream consumption using
+immutable artifact bindings and the pipeline staging mechanism.
+
+MAASAI must not construct server filesystem paths or attempt to read
+execution workspaces directly.
 
 ### Scientific assessment
 
-MAASAI is responsible for interpreting the available products and evaluating scientific quality.
+MAASAI is responsible for interpreting scientific products and evaluating
+the quality of completed runs.
 
-An evaluation workflow may include:
+A multi-run scientific evaluation workflow is:
 
-1. Inspect the run status and artifact inventory.
-2. Identify available diagnostic products relevant to the scientific stage.
-3. Retrieve accessible files through the authenticated artifact API.
-4. Evaluate the results against application-specific scientific criteria.
-5. Accept the result or register a new experiment with modified scientific parameters.
-6. Select the preferred completed run when the evaluation supports that decision.
+1. List the candidate runs belonging to a scientific node.
+2. Inspect each run's execution status and artifact readiness.
+3. Retrieve the artifact inventory for every eligible completed run.
+4. Download QA reports, selected image previews, source-finding catalogs,
+   and other available diagnostics using explicit run IDs.
+5. Compare the results using application-specific scientific criteria.
+6. Persist the evaluation outcome and concrete artifact identities.
+7. Select the preferred completed run using the conditional selection API.
+8. Refresh readiness and proceed with downstream planning when the selected
+   run has the required retained inputs.
+
+If a diagnostic artifact is unavailable, MAASAI should record this as an
+evaluation limitation rather than silently choosing another run or assuming
+that a missing artifact indicates scientific failure.
 
 The precise diagnostic products and quality thresholds needed for OXKAT calibration and imaging assessment are not yet defined as a complete machine-readable contract.
 
 These requirements will be reviewed with astronomers during the final integration milestone.
-
-Any future artifact-discovery or retrieval extensions should preserve authorization, provenance and the integrity of retained upstream products.
 
 ## Step 5: Compare alternatives and select safely
 

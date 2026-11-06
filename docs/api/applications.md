@@ -253,9 +253,98 @@ GET /caesar/api/v1.0/pipelines/{pipeline_id}/nodes/{node_id}/runs/{run_id}/artif
 
 Clients should inspect this run-specific inventory before attempting to retrieve an output.
 
-Individual registered files can be downloaded through the corresponding artifact-index endpoint, subject to authorization and availability.
+Individual registered files can be downloaded by stable numeric index,
+unique logical artifact name, or exact registered relative path, subject
+to authentication, ownership and artifact availability.
+
+Clients may access artifacts of explicit completed runs before choosing
+the preferred run of a node. Selected-run aliases are also supported
+for convenience.
+
+When a logical name matches multiple registered files, the name-based
+download returns HTTP `409`. Clients should select a specific registered
+relative path or index instead.
+
+The file-download API does not support downloading entire directory artifacts.
 
 The regular-file download endpoint does not currently support downloading entire directory artifacts.
+
+### Application diagnostic archive policy
+
+An application configurator may define an `archive_policy` describing
+which lightweight files should be included in a staged Pipeline V2
+job-output archive.
+
+This policy is independent of `job_outputs`.
+
+The two declarations serve different purposes:
+
+| Declaration | Purpose |
+| --- | --- |
+| `job_outputs` | Describes scientific artifacts that can be discovered, registered and retained for a pipeline run |
+| `archive_policy` | Selects lightweight diagnostic files to include in the downloadable job archive |
+
+The archive policy uses workspace-relative inclusion patterns.
+
+For example, an application may declare:
+
+```json
+{
+  "archive_policy": {
+    "include": [
+      "results/*.log",
+      "results/*.json",
+      "results/*.txt",
+      "results/*.sh"
+    ]
+  }
+}
+```
+
+The generic archive builder supports inclusion-only patterns under
+`results/`. Wildcards are permitted in file basenames, but not in
+parent directory components, and recursive `**` patterns are not supported.
+
+The staging manifest `input/staging.json` is included automatically
+when present.
+
+Application-specific policies may additionally include preview images,
+QA reports, scientific catalogs and diagnostic logs.
+
+For example, OXKAT's configured archive policy includes:
+
+```json
+{
+  "include": [
+    "results/*.log",
+    "results/*.json",
+    "results/*.txt",
+    "results/*.sh",
+    "results/previews/image_qa.json",
+    "results/previews/selected/*.png",
+    "results/previews/catalog/*.dat",
+    "results/previews/catalog/*.tab",
+    "results/previews/catalog/*.reg",
+    "results/previews/logs/*.log"
+  ]
+}
+```
+
+The generated archive is a diagnostic bundle and does not contain
+complete scientific directory artifacts.
+
+A file can be registered and retained as a scientific artifact even
+when it is not included in the downloadable job archive.
+
+The archive builder records included and omitted files in the
+`archive_policy.json` manifest within the generated archive.
+
+Clients should use the Pipeline V2 artifact inventory and retrieval
+endpoints to discover the actual scientific results of a completed run,
+rather than treating archive contents as an authoritative artifact list.
+
+See the [Jobs REST API](jobs.md) and
+[Scientific Pipeline V2 API](scientific-pipelines.md).
 
 ### Limitations and tool selection
 
@@ -310,7 +399,6 @@ See [Job submission and monitoring](jobs.md) for the job request and response co
 Some scientific applications support additional scientific configuration beyond ordinary scalar command-line parameters.
 
 These options may depend on the selected scientific stage, execution mode or application-specific validation rules.
-
 
 ### OXKAT and Scientific Pipeline V2
 
@@ -470,7 +558,6 @@ Therefore, clients requiring the full OXKAT Pipeline V2 request contract must al
 The OXKAT configurator's descriptions are intended to support scientific tool discovery and selection, while the REST API documentation defines the actual request and response contracts.
 
 See [Scientific Pipeline V2](scientific-pipelines.md) and the [MAASAI orchestration contract](../maasai_orchestration_contract.md).
-
 
 ## 6. Client integration recommendations
 
