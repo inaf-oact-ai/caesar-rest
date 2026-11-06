@@ -60,11 +60,14 @@ The following pages summarize scientific purpose, inputs, outputs, limitations, 
 | Application | Scientific purpose | Reference |
 | --- | --- | --- |
 | CAESAR | Radio compact/extended source finding | [CAESAR](applications/caesar.md) |
+| Aegean | Radio compact-source finding and Gaussian fitting | [Aegean](applications/aegean.md) |
+| CAESAR-YOLO | Learned radio-source detection and morphological classification | [CAESAR-YOLO](applications/caesar-yolo.md) |
+| Classifier ViT | Radio image classification | [Classifier ViT](applications/classifier-vit.md) |
+| Classifier ViT Catalog | Classify catalogued sources using image cutouts | [Classifier ViT Catalog](applications/classifier-vit-catalog.md) |
 | UMAP | Feature dimensionality reduction | [UMAP](applications/umap.md) |
 | HDBSCAN | Density-based feature clustering | [HDBSCAN](applications/hdbscan.md) |
 | Outlier Finder | IsolationForest anomaly detection | [Outlier Finder](applications/outlier-finder.md) |
-| Classifier ViT | Radio image classification | [Classifier ViT](applications/classifier-vit.md) |
-| Classifier ViT Catalog | Classify catalogued sources using image cutouts | [Classifier ViT Catalog](applications/classifier-vit-catalog.md) |
+| Similarity Search | Nearest-neighbor retrieval using feature embeddings | [Similarity Search](applications/similarity-search.md) |
 | Fextractor | Image and time-series feature extraction | [Fextractor](applications/fextractor.md) |
 | Solar Flare Forecaster | Forecast M+ flares from active-region data | [SFForecaster](applications/sfforecaster.md) |
 | OXKAT | MeerKAT MS calibration and imaging stages | [OXKAT](applications/oxkat.md) |
