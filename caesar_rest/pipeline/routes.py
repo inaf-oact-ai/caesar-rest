@@ -500,6 +500,95 @@ def download_run_artifact(pipeline_id, node_id, run_id, index):
 
 	return invoke(action)
 	
+
+############################################
+###      PIPELINE ARTIFACT DOWNLOAD BY NAME / PATH
+############################################
+def _download_named_run_artifact(
+	owner, 
+	pipeline_id, 
+	node_id, 
+	run_ref,
+	artifact_name=None, 
+	relative_path=None
+):
+	"""Download a registered file using the shared artifact resolver."""
+
+	fileobj, filename, mime = artifact_resolver.open_run_artifact(
+		mongo.db,
+		owner,
+		pipeline_id,
+		node_id,
+		run_ref,
+		artifact_name=artifact_name,
+		relative_path=relative_path,
+		retention_root=current_app.config.get(
+			'PIPELINE_ARTIFACT_RETENTION_ROOT'
+		)
+	)
+
+	try:
+		return send_artifact_file(fileobj, filename, mime)
+	except Exception:
+		fileobj.close()
+		raise
+
+
+@pipeline_bp.route(
+	'/pipelines/<pipeline_id>/nodes/<node_id>/runs/selected/artifacts/by-name/<artifact_name>',
+	defaults={'run_id': 'selected'},
+	methods=['GET']
+)
+@pipeline_bp.route(
+	'/pipelines/<pipeline_id>/nodes/<node_id>/runs/<run_id>/artifacts/by-name/<artifact_name>',
+	methods=['GET']
+)
+@custom_require_login
+def download_run_artifact_by_name(pipeline_id, node_id, run_id, artifact_name):
+	"""Download a unique artifact name from an explicit or selected run."""
+
+	return invoke(
+		lambda owner: _download_named_run_artifact(
+			owner,
+			pipeline_id,
+			node_id,
+			run_id,
+			artifact_name=artifact_name
+		)
+	)
+
+
+@pipeline_bp.route(
+	'/pipelines/<pipeline_id>/nodes/<node_id>/runs/selected/artifacts/by-path',
+	defaults={'run_id': 'selected'},
+	methods=['GET']
+)
+@pipeline_bp.route(
+	'/pipelines/<pipeline_id>/nodes/<node_id>/runs/<run_id>/artifacts/by-path',
+	methods=['GET']
+)
+@custom_require_login
+def download_run_artifact_by_path(pipeline_id, node_id, run_id):
+	"""Download a registered file identified by its exact relative path."""
+
+	relative_path = request.args.get('relative_path')
+
+	if relative_path is None:
+		return jsonify({
+			'error': 'relative_path query parameter is required'
+		}), 400
+
+	return invoke(
+		lambda owner: _download_named_run_artifact(
+			owner,
+			pipeline_id,
+			node_id,
+			run_id,
+			relative_path=relative_path
+		)
+	)
+	
+	
 ############################################
 ###      PIPELINE ARTIFACT RESOLVE
 ############################################	
