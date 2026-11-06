@@ -61,6 +61,7 @@ The following pages summarize scientific purpose, inputs, outputs, limitations, 
 | --- | --- | --- |
 | CAESAR | Radio compact/extended source finding | [CAESAR](applications/caesar.md) |
 | Aegean | Radio compact-source finding and Gaussian fitting | [Aegean](applications/aegean.md) |
+| CuTEx | Curvature-based compact-source extraction and fitting | [CuTEx](applications/cutex.md) |
 | CAESAR-YOLO | Learned radio-source detection and morphological classification | [CAESAR-YOLO](applications/caesar-yolo.md) |
 | Classifier ViT | Radio image classification | [Classifier ViT](applications/classifier-vit.md) |
 | Classifier ViT Catalog | Classify catalogued sources using image cutouts | [Classifier ViT Catalog](applications/classifier-vit-catalog.md) |

@@ -49,23 +49,42 @@ class CutexAppConfigurator(AppConfigurator):
 
 		# - Describe app
 		self.description = (
-			""
+			"Run CuTEx (Curvature Thresholding Extractor) "
+			"to detect and characterize compact emission sources "
+			"in astronomical images. The application uses "
+			"curvature-based source detection and source fitting. "
+			"Configurable parameters control detection thresholds, "
+			"minimum source size, instrumental PSF sampling and "
+			"source-fitting size constraints."
 		)
-		
-		self.tool_categories= ["image"]
-		
+
+		self.tool_categories = ["image"]
+
 		self.input_requirements = {
-			"supported_formats": ["uid", "abspath", "dataset"],
-			"expected_data": "TBD",
+			"supported_formats": ["fits"],
+			"expected_data": (
+				"Single astronomical FITS image containing "
+				"compact emission sources."
+			),
 			"notes": [
-				"TBD",
-				"TBD"
+				"The image should have adequate spatial sampling "
+				"of the instrumental point spread function.",
+				"The npixpsf option specifies the number of "
+				"pixels sampling the instrumental PSF.",
+				"Input files must be accessible through a supported "
+				"CAESAR-REST data reference."
 			]
 		}
-		
+
 		self.limitations = [
-			"TBD",
-			"TBD"
+			"Source detection accuracy depends on image noise, "
+			"source crowding and the selected detection threshold.",
+			"Source-fitting accuracy depends on PSF sampling "
+			"and the configured bounds on fitted source sizes.",
+			"The application is primarily intended for compact "
+			"emission sources rather than extended diffuse structures.",
+			"Output filenames and catalog schema depend on the "
+			"underlying CuTEx execution container."
 		]
 
 		# - Define dictionary with allowed options
@@ -132,7 +151,8 @@ class CutexAppConfigurator(AppConfigurator):
 			'no-logredir' : Option(
 				name='no-logredir', 
 				description='Do not redirect logs to output file in script',
-				category='RUN'
+				category='RUN',
+				default_value=False
 			),
 			
 		} # close dict
