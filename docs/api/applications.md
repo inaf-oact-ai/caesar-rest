@@ -53,6 +53,24 @@ Clients should use this endpoint rather than maintaining a hardcoded list of sup
 
 An application appearing in this list means that its configurator is registered. It does not necessarily guarantee that its scientific container image, external dependencies or execution backend have been successfully validated in the current deployment.
 
+### Application reference pages
+
+The following pages summarize scientific purpose, inputs, outputs, limitations, supported options and example submissions. They describe the `devel` configurator metadata; `GET /apps` and each live `GET /app/{app_name}/describe` response remain authoritative for the deployment.
+
+| Application | Scientific purpose | Reference |
+| --- | --- | --- |
+| CAESAR | Radio compact/extended source finding | [CAESAR](applications/caesar.md) |
+| UMAP | Feature dimensionality reduction | [UMAP](applications/umap.md) |
+| HDBSCAN | Density-based feature clustering | [HDBSCAN](applications/hdbscan.md) |
+| Outlier Finder | IsolationForest anomaly detection | [Outlier Finder](applications/outlier-finder.md) |
+| Classifier ViT | Radio image classification | [Classifier ViT](applications/classifier-vit.md) |
+| Classifier ViT Catalog | Classify catalogued sources using image cutouts | [Classifier ViT Catalog](applications/classifier-vit-catalog.md) |
+| Fextractor | Image and time-series feature extraction | [Fextractor](applications/fextractor.md) |
+| Solar Flare Forecaster | Forecast M+ flares from active-region data | [SFForecaster](applications/sfforecaster.md) |
+| OXKAT | MeerKAT MS calibration and imaging stages | [OXKAT](applications/oxkat.md) |
+
+Other apps, including Similarity Search, will receive pages once `TBD` metadata have been completed and reviewed. `caesar-rest` is the name of the service rather than a separately registered scientific application.
+
 ## 2. Retrieve an application description
 
 **Endpoint:**
