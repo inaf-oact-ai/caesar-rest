@@ -242,8 +242,30 @@ class SimilaritySearchAppConfigurator(AppConfigurator):
 		} ## close valid options
 		
 		# - Define dictionary with job outputs produced
-		self.job_outputs= {
-		
+		self.job_outputs = {
+			"similarity-results": {
+				"path": None,
+				"glob": "*.json",
+				"type": "application/json",
+				"role": "primary_result",
+				"description": (
+					"Similarity-search results containing retrieved "
+					"observation metadata, feature vectors, nearest-neighbor "
+					"indices and similarity scores."
+				),
+				"format": (
+					"JSON object containing a data array with "
+					"observation records and similarity fields "
+					"nn_index and nn_score."
+				),
+				"parser": "json",
+				"required": True,
+				"notes": (
+					"The default output filename is "
+					"'featdata_simsearch.json'. "
+					"It can be customized using 'outfile'."
+				)
+			}
 		}
 		
 		# - Define option value transformers
