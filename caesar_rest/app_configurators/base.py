@@ -177,6 +177,7 @@ class AppConfigurator(object):
 		self.input_requirements= {}
 		self.limitations= []
 
+	
 	def describe_option_schema(self):
 		"""Describe options by name and supported execution interface.
 
@@ -187,13 +188,15 @@ class AppConfigurator(object):
 		schema = {}
 
 		for name, option in self.valid_options.items():
+			option_dict = option.to_dict()
 			schema[name] = {
 				'interfaces': {
-					'v1': option.to_dict()[name]
+					'v1': option_dict[option.name]
 				}
 			}
 
 		return schema
+
 
 	def validate_pipeline_options(self, job_options):
 		"""Optional application-specific Pipeline V2 validation hook."""
