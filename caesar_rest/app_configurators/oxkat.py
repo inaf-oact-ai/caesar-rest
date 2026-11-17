@@ -98,7 +98,8 @@ class OxkatAppConfigurator(AppConfigurator):
 		
 		
 		
-		self.tool_categories = ["measurement-set"]
+		#self.tool_categories = ["measurement-set"]
+		self.tool_categories = ["pipeline"]
 		
 		self.input_requirements = {
 			"supported_formats": ["ms"],
