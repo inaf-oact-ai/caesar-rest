@@ -3,6 +3,7 @@
 
 from caesar_rest.app_configurators import oxkat_readiness
 from caesar_rest.pipeline import scientific_readiness
+from caesar_rest.pipeline import manager
 
 def target_binding():
 	return {
@@ -284,3 +285,77 @@ def test_preview_retention_argument_translation(profile):
 	)
 
 	assert '--preview-retention=%s' % profile in args
+	
+
+def test_first_calibration_bulk_plan_uses_selected_get_info():
+	"""1GC receives its source from authoritative GET_INFO readiness."""
+	scientific = oxkat_readiness.resolve_snapshot(
+		pipeline(),
+		runs(),
+		dataset(),
+	)
+
+	result = oxkat_readiness.build_bulk_plan(
+		scientific,
+		'1GC',
+	)
+
+	assert result['status'] == 'READY'
+	assert len(result['items']) == 1
+
+	item = result['items'][0]
+
+	assert item['target'] is None
+	assert item['can_register'] is True
+	assert item['registration'] == {
+		'stage': '1GC',
+		'node_id': 'stage_1gc',
+		'parameters': {},
+		'inputs': {
+			'project_info': {
+				'run_id': 'info1',
+				'artifact': 'project_info',
+				'artifact_index': 0,
+			},
+		},
+	}
+
+
+def test_first_calibration_requires_selected_get_info():
+	"""An unselected GET_INFO run cannot become a hidden input."""
+	p = pipeline()
+	del p['selections']['info']
+
+	scientific = oxkat_readiness.resolve_snapshot(
+		p,
+		runs(),
+		dataset(),
+	)
+
+	result = oxkat_readiness.build_bulk_plan(
+		scientific,
+		'1GC',
+	)
+
+	assert result['status'] == 'BLOCKED'
+	assert result['items'][0]['can_register'] is False
+	assert result['items'][0]['registration'] is None
+
+
+def test_first_calibration_rejects_individual_targets():
+	"""Dataset-level calibration cannot be reinterpreted as target work."""
+	scientific = oxkat_readiness.resolve_snapshot(
+		pipeline(),
+		runs(),
+		dataset(),
+	)
+
+	with pytest.raises(
+		manager.PipelineError,
+	):
+		oxkat_readiness.build_bulk_plan(
+			scientific,
+			'1GC',
+			targets=['TARGET_A'],
+		)
+	
