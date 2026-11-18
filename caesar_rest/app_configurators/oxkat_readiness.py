@@ -388,7 +388,6 @@ def build_bulk_plan(scientific, stage, targets=None):
 			]
 		}
 		
-
 	# First-generation calibration is one dataset-level operation.
 	# Unlike FLAG and 2GC, it is not associated with an individual
 	# science target. Its input is the selected, retained GET_INFO

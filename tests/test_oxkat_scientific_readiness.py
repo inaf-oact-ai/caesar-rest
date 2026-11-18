@@ -41,7 +41,6 @@ def dataset():
 		}
 	}
 
-
 def pipeline():
 	return {
 		'pipeline_id': 'p1',
