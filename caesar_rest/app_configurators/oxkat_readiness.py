@@ -250,6 +250,41 @@ def resolve_snapshot(pipeline, runs, dataset_doc):
 		and isinstance(run.get('run_id'), str)
 	}
 
+
+	# Resolve the single, selected and consumable GET_INFO source
+	# required by first-generation calibration.
+	#
+	# The original dataset is inherited from the pipeline. Only
+	# the retained project metadata needs an explicit run binding.
+	# Multiple candidates are reported as ambiguous, never chosen
+	# from enumeration order.
+	calibration_candidates = []
+
+	for source in _selected_runs(
+		pipeline,
+		runs,
+		snapshot,
+		'GET_INFO',
+	):
+		for index, artifact in enumerate(source.get('artifacts') or []):
+			if not isinstance(artifact, dict):
+				continue
+
+			if (
+				artifact.get('name') == 'project_info'
+				and artifact.get('kind', 'file') == 'file'
+			):
+				calibration_candidates.append({
+					'project_info': _reference(source, index)
+				})
+
+	initial_calibration = _result(
+		calibration_candidates,
+		'NO_CONSUMABLE_GET_INFO_PROJECT_INFO',
+	)
+
+
+
 	gc1_runs = _selected_runs(pipeline, runs, snapshot, '1GC')
 	flag_runs = _selected_runs(pipeline, runs, snapshot, 'FLAG')
 
@@ -320,10 +355,10 @@ def resolve_snapshot(pipeline, runs, dataset_doc):
 		'provider': 'oxkat',
 		'status': 'READY',
 		'inspection_status': 'READY',
+		'initial_calibration': initial_calibration,
 		'target_count': len(items),
 		'targets': items
 	}
-
 
 
 def build_bulk_plan(scientific, stage, targets=None):
@@ -333,9 +368,9 @@ def build_bulk_plan(scientific, stage, targets=None):
 	preferred selections later cannot silently change their meaning.
 	"""
 
-	if stage not in ('FLAG', '2GC'):
+	if stage not in ('1GC', 'FLAG', '2GC'):
 		raise manager.PipelineError(
-			'OXKAT bulk planning supports FLAG and 2GC only',
+			'OXKAT bulk planning supports 1GC, FLAG and 2GC only',
 			400
 		)
 
@@ -352,6 +387,103 @@ def build_bulk_plan(scientific, stage, targets=None):
 				scientific.get('status', 'SCIENTIFIC_READINESS_UNAVAILABLE')
 			]
 		}
+		
+
+	# First-generation calibration is one dataset-level operation.
+	# Unlike FLAG and 2GC, it is not associated with an individual
+	# science target. Its input is the selected, retained GET_INFO
+	# project metadata determined by scientific readiness.
+	if stage == '1GC':
+		if targets is not None:
+			raise manager.PipelineError(
+				'1GC does not accept individual science targets',
+				400
+			)
+
+		readiness = scientific.get('initial_calibration')
+
+		if not isinstance(readiness, dict):
+			raise manager.PipelineError(
+				'Missing first-calibration scientific readiness',
+				500
+			)
+
+		item = {
+			'target': None,
+			'can_register': False,
+			'blocking_reasons': [],
+			'registration': None
+		}
+
+		if readiness.get('can_plan') is not True:
+			item['blocking_reasons'] = (
+				readiness.get('blocking_reasons')
+				or ['UPSTREAM_INPUTS_NOT_READY']
+			)
+
+			return {
+				'status': 'BLOCKED',
+				'items': [item]
+			}
+
+		references = readiness.get('inputs')
+
+		if (
+			not isinstance(references, dict)
+			or not references
+		):
+			raise manager.PipelineError(
+				'Invalid first-calibration input references',
+				500
+			)
+
+		inputs = {}
+
+		for input_name, reference in references.items():
+			if not isinstance(reference, dict):
+				raise manager.PipelineError(
+					'Invalid calibration artifact reference',
+					500
+				)
+
+			run_id = reference.get('run_id')
+			artifact = reference.get('artifact')
+			index = reference.get('artifact_index')
+
+			if (
+				not isinstance(input_name, str)
+				or not input_name
+				or not isinstance(run_id, str)
+				or not run_id
+				or not isinstance(artifact, str)
+				or not artifact
+				or type(index) is not int
+				or index < 0
+			):
+				raise manager.PipelineError(
+					'Malformed calibration input reference',
+					500
+				)
+
+			inputs[input_name] = {
+				'run_id': run_id,
+				'artifact': artifact,
+				'artifact_index': index
+			}
+
+		item['can_register'] = True
+		item['registration'] = {
+			'stage': stage,
+			'node_id': manager.default_node_id(stage),
+			'parameters': {},
+			'inputs': inputs
+		}
+
+		return {
+			'status': 'READY',
+			'items': [item]
+		}
+		
 
 	discovered = scientific.get('targets')
 
